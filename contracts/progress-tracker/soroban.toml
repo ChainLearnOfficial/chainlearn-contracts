@@ -1,0 +1,10 @@
+[contract]
+name = "progress-tracker"
+type_contract = "custom"
+
+[network]
+rpc_url = "https://soroban-testnet.stellar.org:443"
+network_passphrase = "Test SDF Network ; September 2015"
+
+[deploy]
+source_account = ""

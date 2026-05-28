@@ -1,0 +1,15 @@
+[package]
+name = "credential-nft"
+version = "0.1.0"
+edition = "2021"
+description = "NFT credential contract for ChainLearn course certificates"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+chainlearn-shared = { path = "../../packages/shared" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

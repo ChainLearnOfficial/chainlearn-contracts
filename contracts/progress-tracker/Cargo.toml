@@ -1,0 +1,15 @@
+[package]
+name = "progress-tracker"
+version = "0.1.0"
+edition = "2021"
+description = "On-chain learning progress tracker for ChainLearn"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+chainlearn-shared = { path = "../../packages/shared" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

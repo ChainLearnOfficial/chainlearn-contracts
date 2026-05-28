@@ -1,0 +1,16 @@
+[package]
+name = "learn-token"
+version = "0.1.0"
+edition = "2021"
+description = "SEP-41 fungible token for ChainLearn rewards"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+soroban-token-sdk = { workspace = true }
+chainlearn-shared = { path = "../../packages/shared" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
