@@ -72,7 +72,9 @@ pub fn get_total_supply(env: &Env) -> i128 {
 
 /// Set the total supply.
 pub fn set_total_supply(env: &Env, amount: i128) {
-    env.storage().persistent().set(&DataKey::TotalSupply, &amount);
+    env.storage()
+        .persistent()
+        .set(&DataKey::TotalSupply, &amount);
 }
 
 /// Get the allowance for an owner-spender pair.
@@ -93,7 +95,9 @@ pub fn set_allowance(env: &Env, owner: &Address, spender: &Address, amount: i128
         owner: owner.clone(),
         spender: spender.clone(),
     };
-    env.storage().persistent().set(&DataKey::Allowance(key), &amount);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Allowance(key), &amount);
 }
 
 /// Check if a reward has already been claimed for a given learner + quiz.

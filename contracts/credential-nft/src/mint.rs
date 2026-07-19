@@ -1,5 +1,5 @@
-use soroban_sdk::{Address, Env, Symbol};
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
+use soroban_sdk::{Address, Env, Symbol};
 
 use crate::metadata::{CredentialInfo, DataKey};
 

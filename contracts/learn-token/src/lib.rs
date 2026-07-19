@@ -3,8 +3,8 @@
 mod events;
 mod storage;
 
-use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE, TOKEN_DECIMALS};
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
+use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
+use soroban_sdk::{contract, contractimpl, Address, Env, String as SorobanString, Symbol};
 use soroban_token_sdk::metadata::TokenMetadata;
 
 /// SEP-41 compliant fungible token contract for ChainLearn rewards.
@@ -25,7 +25,13 @@ impl LearnToken {
     /// * `name` - Token name (e.g., "ChainLearn Token")
     /// * `symbol` - Token symbol (e.g., "CLRN")
     /// * `decimals` - Number of decimal places
-    pub fn initialize(env: Env, admin: Address, name: Symbol, symbol: Symbol, decimals: u32) {
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        name: SorobanString,
+        symbol: SorobanString,
+        decimal: u32,
+    ) {
         if storage::is_initialized(&env) {
             panic!("already initialized");
         }
@@ -35,7 +41,7 @@ impl LearnToken {
         let metadata = TokenMetadata {
             name,
             symbol,
-            decimals,
+            decimal,
         };
         env.storage()
             .persistent()
@@ -45,7 +51,7 @@ impl LearnToken {
     // ── SEP-41 Standard Interface ─────────────────────────────────────────
 
     /// Returns the token name.
-    pub fn name(env: Env) -> Symbol {
+    pub fn name(env: Env) -> SorobanString {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
@@ -55,7 +61,7 @@ impl LearnToken {
     }
 
     /// Returns the token symbol.
-    pub fn symbol(env: Env) -> Symbol {
+    pub fn symbol(env: Env) -> SorobanString {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
@@ -71,7 +77,7 @@ impl LearnToken {
             .persistent()
             .get(&storage::DataKey::TokenMetadata)
             .expect("not initialized");
-        metadata.decimals
+        metadata.decimal
     }
 
     /// Returns the total supply of tokens.
@@ -148,7 +154,13 @@ impl LearnToken {
     /// * `spender` - Address being approved
     /// * `amount` - Allowance amount
     /// * `expiration_ledger` - Ledger number when the allowance expires
-    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128, expiration_ledger: u32) {
+    pub fn approve(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
         owner.require_auth();
 
         if amount < 0 {
@@ -239,17 +251,17 @@ impl LearnToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString};
 
     fn setup_token(env: &Env) -> (Address, Address) {
         let admin = Address::generate(env);
-        let contract_id = env.register(LearnToken, ());
+        let contract_id = env.register_contract(None, LearnToken);
         let client = LearnTokenClient::new(env, &contract_id);
 
         client.initialize(
             &admin,
-            &symbol_short!("CLearn"),
-            &symbol_short!("CLRN"),
+            &SorobanString::from_str(env, "CLearn"),
+            &SorobanString::from_str(env, "CLRN"),
             &7,
         );
 
@@ -262,8 +274,8 @@ mod tests {
         let (admin, contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
-        assert_eq!(client.name(), symbol_short!("CLearn"));
-        assert_eq!(client.symbol(), symbol_short!("CLRN"));
+        assert_eq!(client.name(), SorobanString::from_str(&env, "CLearn"));
+        assert_eq!(client.symbol(), SorobanString::from_str(&env, "CLRN"));
         assert_eq!(client.decimals(), 7);
         assert_eq!(client.total_supply(), 0);
         assert_eq!(client.admin(), admin);
@@ -272,7 +284,7 @@ mod tests {
     #[test]
     fn test_mint() {
         let env = Env::default();
-        let (admin, contract_id) = setup_token(&env);
+        let (_admin, contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -287,7 +299,7 @@ mod tests {
     #[test]
     fn test_transfer() {
         let env = Env::default();
-        let (admin, contract_id) = setup_token(&env);
+        let (_admin, contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let alice = Address::generate(&env);
