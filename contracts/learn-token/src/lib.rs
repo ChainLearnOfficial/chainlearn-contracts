@@ -139,7 +139,7 @@ impl LearnToken {
             panic!("insufficient balance");
         }
 
-        storage::set_allowance(&env, &from, &spender, allowance - amount);
+        storage::reduce_allowance(&env, &from, &spender, amount);
         storage::set_balance(&env, &from, from_balance - amount);
         let to_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, to_balance + amount);
@@ -167,7 +167,7 @@ impl LearnToken {
             panic!("negative amount");
         }
 
-        storage::set_allowance(&env, &owner, &spender, amount);
+        storage::set_allowance(&env, &owner, &spender, amount, expiration_ledger);
         events::approve(&env, &owner, &spender, amount, expiration_ledger);
     }
 

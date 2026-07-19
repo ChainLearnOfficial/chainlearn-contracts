@@ -22,6 +22,13 @@ pub struct AllowanceKey {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowanceData {
+    pub amount: i128,
+    pub expiration_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardKey {
     pub learner: Address,
     pub quiz_id: soroban_sdk::Symbol,
@@ -78,26 +85,68 @@ pub fn set_total_supply(env: &Env, amount: i128) {
 }
 
 /// Get the allowance for an owner-spender pair.
+/// Returns 0 if the allowance has expired or does not exist.
 pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
     let key = AllowanceKey {
         owner: owner.clone(),
         spender: spender.clone(),
     };
-    env.storage()
+    match env
+        .storage()
         .persistent()
-        .get(&DataKey::Allowance(key))
-        .unwrap_or(0)
+        .get::<DataKey, AllowanceData>(&DataKey::Allowance(key))
+    {
+        Some(data) => {
+            if env.ledger().sequence() > data.expiration_ledger {
+                0
+            } else {
+                data.amount
+            }
+        }
+        None => 0,
+    }
 }
 
-/// Set the allowance for an owner-spender pair.
-pub fn set_allowance(env: &Env, owner: &Address, spender: &Address, amount: i128) {
+/// Set the allowance for an owner-spender pair with an expiration ledger.
+pub fn set_allowance(
+    env: &Env,
+    owner: &Address,
+    spender: &Address,
+    amount: i128,
+    expiration_ledger: u32,
+) {
     let key = AllowanceKey {
         owner: owner.clone(),
         spender: spender.clone(),
     };
+    let data = AllowanceData {
+        amount,
+        expiration_ledger,
+    };
     env.storage()
         .persistent()
-        .set(&DataKey::Allowance(key), &amount);
+        .set(&DataKey::Allowance(key), &data);
+}
+
+/// Reduce the allowance amount while preserving the expiration ledger.
+pub fn reduce_allowance(env: &Env, owner: &Address, spender: &Address, spend: i128) {
+    let key = AllowanceKey {
+        owner: owner.clone(),
+        spender: spender.clone(),
+    };
+    let data: AllowanceData = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Allowance(key.clone()))
+        .expect("allowance not set");
+    let new_amount = data.amount - spend;
+    let updated = AllowanceData {
+        amount: new_amount,
+        expiration_ledger: data.expiration_ledger,
+    };
+    env.storage()
+        .persistent()
+        .set(&DataKey::Allowance(key), &updated);
 }
 
 /// Check if a reward has already been claimed for a given learner + quiz.
