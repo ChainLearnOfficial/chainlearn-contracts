@@ -1,7 +1,7 @@
-use soroban_sdk::{Env, Symbol, Vec};
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
+use soroban_sdk::{Env, Symbol, Vec};
 
-use crate::types::{Course, DataKey, ProgressInfo, QuizResult};
+use crate::types::{Course, DataKey, ProgressInfo};
 
 /// Calculate the overall progress percentage for a learner in a course.
 ///
@@ -48,11 +48,7 @@ pub fn calculate_progress(
 }
 
 /// Count how many modules a learner has completed in a course.
-fn count_completed_modules(
-    env: &Env,
-    learner: &soroban_sdk::Address,
-    course_id: &Symbol,
-) -> u32 {
+fn count_completed_modules(env: &Env, learner: &soroban_sdk::Address, course_id: &Symbol) -> u32 {
     let modules: Vec<Symbol> = env
         .storage()
         .persistent()
@@ -70,11 +66,7 @@ fn count_completed_modules(
 }
 
 /// Calculate the average quiz score for a learner in a course.
-fn average_quiz_score(
-    env: &Env,
-    learner: &soroban_sdk::Address,
-    course_id: &Symbol,
-) -> u32 {
+fn average_quiz_score(env: &Env, learner: &soroban_sdk::Address, course_id: &Symbol) -> u32 {
     let progress: ProgressInfo = env
         .storage()
         .persistent()
@@ -138,15 +130,4 @@ pub fn is_eligible_for_credential(
         }
         None => false,
     }
-}
-
-/// Calculate the token reward for a quiz submission.
-///
-/// # Arguments
-/// * `score` - The quiz score (0-100)
-///
-/// # Returns
-/// The reward amount in token base units.
-pub fn calculate_quiz_reward(score: u32) -> i128 {
-    (score as i128) * (chainlearn_shared::BASE_REWARD_PER_POINT as i128)
 }

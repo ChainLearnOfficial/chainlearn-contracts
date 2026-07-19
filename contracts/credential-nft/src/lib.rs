@@ -4,8 +4,8 @@ mod metadata;
 mod mint;
 mod verify;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use metadata::{CredentialInfo, DataKey};
+use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 
 /// NFT credential contract for ChainLearn course certificates.
 ///
@@ -96,7 +96,7 @@ mod tests {
 
     fn setup_contract(env: &Env) -> (Address, Address) {
         let admin = Address::generate(env);
-        let contract_id = env.register(CredentialNft, ());
+        let contract_id = env.register_contract(None, CredentialNft);
         let client = CredentialNftClient::new(env, &contract_id);
         client.initialize(&admin);
         (admin, contract_id)
@@ -112,7 +112,7 @@ mod tests {
         env.mock_all_auths();
 
         let course_id = Symbol::new(&env, "rust_101");
-        let metadata_uri = Symbol::new(&env, "ipfs://Qm123");
+        let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
 
         let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
         assert_eq!(cred_id, 1);
@@ -135,7 +135,7 @@ mod tests {
 
         let course1 = Symbol::new(&env, "rust_101");
         let course2 = Symbol::new(&env, "sol_201");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
 
         client.mint_credential(&learner, &course1, &90, &uri);
         client.mint_credential(&learner, &course2, &75, &uri);
@@ -155,7 +155,7 @@ mod tests {
         env.mock_all_auths();
 
         let course_id = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
 
         client.mint_credential(&learner, &course_id, &40, &uri);
     }
@@ -171,7 +171,7 @@ mod tests {
         env.mock_all_auths();
 
         let course_id = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
 
         client.mint_credential(&learner, &course_id, &90, &uri);
         client.mint_credential(&learner, &course_id, &95, &uri); // should panic
@@ -187,7 +187,7 @@ mod tests {
         env.mock_all_auths();
 
         let course_id = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
 
         let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
         assert!(client.is_credential_valid(&cred_id));

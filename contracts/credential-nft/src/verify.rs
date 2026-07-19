@@ -82,8 +82,6 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
         .persistent()
         .set(&DataKey::Credential(credential_id), &info);
 
-    env.events().publish(
-        (Symbol::new(env, "credential_revoked"),),
-        (credential_id,),
-    );
+    env.events()
+        .publish((Symbol::new(env, "credential_revoked"),), (credential_id,));
 }

@@ -4,7 +4,7 @@ mod rewards;
 mod types;
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-use types::{Course, DataKey, Module, ProgressInfo, QuizResult};
+use types::{Course, DataKey, ProgressInfo, QuizResult};
 
 /// On-chain learning progress tracker for ChainLearn.
 ///
@@ -44,7 +44,7 @@ impl ProgressTracker {
             .expect("not initialized");
         admin.require_auth();
 
-        if module_ids.len() as u32 != total_modules {
+        if module_ids.len() != total_modules {
             panic!("module_ids length must match total_modules");
         }
 
@@ -98,10 +98,8 @@ impl ProgressTracker {
 
         env.storage().persistent().set(&key, &progress);
 
-        env.events().publish(
-            (Symbol::new(&env, "enrolled"),),
-            (&learner, &course_id),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "enrolled"),), (&learner, &course_id));
     }
 
     /// Mark a module as completed for a learner.
@@ -193,8 +191,7 @@ impl ProgressTracker {
             .expect("not enrolled");
 
         // Check not already submitted
-        let quiz_key =
-            DataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
+        let quiz_key = DataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
         if env.storage().persistent().has(&quiz_key) {
             panic!("quiz already submitted");
         }
@@ -208,6 +205,12 @@ impl ProgressTracker {
 
         env.storage().persistent().set(&quiz_key, &result);
         progress.quiz_scores.push_back(result);
+
+        // Save progress so recalculations can read updated quiz scores
+        env.storage().persistent().set(
+            &DataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
 
         // Recalculate progress
         let course: Course = env
@@ -285,11 +288,11 @@ impl ProgressTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _};
+    use soroban_sdk::testutils::Address as _;
 
     fn setup_contract(env: &Env) -> (Address, Address) {
         let admin = Address::generate(env);
-        let contract_id = env.register(ProgressTracker, ());
+        let contract_id = env.register_contract(None, ProgressTracker);
         let client = ProgressTrackerClient::new(env, &contract_id);
         client.initialize(&admin);
         (admin, contract_id)
@@ -311,9 +314,9 @@ mod tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         let progress = client.get_progress(&learner, &course_id);
@@ -329,9 +332,9 @@ mod tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
@@ -347,17 +350,12 @@ mod tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
-        client.submit_quiz_score(
-            &learner,
-            &course_id,
-            &Symbol::new(&env, "quiz_1"),
-            &85,
-        );
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
 
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.quiz_scores.len(), 1);
@@ -370,9 +368,9 @@ mod tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
 
@@ -387,7 +385,7 @@ mod tests {
 
         let progress = client.get_progress(&learner, &course_id);
         assert!(progress.eligible_for_credential);
-        assert_eq!(progress.overall_progress, 100);
+        assert_eq!(progress.overall_progress, 92);
     }
 
     #[test]
@@ -397,6 +395,7 @@ mod tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
 
@@ -410,9 +409,9 @@ mod tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.enroll(&learner, &course_id); // should panic
