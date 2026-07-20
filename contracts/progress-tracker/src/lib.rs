@@ -250,6 +250,31 @@ impl ProgressTracker {
             .expect("not enrolled")
     }
 
+    /// Get a verified quiz score for a learner.
+    ///
+    /// Returns the score if the quiz was submitted, or panics if not found.
+    /// Used by the token contract to verify scores before minting rewards.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    /// * `course_id` - The course the quiz belongs to
+    /// * `quiz_id` - The quiz identifier
+    ///
+    /// # Returns
+    /// The verified quiz score (0-100).
+    pub fn get_quiz_score(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> u32 {
+        let result: QuizResult = env
+            .storage()
+            .persistent()
+            .get(&DataKey::QuizResult(
+                learner.clone(),
+                course_id.clone(),
+                quiz_id.clone(),
+            ))
+            .expect("quiz not submitted");
+        result.score
+    }
+
     /// Check if a learner is eligible for a credential.
     ///
     /// # Arguments

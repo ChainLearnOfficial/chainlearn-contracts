@@ -14,3 +14,4 @@ chainlearn-shared = { path = "../../packages/shared" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+progress-tracker = { path = "../progress-tracker" }

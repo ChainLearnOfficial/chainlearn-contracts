@@ -11,6 +11,7 @@ pub enum DataKey {
     Allowance(AllowanceKey),
     TotalSupply,
     RewardClaimed(RewardKey),
+    ProgressTracker,
 }
 
 #[contracttype]
@@ -170,4 +171,19 @@ pub fn set_reward_claimed(env: &Env, learner: &Address, quiz_id: &soroban_sdk::S
     env.storage()
         .persistent()
         .set(&DataKey::RewardClaimed(key), &true);
+}
+
+/// Store the progress-tracker contract address.
+pub fn set_progress_tracker(env: &Env, address: &Address) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::ProgressTracker, address);
+}
+
+/// Retrieve the progress-tracker contract address.
+pub fn get_progress_tracker(env: &Env) -> Address {
+    env.storage()
+        .persistent()
+        .get(&DataKey::ProgressTracker)
+        .expect("progress tracker not set")
 }

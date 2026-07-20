@@ -5,7 +5,7 @@ edition = "2021"
 description = "On-chain learning progress tracker for ChainLearn"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
