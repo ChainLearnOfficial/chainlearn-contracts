@@ -764,6 +764,7 @@ name = "learn-token"
 version = "0.1.0"
 dependencies = [
  "chainlearn-shared",
+ "progress-tracker",
  "soroban-sdk",
  "soroban-token-sdk",
 ]

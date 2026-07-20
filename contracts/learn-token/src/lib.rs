@@ -7,6 +7,11 @@ use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{contract, contractimpl, Address, Env, String as SorobanString, Symbol};
 use soroban_token_sdk::metadata::TokenMetadata;
 
+#[soroban_sdk::contractclient(name = "ProgressTrackerClient")]
+pub trait ProgressTrackerInterface {
+    fn get_quiz_score(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> u32;
+}
+
 /// SEP-41 compliant fungible token contract for ChainLearn rewards.
 ///
 /// This token is minted as rewards when learners complete quizzes.
@@ -24,19 +29,22 @@ impl LearnToken {
     /// * `admin` - Address that has minting privileges
     /// * `name` - Token name (e.g., "ChainLearn Token")
     /// * `symbol` - Token symbol (e.g., "CLRN")
-    /// * `decimals` - Number of decimal places
+    /// * `decimal` - Number of decimal places
+    /// * `progress_tracker` - Address of the progress-tracker contract
     pub fn initialize(
         env: Env,
         admin: Address,
         name: SorobanString,
         symbol: SorobanString,
         decimal: u32,
+        progress_tracker: Address,
     ) {
         if storage::is_initialized(&env) {
             panic!("already initialized");
         }
         storage::set_admin(&env, &admin);
         storage::set_total_supply(&env, 0);
+        storage::set_progress_tracker(&env, &progress_tracker);
 
         let metadata = TokenMetadata {
             name,
@@ -204,22 +212,28 @@ impl LearnToken {
 
     /// Claim a token reward for completing a quiz.
     ///
-    /// The reward amount is calculated as: `score * BASE_REWARD_PER_POINT`.
+    /// The reward amount is calculated as: `verified_score * BASE_REWARD_PER_POINT`.
+    /// The score is verified by querying the progress-tracker contract.
     /// Each learner can only claim a reward once per quiz.
     ///
     /// # Arguments
     /// * `learner` - The learner claiming the reward (must authorize)
+    /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - Unique identifier for the quiz
-    /// * `score` - The learner's score (0-100)
-    pub fn claim_reward(env: Env, learner: Address, quiz_id: Symbol, score: u32) -> i128 {
+    pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> i128 {
         learner.require_auth();
-
-        if score > MAX_QUIZ_SCORE {
-            panic!("score exceeds maximum");
-        }
 
         if storage::is_reward_claimed(&env, &learner, &quiz_id) {
             panic!("reward already claimed");
+        }
+
+        // Verify score by querying the progress-tracker contract
+        let progress_tracker = storage::get_progress_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &progress_tracker);
+        let score = client.get_quiz_score(&learner, &course_id, &quiz_id);
+
+        if score > MAX_QUIZ_SCORE {
+            panic!("score exceeds maximum");
         }
 
         let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
@@ -251,28 +265,50 @@ impl LearnToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString};
+    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Vec};
 
-    fn setup_token(env: &Env) -> (Address, Address) {
+    fn setup(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
-        let contract_id = env.register_contract(None, LearnToken);
-        let client = LearnTokenClient::new(env, &contract_id);
 
-        client.initialize(
+        // Register progress-tracker
+        let pt_contract_id = env.register_contract(None, progress_tracker::ProgressTracker);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        // Register learn-token with progress-tracker address
+        let lt_contract_id = env.register_contract(None, LearnToken);
+        let lt_client = LearnTokenClient::new(env, &lt_contract_id);
+        lt_client.initialize(
             &admin,
             &SorobanString::from_str(env, "CLearn"),
             &SorobanString::from_str(env, "CLRN"),
             &7,
+            &pt_contract_id,
         );
 
-        (admin, contract_id)
+        (admin, lt_contract_id, pt_contract_id)
+    }
+
+    fn create_course_and_submit_quiz(
+        env: &Env,
+        pt_client: &progress_tracker::ProgressTrackerClient,
+        learner: &Address,
+        course_id: &Symbol,
+        quiz_id: &Symbol,
+        score: u32,
+    ) {
+        let mut module_ids = Vec::new(env);
+        module_ids.push_back(Symbol::new(env, "mod_1"));
+        pt_client.create_course(course_id, &1, &1, &module_ids);
+        pt_client.enroll(learner, course_id);
+        pt_client.submit_quiz_score(learner, course_id, quiz_id, &score);
     }
 
     #[test]
     fn test_initialize() {
         let env = Env::default();
-        let (admin, contract_id) = setup_token(&env);
-        let client = LearnTokenClient::new(&env, &contract_id);
+        let (admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         assert_eq!(client.name(), SorobanString::from_str(&env, "CLearn"));
         assert_eq!(client.symbol(), SorobanString::from_str(&env, "CLRN"));
@@ -284,8 +320,8 @@ mod tests {
     #[test]
     fn test_mint() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
-        let client = LearnTokenClient::new(&env, &contract_id);
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let learner = Address::generate(&env);
         env.mock_all_auths();
@@ -299,8 +335,8 @@ mod tests {
     #[test]
     fn test_transfer() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
-        let client = LearnTokenClient::new(&env, &contract_id);
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
@@ -316,14 +352,18 @@ mod tests {
     #[test]
     fn test_claim_reward() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
-        let client = LearnTokenClient::new(&env, &contract_id);
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
 
         let learner = Address::generate(&env);
         env.mock_all_auths();
 
+        let course_id = Symbol::new(&env, "math_101");
         let quiz_id = Symbol::new(&env, "quiz_math_101");
-        let reward = client.claim_reward(&learner, &quiz_id, &85);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+
+        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
 
         // 85 * 100 (BASE_REWARD_PER_POINT) = 8500
         assert_eq!(reward, 8500);
@@ -334,14 +374,34 @@ mod tests {
     #[should_panic(expected = "reward already claimed")]
     fn test_claim_reward_prevents_double_claim() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
-        let client = LearnTokenClient::new(&env, &contract_id);
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
 
         let learner = Address::generate(&env);
         env.mock_all_auths();
 
+        let course_id = Symbol::new(&env, "math_101");
         let quiz_id = Symbol::new(&env, "quiz_math_101");
-        client.claim_reward(&learner, &quiz_id, &85);
-        client.claim_reward(&learner, &quiz_id, &85); // should panic
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id); // should panic
+    }
+
+    #[test]
+    #[should_panic(expected = "quiz not submitted")]
+    fn test_claim_reward_rejects_unverified_score() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Try to claim without submitting a quiz — should panic
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        client.claim_reward(&learner, &course_id, &quiz_id);
     }
 }
