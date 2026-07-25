@@ -13,6 +13,12 @@ pub trait ProgressTrackerInterface {
     fn is_eligible_for_credential(env: Env, learner: Address, course_id: Symbol) -> bool;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ContractError {
+    AlreadyInitialized = 0,
+}
+
 /// NFT credential contract for ChainLearn course certificates.
 ///
 /// Mints non-transferable credential NFTs to learners who complete courses
@@ -28,9 +34,9 @@ impl CredentialNft {
     /// * `admin` - Address that can revoke credentials
     /// * `progress_tracker` - Address of the progress-tracker contract used to
     ///   verify course completion before minting
-    pub fn initialize(env: Env, admin: Address, progress_tracker: Address) {
+    pub fn initialize(env: Env, admin: Address, progress_tracker: Address) -> Result<(), ContractError> {
         if env.storage().persistent().has(&DataKey::Admin) {
-            panic!("already initialized");
+            return Err(ContractError::AlreadyInitialized);
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage()
@@ -39,6 +45,7 @@ impl CredentialNft {
         env.storage()
             .persistent()
             .set(&DataKey::CredentialCounter, &0u64);
+        Ok(())
     }
 
     /// Mint a new credential NFT.
@@ -112,6 +119,20 @@ impl CredentialNft {
             .get(&DataKey::ProgressTracker)
             .expect("not initialized")
     }
+
+    /// Transfer admin rights to a new address.
+    ///
+    /// # Arguments
+    /// * `new_admin` - The new admin address
+    pub fn transfer_admin(env: Env, new_admin: Address) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        env.storage().persistent().set(&DataKey::Admin, &new_admin);
+    }
 }
 
 #[cfg(test)]
@@ -125,11 +146,11 @@ mod tests {
 
         let tracker_id = env.register_contract(None, progress_tracker::ProgressTracker);
         let tracker_client = progress_tracker::ProgressTrackerClient::new(env, &tracker_id);
-        tracker_client.initialize(&admin);
+        tracker_client.initialize(&admin).unwrap();
 
         let contract_id = env.register_contract(None, CredentialNft);
         let client = CredentialNftClient::new(env, &contract_id);
-        client.initialize(&admin, &tracker_id);
+        client.initialize(&admin, &tracker_id).unwrap();
 
         (admin, contract_id, tracker_id)
     }
@@ -140,7 +161,9 @@ mod tests {
         let mut module_ids = Vec::new(env);
         module_ids.push_back(Symbol::new(env, "mod_1"));
         module_ids.push_back(Symbol::new(env, "mod_2"));
-        tracker_client.create_course(course_id, &2, &1, &module_ids);
+        let mut quiz_ids = Vec::new(env);
+        quiz_ids.push_back(Symbol::new(env, "quiz_1"));
+        tracker_client.create_course(course_id, &2, &1, &module_ids, &quiz_ids);
     }
 
     /// Enroll the learner and finish every module and quiz in the course.
