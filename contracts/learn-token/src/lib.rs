@@ -239,6 +239,10 @@ impl LearnToken {
         let client = ProgressTrackerClient::new(&env, &progress_tracker);
         let score = client.get_quiz_score(&learner, &course_id, &quiz_id);
 
+        if score == 0 {
+            panic!("score must be greater than 0");
+        }
+
         if score > MAX_QUIZ_SCORE {
             panic!("score exceeds maximum");
         }

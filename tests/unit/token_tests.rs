@@ -1,7 +1,7 @@
 //! Unit tests for the learn-token contract.
 
 use learn_token::{LearnToken, LearnTokenClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol};
 
 #[cfg(test)]
 mod token_unit_tests {
@@ -11,11 +11,13 @@ mod token_unit_tests {
         let admin = Address::generate(env);
         let contract_id = env.register(LearnToken, ());
         let client = LearnTokenClient::new(env, &contract_id);
+        let pt_contract_id = Address::generate(env);
         client.initialize(
             &admin,
-            &Symbol::new(env, "CLearn"),
-            &Symbol::new(env, "CLRN"),
+            &SorobanString::from_str(env, "CLearn"),
+            &SorobanString::from_str(env, "CLRN"),
             &7,
+            &pt_contract_id,
         );
         (admin, contract_id)
     }
@@ -26,8 +28,8 @@ mod token_unit_tests {
         let (admin, contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
-        assert_eq!(client.name(), Symbol::new(&env, "CLearn"));
-        assert_eq!(client.symbol(), Symbol::new(&env, "CLRN"));
+        assert_eq!(client.name(), SorobanString::from_str(&env, "CLearn"));
+        assert_eq!(client.symbol(), SorobanString::from_str(&env, "CLRN"));
         assert_eq!(client.decimals(), 7);
         assert_eq!(client.total_supply(), 0);
         assert_eq!(client.admin(), admin);
@@ -88,8 +90,9 @@ mod token_unit_tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
 
+        let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
-        let reward = client.claim_reward(&learner, &quiz_id, &80);
+        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
 
         // 80 * 100 (BASE_REWARD_PER_POINT) = 8000
         assert_eq!(reward, 8000);
@@ -107,9 +110,10 @@ mod token_unit_tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
 
+        let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
-        client.claim_reward(&learner, &quiz_id, &80);
-        client.claim_reward(&learner, &quiz_id, &80);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id);
     }
 
     #[test]
@@ -122,8 +126,9 @@ mod token_unit_tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
 
+        let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
-        client.claim_reward(&learner, &quiz_id, &101);
+        client.claim_reward(&learner, &course_id, &quiz_id);
     }
 
     #[test]

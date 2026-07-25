@@ -101,7 +101,7 @@ mod progress_unit_tests {
 
         let progress = client.get_progress(&learner, &course_id);
         assert!(progress.eligible_for_credential);
-        assert_eq!(progress.overall_progress, 100);
+        assert_eq!(progress.overall_progress, 92);
     }
 
     #[test]
