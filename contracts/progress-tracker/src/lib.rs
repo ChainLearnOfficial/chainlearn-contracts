@@ -6,6 +6,12 @@ mod types;
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use types::{Course, DataKey, ProgressInfo, QuizResult};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ContractError {
+    AlreadyInitialized = 0,
+}
+
 /// On-chain learning progress tracker for ChainLearn.
 ///
 /// Tracks learner enrollment, module completion, and quiz scores.
@@ -16,26 +22,29 @@ pub struct ProgressTracker;
 #[contractimpl]
 impl ProgressTracker {
     /// Initialize the progress tracker with an admin.
-    pub fn initialize(env: Env, admin: Address) {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().persistent().has(&DataKey::Admin) {
-            panic!("already initialized");
+            return Err(ContractError::AlreadyInitialized);
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
+        Ok(())
     }
 
-    /// Register a new course with its modules.
+    /// Register a new course with its modules and quizzes.
     ///
     /// # Arguments
     /// * `course_id` - Unique course identifier
     /// * `total_modules` - Number of modules in the course
     /// * `total_quizzes` - Number of quizzes in the course
-    /// * `module_ids` - List of module identifiers
+    /// * `module_ids` - List of module identifiers (must not contain duplicates)
+    /// * `quiz_ids` - List of valid quiz identifiers
     pub fn create_course(
         env: Env,
         course_id: Symbol,
         total_modules: u32,
         total_quizzes: u32,
         module_ids: Vec<Symbol>,
+        quiz_ids: Vec<Symbol>,
     ) {
         let admin: Address = env
             .storage()
@@ -48,10 +57,23 @@ impl ProgressTracker {
             panic!("module_ids length must match total_modules");
         }
 
+        if quiz_ids.len() != total_quizzes {
+            panic!("quiz_ids length must match total_quizzes");
+        }
+
+        for i in 0..module_ids.len() {
+            for j in (i + 1)..module_ids.len() {
+                if module_ids.get(i) == module_ids.get(j) {
+                    panic!("duplicate module_id found");
+                }
+            }
+        }
+
         let course = Course {
             course_id: course_id.clone(),
             total_modules,
             total_quizzes,
+            quiz_ids: quiz_ids.clone(),
         };
 
         env.storage()
@@ -196,6 +218,17 @@ impl ProgressTracker {
             panic!("quiz already submitted");
         }
 
+        // Verify course and quiz_id
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        if !course.quiz_ids.contains(&quiz_id) {
+            panic!("quiz_id not found in course");
+        }
+
         let result = QuizResult {
             quiz_id: quiz_id.clone(),
             course_id: course_id.clone(),
@@ -213,12 +246,6 @@ impl ProgressTracker {
         );
 
         // Recalculate progress
-        let course: Course = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Course(course_id.clone()))
-            .expect("course not found");
-
         progress.overall_progress =
             rewards::calculate_progress(&env, &learner, &course_id, &course);
         progress.eligible_for_credential =
@@ -308,6 +335,20 @@ impl ProgressTracker {
             .get(&DataKey::Admin)
             .expect("not initialized")
     }
+
+    /// Transfer admin rights to a new address.
+    ///
+    /// # Arguments
+    /// * `new_admin` - The new admin address
+    pub fn transfer_admin(env: Env, new_admin: Address) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        env.storage().persistent().set(&DataKey::Admin, &new_admin);
+    }
 }
 
 #[cfg(test)]
@@ -319,7 +360,7 @@ mod tests {
         let admin = Address::generate(env);
         let contract_id = env.register_contract(None, ProgressTracker);
         let client = ProgressTrackerClient::new(env, &contract_id);
-        client.initialize(&admin);
+        client.initialize(&admin).unwrap();
         (admin, contract_id)
     }
 
@@ -329,7 +370,10 @@ mod tests {
         module_ids.push_back(Symbol::new(env, "mod_1"));
         module_ids.push_back(Symbol::new(env, "mod_2"));
         module_ids.push_back(Symbol::new(env, "mod_3"));
-        client.create_course(&course_id, &3, &2, &module_ids);
+        let mut quiz_ids = Vec::new(env);
+        quiz_ids.push_back(Symbol::new(env, "quiz_1"));
+        quiz_ids.push_back(Symbol::new(env, "quiz_2"));
+        client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
         course_id
     }
 

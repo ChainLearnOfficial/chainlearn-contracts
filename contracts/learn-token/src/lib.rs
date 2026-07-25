@@ -12,6 +12,12 @@ pub trait ProgressTrackerInterface {
     fn get_quiz_score(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> u32;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ContractError {
+    AlreadyInitialized = 0,
+}
+
 /// SEP-41 compliant fungible token contract for ChainLearn rewards.
 ///
 /// This token is minted as rewards when learners complete quizzes.
@@ -38,9 +44,9 @@ impl LearnToken {
         symbol: SorobanString,
         decimal: u32,
         progress_tracker: Address,
-    ) {
+    ) -> Result<(), ContractError> {
         if storage::is_initialized(&env) {
-            panic!("already initialized");
+            return Err(ContractError::AlreadyInitialized);
         }
         storage::set_admin(&env, &admin);
         storage::set_total_supply(&env, 0);
@@ -54,6 +60,7 @@ impl LearnToken {
         env.storage()
             .persistent()
             .set(&storage::DataKey::TokenMetadata, &metadata);
+        Ok(())
     }
 
     // ── SEP-41 Standard Interface ─────────────────────────────────────────
@@ -260,6 +267,16 @@ impl LearnToken {
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
     }
+
+    /// Transfer admin rights to a new address.
+    ///
+    /// # Arguments
+    /// * `new_admin` - The new admin address
+    pub fn transfer_admin(env: Env, new_admin: Address) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        storage::set_admin(&env, &new_admin);
+    }
 }
 
 #[cfg(test)]
@@ -273,7 +290,7 @@ mod tests {
         // Register progress-tracker
         let pt_contract_id = env.register_contract(None, progress_tracker::ProgressTracker);
         let pt_client = progress_tracker::ProgressTrackerClient::new(env, &pt_contract_id);
-        pt_client.initialize(&admin);
+        pt_client.initialize(&admin).unwrap();
 
         // Register learn-token with progress-tracker address
         let lt_contract_id = env.register_contract(None, LearnToken);
@@ -284,7 +301,7 @@ mod tests {
             &SorobanString::from_str(env, "CLRN"),
             &7,
             &pt_contract_id,
-        );
+        ).unwrap();
 
         (admin, lt_contract_id, pt_contract_id)
     }
@@ -299,7 +316,9 @@ mod tests {
     ) {
         let mut module_ids = Vec::new(env);
         module_ids.push_back(Symbol::new(env, "mod_1"));
-        pt_client.create_course(course_id, &1, &1, &module_ids);
+        let mut quiz_ids = Vec::new(env);
+        quiz_ids.push_back(quiz_id.clone());
+        pt_client.create_course(course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(learner, course_id);
         pt_client.submit_quiz_score(learner, course_id, quiz_id, &score);
     }

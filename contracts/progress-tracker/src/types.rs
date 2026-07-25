@@ -10,6 +10,8 @@ pub struct Course {
     pub total_modules: u32,
     /// Number of quizzes in the course.
     pub total_quizzes: u32,
+    /// List of valid quiz IDs for the course.
+    pub quiz_ids: Vec<Symbol>,
 }
 
 /// Represents a single module within a course.
