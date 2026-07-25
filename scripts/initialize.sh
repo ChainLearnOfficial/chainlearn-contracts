@@ -78,7 +78,8 @@ soroban contract invoke \
     --network-passphrase "$NETWORK_PASSPHRASE" \
     -- \
     initialize \
-    --admin "$ADMIN_ADDRESS"
+    --admin "$ADMIN_ADDRESS" \
+    --progress_tracker "$PROGRESS_TRACKER_ID"
 echo "  credential-nft initialized with admin: $ADMIN_ADDRESS"
 
 # Initialize progress-tracker

@@ -20,6 +20,8 @@ The reward token for the platform. Implements the SEP-41 fungible token standard
 Non-transferable credential NFTs that certify course completion:
 
 - **Minting**: `mint_credential(to, course_id, score, metadata_uri)` -- score-gated at 50+
+- **Completion-gated**: Minting calls `progress-tracker.is_eligible_for_credential()` and rejects
+  learners who have not completed every module and quiz in the course
 - **Verification**: `verify_credential(credential_id)` returns full credential info
 - **Lookup**: `get_credentials_for(learner)` lists all credentials for a learner
 - **Revocation**: Admin can revoke credentials if needed
@@ -257,6 +259,8 @@ A learner is eligible for a credential when:
 ## Security Considerations
 
 - **Auth**: All state-changing functions require authorization from the relevant party
+- **Verified progress**: Credential minting is gated on the progress-tracker's eligibility check,
+  so a credential cannot be self-issued without actually completing the course
 - **Double-claim prevention**: Token rewards and quiz submissions are tracked to prevent duplicates
 - **Score gating**: Credentials require a minimum passing score
 - **Admin controls**: Only the admin can create courses, mint tokens, and revoke credentials

@@ -2,11 +2,14 @@ use chainlearn_shared::MIN_CREDENTIAL_SCORE;
 use soroban_sdk::{Address, Env, Symbol};
 
 use crate::metadata::{CredentialInfo, DataKey};
+use crate::ProgressTrackerClient;
 
 /// Mint a new credential NFT for a learner.
 ///
 /// The credential is only minted if the learner's score meets the minimum
-/// threshold. Each learner can only receive one credential per course.
+/// threshold and the progress-tracker contract confirms the learner actually
+/// completed the course. Each learner can only receive one credential per
+/// course.
 ///
 /// # Arguments
 /// * `env` - Soroban environment
@@ -21,6 +24,7 @@ use crate::metadata::{CredentialInfo, DataKey};
 /// # Panics
 /// * If score is below the minimum threshold
 /// * If the learner already has a credential for this course
+/// * If the progress-tracker reports the learner is not eligible
 pub fn mint_credential(
     env: &Env,
     to: &Address,
@@ -40,6 +44,18 @@ pub fn mint_credential(
     let dup_key = DataKey::CourseCredential(to.clone(), course_id.clone());
     if env.storage().persistent().has(&dup_key) {
         panic!("credential already exists for this learner and course");
+    }
+
+    // Completion gate: the progress-tracker is the source of truth for whether
+    // the learner finished every module and quiz in the course.
+    let progress_tracker: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::ProgressTracker)
+        .expect("not initialized");
+    let tracker = ProgressTrackerClient::new(env, &progress_tracker);
+    if !tracker.is_eligible_for_credential(to, course_id) {
+        panic!("learner has not completed the course requirements");
     }
 
     // Generate unique credential ID
