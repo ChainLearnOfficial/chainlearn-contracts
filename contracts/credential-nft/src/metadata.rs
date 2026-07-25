@@ -23,6 +23,7 @@ pub struct CredentialInfo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
+    ProgressTracker,
     CredentialCounter,
     Credential(u64),
     CredentialOwner(u64),
