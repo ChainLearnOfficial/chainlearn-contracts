@@ -3,10 +3,11 @@
 mod rewards;
 mod types;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 use types::{Course, DataKey, ProgressInfo, QuizResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
     AlreadyInitialized = 0,
@@ -360,7 +361,7 @@ mod tests {
         let admin = Address::generate(env);
         let contract_id = env.register_contract(None, ProgressTracker);
         let client = ProgressTrackerClient::new(env, &contract_id);
-        client.initialize(&admin).unwrap();
+        client.initialize(&admin);
         (admin, contract_id)
     }
 

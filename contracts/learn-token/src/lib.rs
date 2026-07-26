@@ -4,7 +4,7 @@ mod events;
 mod storage;
 
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
-use soroban_sdk::{contract, contractimpl, Address, Env, String as SorobanString, Symbol};
+use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, String as SorobanString, Symbol};
 use soroban_token_sdk::metadata::TokenMetadata;
 
 #[soroban_sdk::contractclient(name = "ProgressTrackerClient")]
@@ -12,7 +12,8 @@ pub trait ProgressTrackerInterface {
     fn get_quiz_score(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> u32;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
     AlreadyInitialized = 0,
@@ -294,7 +295,7 @@ mod tests {
         // Register progress-tracker
         let pt_contract_id = env.register_contract(None, progress_tracker::ProgressTracker);
         let pt_client = progress_tracker::ProgressTrackerClient::new(env, &pt_contract_id);
-        pt_client.initialize(&admin).unwrap();
+        pt_client.initialize(&admin);
 
         // Register learn-token with progress-tracker address
         let lt_contract_id = env.register_contract(None, LearnToken);
@@ -305,7 +306,7 @@ mod tests {
             &SorobanString::from_str(env, "CLRN"),
             &7,
             &pt_contract_id,
-        ).unwrap();
+        );
 
         (admin, lt_contract_id, pt_contract_id)
     }
