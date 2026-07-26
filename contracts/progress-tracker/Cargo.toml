@@ -3,6 +3,7 @@ name = "progress-tracker"
 version = "0.1.0"
 edition = "2021"
 description = "On-chain learning progress tracker for ChainLearn"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
