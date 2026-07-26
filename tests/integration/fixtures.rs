@@ -24,6 +24,12 @@ pub fn setup_chainlearn_env() -> ChainLearnEnv {
     let admin = Address::generate(&env);
     let learner = Address::generate(&env);
 
+    // Register and initialize ProgressTracker first -- LearnToken::initialize
+    // requires its address.
+    let progress_contract_id = env.register(ProgressTracker, ());
+    let progress_client = ProgressTrackerClient::new(&env, &progress_contract_id);
+    progress_client.initialize(&admin);
+
     // Register and initialize LearnToken
     let token_contract_id = env.register(LearnToken, ());
     let token_client = LearnTokenClient::new(&env, &token_contract_id);
@@ -32,17 +38,13 @@ pub fn setup_chainlearn_env() -> ChainLearnEnv {
         &Symbol::new(&env, "CLearn"),
         &Symbol::new(&env, "CLRN"),
         &7,
+        &progress_contract_id,
     );
 
     // Register and initialize CredentialNft
     let credential_contract_id = env.register(CredentialNft, ());
     let credential_client = CredentialNftClient::new(&env, &credential_contract_id);
-    credential_client.initialize(&admin);
-
-    // Register and initialize ProgressTracker
-    let progress_contract_id = env.register(ProgressTracker, ());
-    let progress_client = ProgressTrackerClient::new(&env, &progress_contract_id);
-    progress_client.initialize(&admin);
+    credential_client.initialize(&admin, &progress_contract_id);
 
     ChainLearnEnv {
         env,
@@ -61,7 +63,10 @@ pub fn create_sample_course(env: &Env, client: &ProgressTrackerClient) -> Symbol
     module_ids.push_back(Symbol::new(env, "mod_basics"));
     module_ids.push_back(Symbol::new(env, "mod_ownership"));
     module_ids.push_back(Symbol::new(env, "mod_traits"));
-    client.create_course(&course_id, &3, &2, &module_ids);
+    let mut quiz_ids = Vec::new(env);
+    quiz_ids.push_back(Symbol::new(env, "quiz_midterm"));
+    quiz_ids.push_back(Symbol::new(env, "quiz_final"));
+    client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
     course_id
 }
 
