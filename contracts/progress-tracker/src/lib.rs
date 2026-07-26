@@ -134,6 +134,22 @@ impl ProgressTracker {
             .expect("not initialized");
         admin.require_auth();
 
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Course(course_id.clone()))
+        {
+            panic!("course already exists");
+        }
+
+        if total_modules == 0 {
+            panic!("total_modules must be greater than zero");
+        }
+
+        if total_quizzes == 0 {
+            panic!("total_quizzes must be greater than zero");
+        }
+
         if module_ids.len() != total_modules {
             panic!("module_ids length must match total_modules");
         }
