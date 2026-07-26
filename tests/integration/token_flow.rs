@@ -5,7 +5,28 @@
 mod fixtures;
 
 use learn_token::LearnTokenClient;
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
+use progress_tracker::ProgressTrackerClient;
+use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
+
+/// Create a minimal course (no modules, just the given quiz ids) and enroll
+/// `learner` in it. `claim_reward` only requires enrollment plus a submitted
+/// quiz score -- not module completion -- so tests that only exercise the
+/// reward flow don't need a full course.
+fn setup_course_and_enroll(
+    env: &Env,
+    progress_client: &ProgressTrackerClient,
+    learner: &Address,
+    course_id: &Symbol,
+    quiz_ids: &[Symbol],
+) {
+    let module_ids: Vec<Symbol> = Vec::new(env);
+    let mut quiz_ids_vec = Vec::new(env);
+    for q in quiz_ids {
+        quiz_ids_vec.push_back(q.clone());
+    }
+    progress_client.create_course(course_id, &0, &(quiz_ids.len() as u32), &module_ids, &quiz_ids_vec);
+    progress_client.enroll(learner, course_id);
+}
 
 #[test]
 fn test_end_to_end_reward_flow() {
@@ -15,8 +36,7 @@ fn test_end_to_end_reward_flow() {
     env.mock_all_auths();
 
     let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
-    let progress_client =
-        progress_tracker::ProgressTrackerClient::new(env, &setup.progress_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
 
     let course_id = fixtures::create_sample_course(env, &progress_client);
 
@@ -30,8 +50,9 @@ fn test_end_to_end_reward_flow() {
     let quiz_id = Symbol::new(env, "quiz_final");
     progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &85);
 
-    // Claim reward
-    let reward = token_client.claim_reward(learner, &quiz_id, &85);
+    // Claim reward -- claim_reward(learner, course_id, quiz_id) fetches the
+    // score from progress-tracker itself rather than taking it as an arg.
+    let reward = token_client.claim_reward(learner, &course_id, &quiz_id);
 
     // Verify: 85 * 100 (BASE_REWARD_PER_POINT) = 8500
     assert_eq!(reward, 8500);
@@ -47,10 +68,15 @@ fn test_double_claim_prevented() {
     env.mock_all_auths();
 
     let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
 
+    let course_id = Symbol::new(env, "course_1");
     let quiz_id = Symbol::new(env, "quiz_1");
-    token_client.claim_reward(learner, &quiz_id, &80);
-    token_client.claim_reward(learner, &quiz_id, &80);
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
+
+    token_client.claim_reward(learner, &course_id, &quiz_id);
+    token_client.claim_reward(learner, &course_id, &quiz_id);
 }
 
 #[test]
@@ -61,12 +87,17 @@ fn test_multiple_quiz_rewards() {
     env.mock_all_auths();
 
     let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
 
+    let course_id = Symbol::new(env, "course_1");
     let quiz1 = Symbol::new(env, "quiz_1");
     let quiz2 = Symbol::new(env, "quiz_2");
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz1.clone(), quiz2.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz1, &80);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz2, &60);
 
-    token_client.claim_reward(learner, &quiz1, &80); // 8000 tokens
-    token_client.claim_reward(learner, &quiz2, &60); // 6000 tokens
+    token_client.claim_reward(learner, &course_id, &quiz1); // 8000 tokens
+    token_client.claim_reward(learner, &course_id, &quiz2); // 6000 tokens
 
     assert_eq!(token_client.balance(learner), 14000);
     assert_eq!(token_client.total_supply(), 14000);
@@ -81,9 +112,14 @@ fn test_learner_to_learner_transfer() {
     env.mock_all_auths();
 
     let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
 
+    let course_id = Symbol::new(env, "course_1");
     let quiz_id = Symbol::new(env, "quiz_1");
-    token_client.claim_reward(learner, &quiz_id, &100); // 10000 tokens
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &100);
+
+    token_client.claim_reward(learner, &course_id, &quiz_id); // 10000 tokens
 
     token_client.transfer(learner, &other_learner, &3000);
 
@@ -100,9 +136,18 @@ fn test_total_supply_consistency() {
     env.mock_all_auths();
 
     let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
 
-    token_client.claim_reward(learner1, &Symbol::new(env, "q1"), &80); // 8000
-    token_client.claim_reward(&learner2, &Symbol::new(env, "q2"), &50); // 5000
+    let course_id = Symbol::new(env, "course_1");
+    let q1 = Symbol::new(env, "q1");
+    let q2 = Symbol::new(env, "q2");
+    setup_course_and_enroll(env, &progress_client, learner1, &course_id, &[q1.clone(), q2.clone()]);
+    progress_client.enroll(&learner2, &course_id);
+    progress_client.submit_quiz_score(learner1, &course_id, &q1, &80);
+    progress_client.submit_quiz_score(&learner2, &course_id, &q2, &50);
+
+    token_client.claim_reward(learner1, &course_id, &q1); // 8000
+    token_client.claim_reward(&learner2, &course_id, &q2); // 5000
 
     assert_eq!(token_client.total_supply(), 13000);
 }

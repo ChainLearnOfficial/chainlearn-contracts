@@ -21,7 +21,10 @@ mod progress_unit_tests {
         module_ids.push_back(Symbol::new(env, "mod_1"));
         module_ids.push_back(Symbol::new(env, "mod_2"));
         module_ids.push_back(Symbol::new(env, "mod_3"));
-        client.create_course(&course_id, &3, &2, &module_ids);
+        let mut quiz_ids = Vec::new(env);
+        quiz_ids.push_back(Symbol::new(env, "quiz_1"));
+        quiz_ids.push_back(Symbol::new(env, "quiz_2"));
+        client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
         course_id
     }
 
@@ -31,9 +34,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
 
@@ -50,9 +53,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
@@ -68,9 +71,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
@@ -86,9 +89,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
 
@@ -110,9 +113,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
 
@@ -135,9 +138,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.enroll(&learner, &course_id);
@@ -150,9 +153,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
@@ -166,9 +169,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
@@ -182,9 +185,9 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
-        env.mock_all_auths();
 
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &101);
@@ -197,6 +200,7 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
 
@@ -209,6 +213,7 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = create_test_course(&env, &client);
         let course = client.get_course(&course_id);
         assert_eq!(course.total_modules, 3);
@@ -222,10 +227,14 @@ mod progress_unit_tests {
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
+        env.mock_all_auths();
         let course_id = Symbol::new(&env, "rust_101");
         let mut two_ids = Vec::new(&env);
         two_ids.push_back(Symbol::new(&env, "mod_1"));
         two_ids.push_back(Symbol::new(&env, "mod_2"));
-        client.create_course(&course_id, &3, &2, &two_ids);
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_1"));
+        quiz_ids.push_back(Symbol::new(&env, "quiz_2"));
+        client.create_course(&course_id, &3, &2, &two_ids, &quiz_ids);
     }
 }
