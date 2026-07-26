@@ -3,6 +3,7 @@ name = "credential-nft"
 version = "0.1.0"
 edition = "2021"
 description = "NFT credential contract for ChainLearn course certificates"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]

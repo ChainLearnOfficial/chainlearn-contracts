@@ -3,6 +3,7 @@ name = "learn-token"
 version = "0.1.0"
 edition = "2021"
 description = "SEP-41 fungible token for ChainLearn rewards"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
