@@ -5,7 +5,7 @@ mod mint;
 mod verify;
 
 use metadata::{CredentialInfo, DataKey};
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 
 /// Subset of the progress-tracker interface used to verify course completion.
 #[soroban_sdk::contractclient(name = "ProgressTrackerClient")]
@@ -13,7 +13,8 @@ pub trait ProgressTrackerInterface {
     fn is_eligible_for_credential(env: Env, learner: Address, course_id: Symbol) -> bool;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
     AlreadyInitialized = 0,
@@ -146,11 +147,11 @@ mod tests {
 
         let tracker_id = env.register_contract(None, progress_tracker::ProgressTracker);
         let tracker_client = progress_tracker::ProgressTrackerClient::new(env, &tracker_id);
-        tracker_client.initialize(&admin).unwrap();
+        tracker_client.initialize(&admin);
 
         let contract_id = env.register_contract(None, CredentialNft);
         let client = CredentialNftClient::new(env, &contract_id);
-        client.initialize(&admin, &tracker_id).unwrap();
+        client.initialize(&admin, &tracker_id);
 
         (admin, contract_id, tracker_id)
     }
