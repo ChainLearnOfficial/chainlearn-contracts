@@ -66,7 +66,8 @@ soroban contract invoke \
     --admin "$ADMIN_ADDRESS" \
     --name "ChainLearn Token" \
     --symbol "CLRN" \
-    --decimals 7
+    --decimal 7 \
+    --progress_tracker "$PROGRESS_TRACKER_ID"
 echo "  learn-token initialized with admin: $ADMIN_ADDRESS"
 
 # Initialize credential-nft
