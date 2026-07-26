@@ -92,13 +92,15 @@ pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
         owner: owner.clone(),
         spender: spender.clone(),
     };
+    let data_key = DataKey::Allowance(key);
     match env
         .storage()
         .persistent()
-        .get::<DataKey, AllowanceData>(&DataKey::Allowance(key))
+        .get::<DataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
             if env.ledger().sequence() > data.expiration_ledger {
+                env.storage().persistent().remove(&data_key);
                 0
             } else {
                 data.amount
