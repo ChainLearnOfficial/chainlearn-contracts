@@ -11,6 +11,7 @@ set -euo pipefail
 #
 # Prerequisites:
 #   - soroban CLI installed (v21+)
+#   - jq installed
 #   - STELLAR_SECRET_KEY environment variable set
 #   - Sufficient XLM for deployment fees
 # ──────────────────────────────────────────────────────────────────────────────
@@ -35,6 +36,14 @@ if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
     exit 1
 fi
 
+# Verify jq is installed (#59)
+if ! command -v jq &>/dev/null; then
+    echo "Error: jq is required but not installed."
+    echo "Install it with: sudo apt install jq  (Debian/Ubuntu)"
+    echo "                 brew install jq      (macOS)"
+    exit 1
+fi
+
 echo "=== ChainLearn Contract Deployment ==="
 echo "Network:  $NETWORK"
 echo "RPC URL:  $RPC_URL"
@@ -44,6 +53,14 @@ echo ""
 echo "[1/4] Building contracts..."
 cargo build --release --target wasm32-unknown-unknown
 
+# On mainnet, perform safety checks. On testnet, skip for faster iteration (#61).
+DEPLOY_FLAGS=()
+if [ "$NETWORK" = "mainnet" ]; then
+    echo "  Mainnet deployment — running safety checks."
+else
+    DEPLOY_FLAGS+=(--ignore-checks)
+fi
+
 # Deploy learn-token
 echo "[2/4] Deploying learn-token..."
 LEARN_TOKEN_ID=$(soroban contract deploy \
@@ -51,7 +68,7 @@ LEARN_TOKEN_ID=$(soroban contract deploy \
     --source "$STELLAR_SECRET_KEY" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
-    --ignore-checks)
+    "${DEPLOY_FLAGS[@]+"${DEPLOY_FLAGS[@]}"}")
 echo "  learn-token deployed: $LEARN_TOKEN_ID"
 
 # Deploy credential-nft
@@ -61,7 +78,7 @@ CREDENTIAL_NFT_ID=$(soroban contract deploy \
     --source "$STELLAR_SECRET_KEY" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
-    --ignore-checks)
+    "${DEPLOY_FLAGS[@]+"${DEPLOY_FLAGS[@]}"}")
 echo "  credential-nft deployed: $CREDENTIAL_NFT_ID"
 
 # Deploy progress-tracker
@@ -71,10 +88,10 @@ PROGRESS_TRACKER_ID=$(soroban contract deploy \
     --source "$STELLAR_SECRET_KEY" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
-    --ignore-checks)
+    "${DEPLOY_FLAGS[@]+"${DEPLOY_FLAGS[@]}"}")
 echo "  progress-tracker deployed: $PROGRESS_TRACKER_ID"
 
-# Write deployment info to file
+# Write deployment info to file and validate (#60)
 DEPLOY_FILE="deployments-${NETWORK}.json"
 cat > "$DEPLOY_FILE" << EOF
 {
@@ -87,6 +104,22 @@ cat > "$DEPLOY_FILE" << EOF
   }
 }
 EOF
+
+# Validate the written JSON is parseable
+if ! jq empty "$DEPLOY_FILE" 2>/dev/null; then
+    echo "Error: Failed to write valid JSON to $DEPLOY_FILE"
+    echo "Contents:"
+    cat "$DEPLOY_FILE"
+    exit 1
+fi
+
+# Sanity-check that all contract IDs look like valid Stellar addresses
+for field in learn_token credential_nft progress_tracker; do
+    value=$(jq -r ".contracts.$field" "$DEPLOY_FILE")
+    if [[ ! "$value" =~ ^C[A-Z0-9]{55,62}$ ]]; then
+        echo "Warning: Contract ID for $field does not look like a valid Stellar contract address: $value"
+    fi
+done
 
 echo ""
 echo "=== Deployment Complete ==="

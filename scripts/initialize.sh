@@ -11,9 +11,15 @@ set -euo pipefail
 #
 # Prerequisites:
 #   - soroban CLI installed (v21+)
+#   - jq installed
 #   - STELLAR_SECRET_KEY environment variable set
 #   - Contract must be deployed first (run deploy.sh)
 # ──────────────────────────────────────────────────────────────────────────────
+
+if ! command -v jq &>/dev/null; then
+    echo "Error: jq is required but not installed."
+    exit 1
+fi
 
 NETWORK="${1:-testnet}"
 
@@ -42,12 +48,23 @@ if [ ! -f "$DEPLOY_FILE" ]; then
     exit 1
 fi
 
-# Extract contract IDs
+# Extract contract IDs and validate they are non-empty
 LEARN_TOKEN_ID=$(jq -r '.contracts.learn_token' "$DEPLOY_FILE")
 CREDENTIAL_NFT_ID=$(jq -r '.contracts.credential_nft' "$DEPLOY_FILE")
 PROGRESS_TRACKER_ID=$(jq -r '.contracts.progress_tracker' "$DEPLOY_FILE")
 
-ADMIN_ADDRESS=$(soroban config identity address default)
+if [[ -z "$LEARN_TOKEN_ID" || -z "$CREDENTIAL_NFT_ID" || -z "$PROGRESS_TRACKER_ID" ]]; then
+    echo "Error: One or more contract IDs are missing from $DEPLOY_FILE."
+    echo "Ensure deploy.sh completed successfully and the file is not corrupted."
+    exit 1
+fi
+
+ADMIN_ADDRESS=$(soroban config identity address default 2>&1) || {
+    echo "Error: Failed to resolve default identity."
+    echo "Ensure 'soroban keys list' shows a default identity, or set STELLAR_SECRET_KEY."
+    echo "Output: $ADMIN_ADDRESS"
+    exit 1
+}
 
 echo "=== ChainLearn Contract Initialization ==="
 echo "Network:           $NETWORK"
