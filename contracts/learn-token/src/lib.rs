@@ -269,7 +269,6 @@ impl LearnToken {
         storage::set_reward_claimed(&env, &learner, &quiz_id);
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount);
-        events::mint(&env, &learner, reward_amount);
 
         reward_amount
     }

@@ -6,6 +6,86 @@ mod types;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 use types::{Course, DataKey, ProgressInfo, QuizResult};
 
+/// Calculate progress from in-memory ProgressInfo without reading storage.
+/// Used in submit_quiz_score to avoid redundant storage writes.
+fn calculate_progress_from_memory(
+    env: &Env,
+    learner: &Address,
+    course_id: &Symbol,
+    course: &Course,
+    progress: &ProgressInfo,
+) -> u32 {
+    // Module completion component (70% weight)
+    let module_progress = if course.total_modules > 0 {
+        let completed = count_completed_modules(env, learner, course_id);
+        (completed * 70) / course.total_modules
+    } else {
+        0
+    };
+
+    // Quiz performance component (30% weight)
+    let quiz_progress = if course.total_quizzes > 0 {
+        let avg_score = average_quiz_score_from_memory(progress);
+        (avg_score * 30) / 100
+    } else {
+        0
+    };
+
+    let total = module_progress + quiz_progress;
+    if total > 100 {
+        100
+    } else {
+        total
+    }
+}
+
+/// Calculate average quiz score from in-memory ProgressInfo.
+fn average_quiz_score_from_memory(progress: &ProgressInfo) -> u32 {
+    if progress.quiz_scores.is_empty() {
+        return 0;
+    }
+
+    let mut total_score: u64 = 0;
+    let count = progress.quiz_scores.len() as u64;
+
+    for quiz in progress.quiz_scores.iter() {
+        total_score += quiz.score as u64;
+    }
+
+    (total_score / count) as u32
+}
+
+/// Count how many modules a learner has completed in a course.
+fn count_completed_modules(env: &Env, learner: &Address, course_id: &Symbol) -> u32 {
+    let modules: Vec<Symbol> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::CourseModules(course_id.clone()))
+        .unwrap_or(Vec::new(env));
+
+    let mut count = 0u32;
+    for module_id in modules.iter() {
+        let key = DataKey::ModuleCompleted(learner.clone(), course_id.clone(), module_id.clone());
+        if env.storage().persistent().has(&key) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Check eligibility from in-memory ProgressInfo without reading storage.
+fn is_eligible_from_memory(course: &Course, progress: &ProgressInfo) -> bool {
+    // Check all quizzes submitted
+    if progress.quiz_scores.len() < course.total_quizzes {
+        return false;
+    }
+
+    // Check average score meets minimum
+    let avg = average_quiz_score_from_memory(progress);
+    avg >= chainlearn_shared::MIN_CREDENTIAL_SCORE
+        && progress.modules_completed.len() >= course.total_modules
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -256,18 +336,15 @@ impl ProgressTracker {
         env.storage().persistent().set(&quiz_key, &result);
         progress.quiz_scores.push_back(result);
 
-        // Save progress so recalculations can read updated quiz scores
-        env.storage().persistent().set(
-            &DataKey::Progress(learner.clone(), course_id.clone()),
-            &progress,
-        );
-
-        // Recalculate progress
+        // Recalculate progress with updated quiz scores
+        // Note: calculate_progress reads from storage, but we've already updated quiz_scores in memory
+        // This avoids a redundant write by calculating everything before the final storage update
         progress.overall_progress =
-            rewards::calculate_progress(&env, &learner, &course_id, &course);
+            calculate_progress_from_memory(&env, &learner, &course_id, &course, &progress);
         progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&env, &learner, &course_id, &course);
+            is_eligible_from_memory(&course, &progress);
 
+        // Single write with all updated fields
         env.storage().persistent().set(
             &DataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
