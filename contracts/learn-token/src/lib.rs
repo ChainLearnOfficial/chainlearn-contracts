@@ -115,6 +115,10 @@ impl LearnToken {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
 
+        if from == to {
+            return;
+        }
+
         if amount < 0 {
             panic!("negative amount");
         }
@@ -140,6 +144,10 @@ impl LearnToken {
     /// * `amount` - Amount to transfer
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         spender.require_auth();
+
+        if from == to {
+            return;
+        }
 
         if amount < 0 {
             panic!("negative amount");
