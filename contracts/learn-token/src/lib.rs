@@ -211,6 +211,10 @@ impl LearnToken {
             panic!("negative amount");
         }
 
+        if expiration_ledger <= env.ledger().sequence() {
+            panic!("expiration_ledger must be in the future");
+        }
+
         storage::set_allowance(&env, &owner, &spender, amount, expiration_ledger);
         events::approve(&env, &owner, &spender, amount, expiration_ledger);
     }
@@ -353,6 +357,10 @@ impl LearnToken {
 
         if additional_amount < 0 {
             panic!("negative amount");
+        }
+
+        if expiration_ledger <= env.ledger().sequence() {
+            panic!("expiration_ledger must be in the future");
         }
 
         let current = storage::get_allowance(&env, &owner, &spender);
