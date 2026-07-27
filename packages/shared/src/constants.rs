@@ -15,6 +15,9 @@ pub const BASE_REWARD_PER_POINT: i128 = 100;
 /// Maximum modules per course.
 pub const MAX_MODULES_PER_COURSE: u32 = 64;
 
+/// Maximum number of credential IDs a single paginated read may return.
+pub const MAX_CREDENTIALS_PAGE_SIZE: u32 = 50;
+
 /// Status of a learner's enrollment in a course.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
