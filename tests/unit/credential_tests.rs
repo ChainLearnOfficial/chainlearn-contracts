@@ -93,7 +93,7 @@ mod credential_unit_tests {
     #[test]
     fn test_revoke_credential() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -105,7 +105,21 @@ mod credential_unit_tests {
         let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
         assert!(client.is_credential_valid(&cred_id));
 
+        let event_count_before = env.events().all().len();
         client.revoke_credential(&cred_id);
+
+        // Verify the revocation event includes the admin address.
+        let events = env.events().all();
+        assert_eq!(events.len(), event_count_before + 1);
+        let (_, topics, data) = events.get(events.len() - 1).unwrap();
+        let event_sym: Symbol = topics.get(0).unwrap();
+        assert_eq!(event_sym, Symbol::new(&env, "credential_revoked"));
+        // data: (learner, course_id, credential_id, admin)
+        let event_learner: Address = data.get(0).unwrap();
+        let event_admin: Address = data.get(3).unwrap();
+        assert_eq!(event_learner, learner);
+        assert_eq!(event_admin, admin);
+
         assert!(!client.is_credential_valid(&cred_id));
 
         let info = client.verify_credential(&cred_id);
