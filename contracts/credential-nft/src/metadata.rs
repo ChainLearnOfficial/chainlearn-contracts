@@ -29,4 +29,5 @@ pub enum DataKey {
     CredentialOwner(u64),
     LearnerCredentials(Address),
     CourseCredential(Address, Symbol),
+    CourseCredentials(Symbol),
 }
