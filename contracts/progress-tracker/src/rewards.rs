@@ -3,6 +3,28 @@ use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::types::{Course, DataKey, ProgressInfo};
 
+/// Count how many modules a learner has completed in a course.
+///
+/// `modules` is passed in by the caller instead of being re-fetched here,
+/// since `Course::module_ids` already holds it (#97): the top-level entry
+/// point reads `Course` once and threads the same list through to both the
+/// progress and eligibility calculations below.
+pub fn count_completed_modules(
+    env: &Env,
+    learner: &Address,
+    course_id: &Symbol,
+    modules: &Vec<Symbol>,
+) -> u32 {
+    let mut count = 0u32;
+    for module_id in modules.iter() {
+        let key = DataKey::ModuleCompleted(learner.clone(), course_id.clone(), module_id.clone());
+        if env.storage().persistent().has(&key) {
+            count += 1;
+        }
+    }
+    count
+}
+
 /// Calculate the overall progress percentage for a learner in a course.
 ///
 /// Progress is weighted:
@@ -27,7 +49,7 @@ pub fn calculate_progress(
 ) -> u32 {
     // Module completion component (70% weight)
     let module_progress = if course.total_modules > 0 {
-        let completed = count_completed_modules(env, learner, course_id);
+        let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
         (completed * 70) / course.total_modules
     } else {
         0
@@ -46,24 +68,6 @@ pub fn calculate_progress(
     } else {
         total
     }
-}
-
-/// Count how many modules a learner has completed in a course.
-pub fn count_completed_modules(env: &Env, learner: &Address, course_id: &Symbol) -> u32 {
-    let modules: Vec<Symbol> = env
-        .storage()
-        .persistent()
-        .get(&DataKey::CourseModules(course_id.clone()))
-        .unwrap_or(Vec::new(env));
-
-    let mut count = 0u32;
-    for module_id in modules.iter() {
-        let key = DataKey::ModuleCompleted(learner.clone(), course_id.clone(), module_id.clone());
-        if env.storage().persistent().has(&key) {
-            count += 1;
-        }
-    }
-    count
 }
 
 /// Calculate the average quiz score from the aggregates on `ProgressInfo`.
@@ -102,7 +106,7 @@ pub fn is_eligible_for_credential(
     progress: &ProgressInfo,
 ) -> bool {
     // Check all modules completed
-    let completed = count_completed_modules(env, learner, course_id);
+    let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
     if completed < course.total_modules {
         return false;
     }

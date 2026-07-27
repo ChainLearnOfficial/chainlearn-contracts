@@ -40,6 +40,10 @@ Tracks learner enrollment, module completion, and quiz scores:
 - **Progress view**: `get_progress(learner, course_id)` returns `ProgressInfo`
 - **Eligibility**: Automatic credential eligibility calculation
 - **Weighted progress**: 70% module completion + 30% quiz performance
+- **Events**: `enrolled(learner, course_id, enrolled_at)`, `module_completed(learner, course_id, module_id)`,
+  `quiz_submitted(learner, course_id, quiz_id, score)`, and `credential_eligible(learner, course_id)` --
+  published once, the moment eligibility flips from false to true, so indexers don't have to poll
+  `get_progress`
 
 ### shared (Utilities Package)
 

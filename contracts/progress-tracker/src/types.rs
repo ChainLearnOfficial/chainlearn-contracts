@@ -10,6 +10,8 @@ pub struct Course {
     pub total_modules: u32,
     /// Number of quizzes in the course.
     pub total_quizzes: u32,
+    /// Ordered list of module IDs for the course.
+    pub module_ids: Vec<Symbol>,
     /// List of valid quiz IDs for the course.
     pub quiz_ids: Vec<Symbol>,
 }
@@ -66,7 +68,6 @@ pub struct ProgressInfo {
 pub enum DataKey {
     Admin,
     Course(Symbol),
-    CourseModules(Symbol),
     Progress(Address, Symbol),
     ModuleCompleted(Address, Symbol, Symbol),
     QuizResult(Address, Symbol, Symbol),

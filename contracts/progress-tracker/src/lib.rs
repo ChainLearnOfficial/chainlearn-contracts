@@ -90,15 +90,13 @@ impl ProgressTracker {
             course_id: course_id.clone(),
             total_modules,
             total_quizzes,
+            module_ids: module_ids.clone(),
             quiz_ids: quiz_ids.clone(),
         };
 
         env.storage()
             .persistent()
             .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage()
-            .persistent()
-            .set(&DataKey::CourseModules(course_id.clone()), &module_ids);
 
         env.events().publish(
             (Symbol::new(&env, "course_created"),),
@@ -142,8 +140,10 @@ impl ProgressTracker {
 
         env.storage().persistent().set(&key, &progress);
 
-        env.events()
-            .publish((symbol_short!("enrolled"),), (&learner, &course_id));
+        env.events().publish(
+            (symbol_short!("enrolled"),),
+            (&learner, &course_id, progress.enrolled_at),
+        );
     }
 
     /// Mark a module as completed for a learner.
@@ -169,20 +169,23 @@ impl ProgressTracker {
             panic!("module already completed");
         }
 
-        // Verify module exists in course and enforce ordering (#81)
-        let modules: Vec<Symbol> = env
+        // Single read serves both the module lookup/ordering check below and
+        // the progress/eligibility recalculation further down -- Course
+        // carries module_ids, so there is no second fetch under a separate
+        // key for the same course configuration (#97).
+        let course: Course = env
             .storage()
             .persistent()
-            .get(&DataKey::CourseModules(course_id.clone()))
-            .expect("course modules not found");
+            .get(&DataKey::Course(course_id.clone()))
+            .expect("course not found");
 
-        if !modules.contains(&module_id) {
+        if !course.module_ids.contains(&module_id) {
             panic!("module not found in course");
         }
 
         // Enforce sequential ordering: module at index N requires module N-1 completed
         let mut module_index: Option<u32> = None;
-        for (i, m) in modules.iter().enumerate() {
+        for (i, m) in course.module_ids.iter().enumerate() {
             if m == module_id {
                 module_index = Some(i as u32);
                 break;
@@ -190,7 +193,7 @@ impl ProgressTracker {
         }
         if let Some(idx) = module_index {
             if idx > 0 {
-                let prev_module = modules.get(idx - 1).unwrap();
+                let prev_module = course.module_ids.get(idx - 1).unwrap();
                 let prev_key = DataKey::ModuleCompleted(
                     learner.clone(),
                     course_id.clone(),
@@ -205,12 +208,7 @@ impl ProgressTracker {
         // Mark module as completed
         env.storage().persistent().set(&completed_key, &true);
 
-        // Recalculate progress
-        let course: Course = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Course(course_id.clone()))
-            .expect("course not found");
+        let was_eligible = progress.eligible_for_credential;
 
         progress.overall_progress =
             rewards::calculate_progress(&env, &learner, &course_id, &course, &progress);
@@ -226,6 +224,15 @@ impl ProgressTracker {
             (Symbol::new(&env, "module_completed"),),
             (&learner, &course_id, &module_id),
         );
+
+        // Notify indexers the moment eligibility flips to true, instead of
+        // requiring them to poll get_progress (#96).
+        if !was_eligible && progress.eligible_for_credential {
+            env.events().publish(
+                (Symbol::new(&env, "credential_eligible"),),
+                (&learner, &course_id),
+            );
+        }
     }
 
     /// Submit a quiz score for a learner.
@@ -287,6 +294,8 @@ impl ProgressTracker {
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
 
+        let was_eligible = progress.eligible_for_credential;
+
         // Recalculate from the updated in-memory aggregates, so everything is
         // known before the single storage write below.
         progress.overall_progress =
@@ -304,6 +313,15 @@ impl ProgressTracker {
             (Symbol::new(&env, "quiz_submitted"),),
             (&learner, &course_id, &quiz_id, score),
         );
+
+        // Notify indexers the moment eligibility flips to true, instead of
+        // requiring them to poll get_progress (#96).
+        if !was_eligible && progress.eligible_for_credential {
+            env.events().publish(
+                (Symbol::new(&env, "credential_eligible"),),
+                (&learner, &course_id),
+            );
+        }
     }
 
     /// Get a learner's progress in a course.
@@ -351,30 +369,25 @@ impl ProgressTracker {
 
     /// Check if a learner is eligible for a credential.
     ///
+    /// `eligible_for_credential` is kept up to date on every write that could
+    /// change it (`complete_module`, `submit_quiz_score`), so the stored
+    /// `ProgressInfo` already carries the answer -- no need to re-derive it
+    /// from `Course` and the `ModuleCompleted` keys on every read (#98).
+    ///
     /// # Arguments
     /// * `learner` - The learner address
     /// * `course_id` - The course identifier
     ///
     /// # Panics
     /// * If the learner is not enrolled in the course
-    /// * If the course does not exist
     pub fn is_eligible_for_credential(env: Env, learner: Address, course_id: Symbol) -> bool {
-        // Enrollment is checked before any course data is read (#86): a learner
-        // who never enrolled cannot be eligible, and reporting that as `false`
-        // would hide the difference from a real, failed attempt.
         let progress: ProgressInfo = env
             .storage()
             .persistent()
-            .get(&DataKey::Progress(learner.clone(), course_id.clone()))
+            .get(&DataKey::Progress(learner, course_id))
             .expect("not enrolled");
 
-        let course: Course = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Course(course_id.clone()))
-            .expect("course not found");
-
-        rewards::is_eligible_for_credential(&env, &learner, &course_id, &course, &progress)
+        progress.eligible_for_credential
     }
 
     /// Get course configuration.
@@ -414,7 +427,10 @@ impl ProgressTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Events as _};
+    use soroban_sdk::{
+        testutils::{Address as _, Events as _, Ledger as _},
+        vec, IntoVal,
+    };
 
     fn setup_contract(env: &Env) -> (Address, Address) {
         let admin = Address::generate(env);
@@ -657,5 +673,152 @@ mod tests {
 
         client.enroll(&learner, &course_id);
         client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
+    }
+
+    /// #95: enroll's event carries the enrollment timestamp, so indexers
+    /// don't have to follow up with a get_progress call to learn it.
+    #[test]
+    fn test_enroll_event_includes_timestamp() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        env.ledger().with_mut(|l| l.timestamp = 12345);
+        client.enroll(&learner, &course_id);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.enrolled_at, 12345);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (symbol_short!("enrolled"),).into_val(&env),
+                    (learner, course_id, 12345u64).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    /// #96: credential_eligible fires exactly on the false -> true flip, not
+    /// on every write, so indexers don't have to poll get_progress.
+    #[test]
+    fn test_credential_eligible_event_emitted_on_flip_to_true() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+
+        // Not yet eligible (mod_3 and both quizzes still missing) -- the last
+        // event so far must be module_completed, not credential_eligible.
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "module_completed"),).into_val(&env),
+                    (
+                        learner.clone(),
+                        course_id.clone(),
+                        Symbol::new(&env, "mod_2"),
+                    )
+                        .into_val(&env),
+                )
+            ]
+        );
+        let events_before_eligible = all.len();
+
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        // The submission that completes every requirement must publish
+        // credential_eligible as the final event.
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &70);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
+                    (learner, course_id).into_val(&env),
+                )
+            ]
+        );
+        // module_completed + quiz_submitted x2 + credential_eligible = 4 new events.
+        assert_eq!(all.len(), events_before_eligible + 4);
+    }
+
+    /// #97: Course carries module_ids (mirroring quiz_ids), so complete_module
+    /// only reads one storage key for course configuration instead of two.
+    #[test]
+    fn test_course_carries_module_ids() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        let course = client.get_course(&course_id);
+        assert_eq!(course.module_ids.len(), 3);
+        assert_eq!(course.module_ids.get(0).unwrap(), Symbol::new(&env, "mod_1"));
+        assert_eq!(course.module_ids.get(2).unwrap(), Symbol::new(&env, "mod_3"));
+
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        let progress = client.get_progress(&learner, &course_id);
+        assert!(progress.overall_progress > 0);
+    }
+
+    /// #98: is_eligible_for_credential serves the cached field on ProgressInfo
+    /// instead of re-deriving it from Course + ModuleCompleted on every read.
+    #[test]
+    fn test_is_eligible_for_credential_returns_cached_field() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        assert!(!client.is_eligible_for_credential(&learner, &course_id));
+
+        // Flip the cached field directly, without completing any module or
+        // quiz. If the getter recomputed from scratch it would still report
+        // false; it must report the cached field instead.
+        let mut progress = client.get_progress(&learner, &course_id);
+        progress.eligible_for_credential = true;
+        env.as_contract(&contract_id, || {
+            env.storage().persistent().set(
+                &DataKey::Progress(learner.clone(), course_id.clone()),
+                &progress,
+            );
+        });
+
+        assert!(client.is_eligible_for_credential(&learner, &course_id));
     }
 }
