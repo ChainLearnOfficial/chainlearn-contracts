@@ -107,6 +107,17 @@ impl CredentialNft {
         verify::get_credential_count(&env, &learner)
     }
 
+    /// Get the total number of credentials issued across all learners (#103).
+    ///
+    /// This is the value of the credential ID counter, which increments on
+    /// every successful mint and is never decremented.
+    pub fn get_total_credentials_count(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CredentialCounter)
+            .unwrap_or(0)
+    }
+
     /// Get all credential IDs for a given course (reverse lookup).
     ///
     /// # Arguments
@@ -612,5 +623,81 @@ mod tests {
 
         let info = client.verify_credential(&cred_id);
         assert!(info.revoked);
+    }
+
+    // ── Issue #103: public total credentials count ──────────────────────────
+
+    #[test]
+    fn test_get_total_credentials_count_returns_counter() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert_eq!(client.get_total_credentials_count(), 0);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs://meta");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+
+        client.mint_credential(&learner, &course, &80, &uri);
+        assert_eq!(client.get_total_credentials_count(), 1);
+
+        let learner2 = Address::generate(&env);
+        enrolled_and_completed(&env, &tracker_id, &learner2, &course);
+        client.mint_credential(&learner2, &course, &90, &uri);
+        assert_eq!(client.get_total_credentials_count(), 2);
+    }
+
+    // ── Issue #104: learner credentials vec pruned on revoke ─────────────────
+
+    #[test]
+    fn test_revoke_prunes_learner_credentials_list() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs://meta");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+
+        let cred_id = client.mint_credential(&learner, &course, &80, &uri);
+
+        // Before revoke, the credential appears in the learner's list.
+        let before = client.get_credentials_for(&learner, &0, &10);
+        assert_eq!(before.len(), 1);
+        assert_eq!(before.get(0).unwrap(), cred_id);
+
+        client.revoke_credential(&cred_id);
+
+        // After revoke, the credential is pruned from the learner's list.
+        let after = client.get_credentials_for(&learner, &0, &10);
+        assert_eq!(after.len(), 0);
+    }
+
+    #[test]
+    fn test_revoke_prunes_course_credentials_index() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs://meta");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+
+        let cred_id = client.mint_credential(&learner, &course, &80, &uri);
+
+        let before = client.get_credentials_by_course(&course);
+        assert_eq!(before.len(), 1);
+
+        client.revoke_credential(&cred_id);
+
+        let after = client.get_credentials_by_course(&course);
+        assert_eq!(after.len(), 0);
     }
 }
