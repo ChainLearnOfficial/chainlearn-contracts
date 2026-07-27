@@ -59,6 +59,13 @@ if [[ -z "$LEARN_TOKEN_ID" || -z "$CREDENTIAL_NFT_ID" || -z "$PROGRESS_TRACKER_I
     exit 1
 fi
 
+for field in "$LEARN_TOKEN_ID" "$CREDENTIAL_NFT_ID" "$PROGRESS_TRACKER_ID"; do
+    if [[ ! "$field" =~ ^C[A-Z0-9]{55,62}$ ]]; then
+        echo "Error: Invalid Stellar contract ID in $DEPLOY_FILE: $field"
+        exit 1
+    fi
+done
+
 ADMIN_ADDRESS=$(soroban config identity address default 2>&1) || {
     echo "Error: Failed to resolve default identity."
     echo "Ensure 'soroban keys list' shows a default identity, or set STELLAR_SECRET_KEY."
@@ -69,6 +76,14 @@ ADMIN_ADDRESS=$(soroban config identity address default 2>&1) || {
 echo "=== ChainLearn Contract Initialization ==="
 echo "Network:           $NETWORK"
 echo "Admin Address:     $ADMIN_ADDRESS"
+echo ""
+
+echo "Verifying RPC reachability..."
+if ! curl -s --max-time 10 "$RPC_URL" > /dev/null; then
+    echo "Error: RPC endpoint $RPC_URL is not reachable."
+    exit 1
+fi
+echo "RPC reachable."
 echo ""
 
 # Initialize learn-token

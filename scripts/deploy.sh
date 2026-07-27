@@ -49,6 +49,21 @@ echo "Network:  $NETWORK"
 echo "RPC URL:  $RPC_URL"
 echo ""
 
+echo "Verifying RPC reachability..."
+if ! curl -s --max-time 10 "$RPC_URL" > /dev/null; then
+    echo "Error: RPC endpoint $RPC_URL is not reachable."
+    exit 1
+fi
+echo "RPC reachable."
+echo ""
+
+DEPLOY_FILE="deployments-${NETWORK}.json"
+if [ -f "$DEPLOY_FILE" ]; then
+    echo "Error: Deployment already exists in $DEPLOY_FILE"
+    echo "To redeploy, please remove this file first."
+    exit 1
+fi
+
 # Build all contracts
 echo "[1/4] Building contracts..."
 cargo build --release --target wasm32-unknown-unknown
@@ -92,7 +107,6 @@ PROGRESS_TRACKER_ID=$(soroban contract deploy \
 echo "  progress-tracker deployed: $PROGRESS_TRACKER_ID"
 
 # Write deployment info to file and validate (#60)
-DEPLOY_FILE="deployments-${NETWORK}.json"
 cat > "$DEPLOY_FILE" << EOF
 {
   "network": "$NETWORK",
