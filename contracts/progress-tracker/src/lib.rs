@@ -74,7 +74,13 @@ fn count_completed_modules(env: &Env, learner: &Address, course_id: &Symbol) -> 
 }
 
 /// Check eligibility from in-memory ProgressInfo without reading storage.
-fn is_eligible_from_memory(course: &Course, progress: &ProgressInfo) -> bool {
+fn is_eligible_from_memory(
+    env: &Env,
+    learner: &Address,
+    course_id: &Symbol,
+    course: &Course,
+    progress: &ProgressInfo,
+) -> bool {
     // Check all quizzes submitted
     if progress.quiz_scores.len() < course.total_quizzes {
         return false;
@@ -82,8 +88,8 @@ fn is_eligible_from_memory(course: &Course, progress: &ProgressInfo) -> bool {
 
     // Check average score meets minimum
     let avg = average_quiz_score_from_memory(progress);
-    avg >= chainlearn_shared::MIN_CREDENTIAL_SCORE
-        && progress.modules_completed.len() >= course.total_modules
+    let completed = count_completed_modules(env, learner, course_id);
+    avg >= chainlearn_shared::MIN_CREDENTIAL_SCORE && completed >= course.total_modules
 }
 
 #[contracterror]
@@ -195,11 +201,16 @@ impl ProgressTracker {
         learner.require_auth();
 
         // Verify course exists
-        let _course: Course = env
+        let course: Course = env
             .storage()
             .persistent()
             .get(&DataKey::Course(course_id.clone()))
             .expect("course not found");
+
+        // Verify course has at least one module (#80)
+        if course.total_modules == 0 {
+            panic!("course has no modules");
+        }
 
         // Check not already enrolled
         let key = DataKey::Progress(learner.clone(), course_id.clone());
@@ -209,7 +220,6 @@ impl ProgressTracker {
 
         let progress = ProgressInfo {
             enrolled_at: env.ledger().timestamp(),
-            modules_completed: Vec::new(&env),
             quiz_scores: Vec::new(&env),
             overall_progress: 0,
             eligible_for_credential: false,
@@ -244,7 +254,7 @@ impl ProgressTracker {
             panic!("module already completed");
         }
 
-        // Verify module exists in course
+        // Verify module exists in course and enforce ordering (#81)
         let modules: Vec<Symbol> = env
             .storage()
             .persistent()
@@ -255,9 +265,30 @@ impl ProgressTracker {
             panic!("module not found in course");
         }
 
+        // Enforce sequential ordering: module at index N requires module N-1 completed
+        let mut module_index: Option<u32> = None;
+        for (i, m) in modules.iter().enumerate() {
+            if m == module_id {
+                module_index = Some(i as u32);
+                break;
+            }
+        }
+        if let Some(idx) = module_index {
+            if idx > 0 {
+                let prev_module = modules.get(idx - 1).unwrap();
+                let prev_key = DataKey::ModuleCompleted(
+                    learner.clone(),
+                    course_id.clone(),
+                    prev_module.clone(),
+                );
+                if !env.storage().persistent().has(&prev_key) {
+                    panic!("previous module not completed");
+                }
+            }
+        }
+
         // Mark module as completed
         env.storage().persistent().set(&completed_key, &true);
-        progress.modules_completed.push_back(module_id.clone());
 
         // Recalculate progress
         let course: Course = env
@@ -342,7 +373,7 @@ impl ProgressTracker {
         progress.overall_progress =
             calculate_progress_from_memory(&env, &learner, &course_id, &course, &progress);
         progress.eligible_for_credential =
-            is_eligible_from_memory(&course, &progress);
+            is_eligible_from_memory(&env, &learner, &course_id, &course, &progress);
 
         // Single write with all updated fields
         env.storage().persistent().set(
@@ -486,7 +517,6 @@ mod tests {
 
         assert_eq!(progress.overall_progress, 0);
         assert!(!progress.eligible_for_credential);
-        assert_eq!(progress.modules_completed.len(), 0);
     }
 
     #[test]
@@ -503,7 +533,6 @@ mod tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
 
         let progress = client.get_progress(&learner, &course_id);
-        assert_eq!(progress.modules_completed.len(), 1);
         assert!(progress.overall_progress > 0);
     }
 

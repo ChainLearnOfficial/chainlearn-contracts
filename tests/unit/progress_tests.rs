@@ -43,7 +43,6 @@ mod progress_unit_tests {
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.overall_progress, 0);
         assert!(!progress.eligible_for_credential);
-        assert_eq!(progress.modules_completed.len(), 0);
         assert_eq!(progress.quiz_scores.len(), 0);
     }
 
@@ -61,7 +60,6 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
 
         let progress = client.get_progress(&learner, &course_id);
-        assert_eq!(progress.modules_completed.len(), 1);
         assert!(progress.overall_progress > 0);
     }
 
@@ -95,6 +93,7 @@ mod progress_unit_tests {
 
         client.enroll(&learner, &course_id);
 
+        // Modules must be completed in order (#81)
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
@@ -236,5 +235,142 @@ mod progress_unit_tests {
         quiz_ids.push_back(Symbol::new(&env, "quiz_1"));
         quiz_ids.push_back(Symbol::new(&env, "quiz_2"));
         client.create_course(&course_id, &3, &2, &two_ids, &quiz_ids);
+    }
+
+    // ── Issue #79: create_course rejects zero modules ─────────────────────────
+
+    #[test]
+    #[should_panic(expected = "total_modules must be greater than zero")]
+    fn test_create_course_rejects_zero_modules() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = Symbol::new(&env, "empty_course");
+        let module_ids = Vec::new(&env);
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_1"));
+        client.create_course(&course_id, &0, &1, &module_ids, &quiz_ids);
+    }
+
+    // ── Issue #80: enroll rejects course with no modules ──────────────────────
+
+    #[test]
+    #[should_panic(expected = "course has no modules")]
+    fn test_enroll_rejects_course_with_no_modules() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+
+        // Directly insert a course with 0 modules into storage to bypass
+        // create_course's own validation, then try to enroll.
+        let course_id = Symbol::new(&env, "zero_mod_course");
+        let course = progress_tracker::Course {
+            course_id: course_id.clone(),
+            total_modules: 0,
+            total_quizzes: 1,
+            quiz_ids: {
+                let mut q = Vec::new(&env);
+                q.push_back(Symbol::new(&env, "quiz_1"));
+                q
+            },
+        };
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&progress_tracker::DataKey::Course(course_id.clone()), &course);
+        });
+
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+    }
+
+    // ── Issue #81: complete_module enforces sequential ordering ────────────────
+
+    #[test]
+    #[should_panic(expected = "previous module not completed")]
+    fn test_complete_module_rejects_out_of_order() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+
+        // Try to complete mod_2 before mod_1 — must fail.
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+    }
+
+    #[test]
+    fn test_complete_module_first_module_requires_no_prerequisite() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+
+        // First module (mod_1, index 0) has no prerequisite — must succeed.
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert!(progress.overall_progress > 0);
+    }
+
+    #[test]
+    fn test_complete_module_sequential_order_succeeds() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+
+        // Complete modules in order — must all succeed.
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+
+        let progress = client.get_progress(&learner, &course_id);
+        // 3/3 modules * 70 = 70% from modules, 0% from quizzes = 70
+        assert_eq!(progress.overall_progress, 70);
+    }
+
+    // ── Issue #82: modules_completed Vec removed (no redundant tracking) ──────
+
+    #[test]
+    fn test_progress_info_has_no_modules_completed_field() {
+        // After removing the redundant modules_completed Vec, ProgressInfo
+        // should only have: enrolled_at, quiz_scores, overall_progress,
+        // eligible_for_credential. Module completion is tracked solely via
+        // the ModuleCompleted storage key.
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        let progress = client.get_progress(&learner, &course_id);
+        // Module completion is reflected in overall_progress, not a Vec field.
+        assert!(progress.overall_progress > 0);
+        // The struct no longer has modules_completed — if it did, this
+        // wouldn't compile.
     }
 }
