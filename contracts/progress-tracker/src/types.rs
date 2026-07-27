@@ -41,13 +41,19 @@ pub struct QuizResult {
 }
 
 /// A learner's progress in a specific course.
+///
+/// Individual quiz submissions are stored under [`DataKey::QuizResult`]; this
+/// struct only keeps the aggregates needed to derive progress and eligibility,
+/// so a quiz result is never written twice.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgressInfo {
     /// When the learner enrolled.
     pub enrolled_at: u64,
-    /// Quiz results for this course.
-    pub quiz_scores: Vec<QuizResult>,
+    /// Number of quizzes submitted for this course.
+    pub quizzes_submitted: u32,
+    /// Sum of every submitted quiz score, used to derive the average.
+    pub total_quiz_score: u64,
     /// Overall progress percentage (0-100).
     pub overall_progress: u32,
     /// Whether the learner qualifies for a credential.
