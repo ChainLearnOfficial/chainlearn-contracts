@@ -39,6 +39,23 @@ impl ProgressTracker {
     /// * `total_quizzes` - Number of quizzes in the course
     /// * `module_ids` - List of module identifiers (must not contain duplicates)
     /// * `quiz_ids` - List of valid quiz identifiers
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let env = Env::default();
+    /// let admin = Address::generate(&env);
+    /// let client = ProgressTrackerClient::new(&env, &contract_id);
+    /// client.initialize(&admin);
+    ///
+    /// let mut modules = Vec::new(&env);
+    /// modules.push_back(Symbol::new(&env, "basics"));
+    /// modules.push_back(Symbol::new(&env, "ownership"));
+    /// let mut quizzes = Vec::new(&env);
+    /// quizzes.push_back(Symbol::new(&env, "quiz_1"));
+    ///
+    /// client.create_course(&Symbol::new(&env, "rust_101"), &2, &1, &modules, &quizzes);
+    /// ```
     pub fn create_course(
         env: Env,
         course_id: Symbol,
@@ -109,6 +126,17 @@ impl ProgressTracker {
     /// # Arguments
     /// * `learner` - The learner address (must authorize)
     /// * `course_id` - The course to enroll in
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let learner = Address::generate(&env);
+    /// env.mock_all_auths();
+    /// client.enroll(&learner, &Symbol::new(&env, "rust_101"));
+    /// let progress = client.get_progress(&learner, &Symbol::new(&env, "rust_101"));
+    /// assert_eq!(progress.overall_progress, 0);
+    /// assert!(!progress.eligible_for_credential);
+    /// ```
     pub fn enroll(env: Env, learner: Address, course_id: Symbol) {
         learner.require_auth();
 
@@ -152,6 +180,18 @@ impl ProgressTracker {
     /// * `learner` - The learner address (must authorize)
     /// * `course_id` - The course the module belongs to
     /// * `module_id` - The module to mark complete
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// client.enroll(&learner, &course_id);
+    /// client.complete_module(&learner, &course_id, &Symbol::new(&env, "basics"));
+    /// let progress = client.get_progress(&learner, &course_id);
+    /// assert!(progress.overall_progress > 0);
+    /// ```
     pub fn complete_module(env: Env, learner: Address, course_id: Symbol, module_id: Symbol) {
         learner.require_auth();
 
@@ -242,6 +282,19 @@ impl ProgressTracker {
     /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - The quiz identifier
     /// * `score` - The score achieved (0-100)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// client.enroll(&learner, &course_id);
+    /// client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+    /// let progress = client.get_progress(&learner, &course_id);
+    /// assert_eq!(progress.quizzes_submitted, 1);
+    /// assert_eq!(progress.total_quiz_score, 85);
+    /// ```
     pub fn submit_quiz_score(
         env: Env,
         learner: Address,
@@ -337,6 +390,20 @@ impl ProgressTracker {
     ///
     /// # Returns
     /// The `ProgressInfo` for the learner in the given course.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// client.enroll(&learner, &course_id);
+    /// client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+    /// client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+    /// let progress = client.get_progress(&learner, &course_id);
+    /// assert!(progress.overall_progress > 0);
+    /// assert_eq!(progress.quizzes_submitted, 1);
+    /// ```
     pub fn get_progress(env: Env, learner: Address, course_id: Symbol) -> ProgressInfo {
         env.storage()
             .persistent()
@@ -377,6 +444,25 @@ impl ProgressTracker {
     /// # Arguments
     /// * `learner` - The learner address
     /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// `true` if the learner qualifies for a credential.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// client.enroll(&learner, &course_id);
+    /// assert!(!client.is_eligible_for_credential(&learner, &course_id));
+    ///
+    /// client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+    /// client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+    /// client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &75);
+    /// client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &75);
+    /// assert!(client.is_eligible_for_credential(&learner, &course_id));
+    /// ```
     ///
     /// # Panics
     /// * If the learner is not enrolled in the course
