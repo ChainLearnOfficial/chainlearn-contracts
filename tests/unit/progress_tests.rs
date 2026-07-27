@@ -1,7 +1,10 @@
 //! Unit tests for the progress-tracker contract.
 
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
+use soroban_sdk::{
+    testutils::{Address as _, Events as _, Ledger as _},
+    vec, Address, Env, IntoVal, Symbol, Vec,
+};
 
 #[cfg(test)]
 mod progress_unit_tests {
@@ -273,6 +276,7 @@ mod progress_unit_tests {
             course_id: course_id.clone(),
             total_modules: 0,
             total_quizzes: 1,
+            module_ids: Vec::new(&env),
             quiz_ids: {
                 let mut q = Vec::new(&env);
                 q.push_back(Symbol::new(&env, "quiz_1"));
@@ -502,6 +506,163 @@ mod progress_unit_tests {
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &70);
 
+        assert!(client.is_eligible_for_credential(&learner, &course_id));
+    }
+
+    // ── Issue #95: enroll event carries the enrollment timestamp ──────────────
+
+    #[test]
+    fn test_enroll_event_includes_timestamp() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        env.ledger().with_mut(|l| l.timestamp = 12345);
+        client.enroll(&learner, &course_id);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.enrolled_at, 12345);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (soroban_sdk::symbol_short!("enrolled"),).into_val(&env),
+                    (learner, course_id, 12345u64).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    // ── Issue #96: credential_eligible fires exactly on the false→true flip ───
+
+    #[test]
+    fn test_credential_eligible_event_emitted_on_flip_to_true() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+
+        // Not yet eligible (mod_3 and both quizzes are still missing) — the
+        // last event so far must be module_completed, not credential_eligible.
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "module_completed"),).into_val(&env),
+                    (
+                        learner.clone(),
+                        course_id.clone(),
+                        Symbol::new(&env, "mod_2"),
+                    )
+                        .into_val(&env),
+                )
+            ]
+        );
+        let events_before_eligible = all.len();
+
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        // The submission that completes every requirement must publish
+        // credential_eligible as the final event.
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &70);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
+                    (learner, course_id).into_val(&env),
+                )
+            ]
+        );
+        // module_completed + quiz_submitted x2 + credential_eligible = 4 new events.
+        assert_eq!(all.len(), events_before_eligible + 4);
+    }
+
+    // ── Issue #97: complete_module reads Course once (module_ids included) ────
+
+    #[test]
+    fn test_course_carries_module_ids_for_single_read() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        // Course itself now carries module_ids (mirroring quiz_ids), so
+        // complete_module no longer needs a second storage key just to look
+        // up the module list.
+        let course = client.get_course(&course_id);
+        assert_eq!(course.module_ids.len(), 3);
+        assert_eq!(course.module_ids.get(0).unwrap(), Symbol::new(&env, "mod_1"));
+        assert_eq!(course.module_ids.get(1).unwrap(), Symbol::new(&env, "mod_2"));
+        assert_eq!(course.module_ids.get(2).unwrap(), Symbol::new(&env, "mod_3"));
+
+        // Ordering/ existence checks driven by Course::module_ids still work.
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        let progress = client.get_progress(&learner, &course_id);
+        assert!(progress.overall_progress > 0);
+    }
+
+    // ── Issue #98: is_eligible_for_credential serves the cached field ─────────
+
+    #[test]
+    fn test_is_eligible_for_credential_returns_cached_field() {
+        // eligible_for_credential is maintained on every write that could
+        // change it, so the public getter should simply return the stored
+        // value rather than re-deriving it from Course + ModuleCompleted on
+        // every read. Pin that by mutating the stored ProgressInfo directly
+        // and confirming the getter reflects it without any further writes.
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        assert!(!client.is_eligible_for_credential(&learner, &course_id));
+
+        let mut progress = client.get_progress(&learner, &course_id);
+        progress.eligible_for_credential = true;
+        env.as_contract(&contract_id, || {
+            env.storage().persistent().set(
+                &progress_tracker::DataKey::Progress(learner.clone(), course_id.clone()),
+                &progress,
+            );
+        });
+
+        // No module or quiz was actually completed -- if this recomputed from
+        // scratch it would still report false. It must report the cached
+        // field instead.
         assert!(client.is_eligible_for_credential(&learner, &course_id));
     }
 }
