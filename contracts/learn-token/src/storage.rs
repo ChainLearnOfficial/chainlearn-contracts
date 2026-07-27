@@ -110,6 +110,30 @@ pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
     }
 }
 
+/// Check if an allowance exists and is expired.
+/// Returns (exists, expired, expiration_ledger).
+pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
+    let key = AllowanceKey {
+        owner: owner.clone(),
+        spender: spender.clone(),
+    };
+    let data_key = DataKey::Allowance(key);
+    match env
+        .storage()
+        .persistent()
+        .get::<DataKey, AllowanceData>(&data_key)
+    {
+        Some(data) => {
+            let is_expired = env.ledger().sequence() > data.expiration_ledger;
+            if is_expired {
+                env.storage().persistent().remove(&data_key);
+            }
+            (true, is_expired, data.expiration_ledger)
+        }
+        None => (false, false, 0),
+    }
+}
+
 /// Set the allowance for an owner-spender pair with an expiration ledger.
 pub fn set_allowance(
     env: &Env,

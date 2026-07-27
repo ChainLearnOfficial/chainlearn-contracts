@@ -173,6 +173,11 @@ impl LearnToken {
             panic!("negative amount");
         }
 
+        let (exists, is_expired, expiration_ledger) = storage::check_allowance_expired(&env, &from, &spender);
+        if exists && is_expired {
+            events::allowance_expired(&env, &from, &spender, expiration_ledger);
+        }
+
         let allowance = storage::get_allowance(&env, &from, &spender);
         if allowance < amount {
             panic!("insufficient allowance");
@@ -188,7 +193,7 @@ impl LearnToken {
         let to_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, to_balance + amount);
 
-        events::transfer(&env, &from, &to, amount);
+        events::transfer_from(&env, &spender, &from, &to, amount);
     }
 
     /// Approve a spender to spend tokens on behalf of the caller.
@@ -220,7 +225,14 @@ impl LearnToken {
     }
 
     /// Returns the allowance for a spender on behalf of an owner.
+    /// Emits an allowance_expired event if the allowance has expired.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
+        let (exists, is_expired, expiration_ledger) = storage::check_allowance_expired(&env, &owner, &spender);
+
+        if exists && is_expired {
+            events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+        }
+
         storage::get_allowance(&env, &owner, &spender)
     }
 
@@ -298,7 +310,7 @@ impl LearnToken {
         // Mark reward as claimed to prevent double-claiming
         storage::set_reward_claimed(&env, &learner, &quiz_id);
 
-        events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount);
+        events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
 
         reward_amount
     }

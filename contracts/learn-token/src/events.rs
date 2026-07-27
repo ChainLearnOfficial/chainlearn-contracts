@@ -2,6 +2,8 @@ use soroban_sdk::{Address, Env, Symbol};
 
 /// Emitted when a learner claims a reward for completing a quiz.
 ///
+/// Topics: ["reward_claimed"]
+/// Data: (learner, quiz_id, score, reward_amount, course_id)
 /// Topics: ["reward"]
 /// Data: (learner, quiz_id, score, reward_amount)
 pub fn reward_claimed(
@@ -10,21 +12,31 @@ pub fn reward_claimed(
     quiz_id: &Symbol,
     score: u32,
     reward_amount: i128,
+    course_id: &Symbol,
 ) {
     // Symbol::new (not symbol_short!) so topic construction matches
     // progress-tracker and credential-nft, which indexers rely on (#118).
     let topics = (Symbol::new(env, "reward"),);
     env.events()
-        .publish(topics, (learner, quiz_id, score, reward_amount));
+        .publish(topics, (learner, quiz_id, score, reward_amount, course_id));
 }
 
-/// Emitted when tokens are transferred.
+/// Emitted when tokens are transferred directly.
 ///
 /// Topics: ["transfer"]
 /// Data: (from, to, amount)
 pub fn transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
     let topics = (Symbol::new(env, "transfer"),);
     env.events().publish(topics, (from, to, amount));
+}
+
+/// Emitted when tokens are transferred on behalf of another address (delegated).
+///
+/// Topics: ["transfer_from"]
+/// Data: (spender, from, to, amount)
+pub fn transfer_from(env: &Env, spender: &Address, from: &Address, to: &Address, amount: i128) {
+    let topics = (Symbol::new(env, "transfer_from"),);
+    env.events().publish(topics, (spender, from, to, amount));
 }
 
 /// Emitted when tokens are minted.
@@ -59,4 +71,19 @@ pub fn approve(
 pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
     let topics = (Symbol::new(env, "progress"),);
     env.events().publish(topics, (new_address,));
+}
+
+/// Emitted when an allowance expires or is accessed after expiration.
+///
+/// Topics: ["allowance_expired"]
+/// Data: (owner, spender, expiration_ledger)
+pub fn allowance_expired(
+    env: &Env,
+    owner: &Address,
+    spender: &Address,
+    expiration_ledger: u32,
+) {
+    let topics = (Symbol::new(env, "allowance_expired"),);
+    env.events()
+        .publish(topics, (owner, spender, expiration_ledger));
 }
