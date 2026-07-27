@@ -43,7 +43,8 @@ mod progress_unit_tests {
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.overall_progress, 0);
         assert!(!progress.eligible_for_credential);
-        assert_eq!(progress.quiz_scores.len(), 0);
+        assert_eq!(progress.quizzes_submitted, 0);
+        assert_eq!(progress.total_quiz_score, 0);
     }
 
     #[test]
@@ -77,8 +78,8 @@ mod progress_unit_tests {
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
 
         let progress = client.get_progress(&learner, &course_id);
-        assert_eq!(progress.quiz_scores.len(), 1);
-        assert_eq!(progress.quiz_scores.get(0).unwrap().score, 85);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 85);
     }
 
     #[test]
@@ -372,5 +373,135 @@ mod progress_unit_tests {
         assert!(progress.overall_progress > 0);
         // The struct no longer has modules_completed — if it did, this
         // wouldn't compile.
+    }
+
+    // ── Issue #83: quiz results are stored once, not in two places ────────────
+
+    #[test]
+    fn test_quiz_result_stored_only_under_quiz_key() {
+        // A submitted quiz lives in DataKey::QuizResult; ProgressInfo keeps
+        // only the aggregates derived from it. If the struct still carried a
+        // quiz_scores Vec, this wouldn't compile.
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+
+        // The full result is still retrievable from its own storage key.
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            85
+        );
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 85);
+    }
+
+    #[test]
+    fn test_quiz_aggregates_accumulate_across_submissions() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &60);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &90);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 2);
+        assert_eq!(progress.total_quiz_score, 150);
+        // Average 75 → 75 * 30 / 100 = 22 from quizzes, 0 modules completed.
+        assert_eq!(progress.overall_progress, 22);
+    }
+
+    // ── Issues #84/#85: read-only getters do not clone their arguments ────────
+
+    #[test]
+    fn test_read_only_getters_return_stored_values() {
+        // get_progress and get_quiz_score move their arguments into the
+        // storage key rather than cloning them. Behaviour is unchanged; this
+        // pins it so the clone-free reads stay correct.
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &70);
+
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            70
+        );
+        assert_eq!(client.get_progress(&learner, &course_id).quizzes_submitted, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "quiz not submitted")]
+    fn test_get_quiz_score_rejects_unsubmitted_quiz() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
+    }
+
+    // ── Issue #86: is_eligible_for_credential requires enrollment ─────────────
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_eligibility_rejects_unenrolled_learner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        // Never enrolled — must fail before any course data is read.
+        client.is_eligible_for_credential(&learner, &course_id);
+    }
+
+    #[test]
+    fn test_eligibility_for_enrolled_learner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        // Enrolled but nothing completed yet.
+        assert!(!client.is_eligible_for_credential(&learner, &course_id));
+
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &70);
+
+        assert!(client.is_eligible_for_credential(&learner, &course_id));
     }
 }

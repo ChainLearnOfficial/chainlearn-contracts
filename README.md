@@ -208,12 +208,17 @@ soroban contract invoke --id <CREDENTIAL_ID> -- mint_credential \
 ```rust
 struct ProgressInfo {
     enrolled_at: u64,           // Timestamp of enrollment
-    modules_completed: Vec<Symbol>,  // Completed module IDs
-    quiz_scores: Vec<QuizResult>,    // Quiz submission results
+    quizzes_submitted: u32,     // Number of quizzes submitted
+    total_quiz_score: u64,      // Sum of submitted scores (average is derived)
     overall_progress: u32,      // Progress percentage (0-100)
     eligible_for_credential: bool,   // Qualifies for credential
 }
 ```
+
+Module completion and individual quiz submissions are not duplicated here:
+they are stored once, under the `ModuleCompleted` and `QuizResult` storage
+keys. Use `get_quiz_score(learner, course_id, quiz_id)` to read a single
+result.
 
 ### CredentialInfo
 
