@@ -49,3 +49,12 @@ pub fn approve(
     env.events()
         .publish(topics, (owner, spender, amount, expiration_ledger));
 }
+
+/// Emitted when the progress-tracker address is updated (#75).
+///
+/// Topics: ["progress_tracker"]
+/// Data: (new_address,)
+pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
+    let topics = (symbol_short!("progress"),);
+    env.events().publish(topics, (new_address,));
+}

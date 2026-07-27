@@ -7,6 +7,10 @@ use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, String as SorobanString, Symbol};
 use soroban_token_sdk::metadata::TokenMetadata;
 
+/// Maximum reward tokens that can be minted in a single claim (#78).
+/// Caps at MAX_QUIZ_SCORE * BASE_REWARD_PER_POINT (100 * 100 = 10_000).
+const MAX_REWARD_AMOUNT: i128 = (MAX_QUIZ_SCORE as i128) * BASE_REWARD_PER_POINT;
+
 #[soroban_sdk::contractclient(name = "ProgressTrackerClient")]
 pub trait ProgressTrackerInterface {
     fn get_quiz_score(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> u32;
@@ -17,6 +21,8 @@ pub trait ProgressTrackerInterface {
 #[repr(u32)]
 pub enum ContractError {
     AlreadyInitialized = 0,
+    ZeroAddress = 1,
+    RewardCapped = 2,
 }
 
 /// SEP-41 compliant fungible token contract for ChainLearn rewards.
@@ -119,6 +125,12 @@ impl LearnToken {
             return;
         }
 
+        // Prevent transfers to the contract itself, which would lock tokens
+        // irretrievably (#76).
+        if to == env.current_contract_address() {
+            panic!("cannot transfer to contract");
+        }
+
         if amount < 0 {
             panic!("negative amount");
         }
@@ -147,6 +159,12 @@ impl LearnToken {
 
         if from == to {
             return;
+        }
+
+        // Prevent transfers to the contract itself, which would lock tokens
+        // irretrievably (#76).
+        if to == env.current_contract_address() {
+            panic!("cannot transfer to contract");
         }
 
         if amount < 0 {
@@ -258,6 +276,12 @@ impl LearnToken {
 
         let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
 
+        // Cap the maximum reward to prevent excessively large minting if
+        // MAX_QUIZ_SCORE or BASE_REWARD_PER_POINT change in the future (#78).
+        if reward_amount > MAX_REWARD_AMOUNT {
+            panic!("reward exceeds cap");
+        }
+
         // Mint tokens to the learner
         let current_balance = storage::get_balance(&env, &learner);
         storage::set_balance(&env, &learner, current_balance + reward_amount);
@@ -289,12 +313,96 @@ impl LearnToken {
         admin.require_auth();
         storage::set_admin(&env, &new_admin);
     }
+
+    /// Update the progress-tracker contract address. Admin only.
+    ///
+    /// Required when the progress-tracker contract is upgraded or redeployed.
+    /// Without this, the learn-token becomes permanently broken after a
+    /// progress-tracker upgrade (#75).
+    ///
+    /// # Arguments
+    /// * `new_progress_tracker` - The new progress-tracker contract address
+    pub fn set_progress_tracker(env: Env, new_progress_tracker: Address) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        storage::set_progress_tracker(&env, &new_progress_tracker);
+        events::progress_tracker_updated(&env, &new_progress_tracker);
+    }
+
+    /// Increase the allowance for a spender (#77).
+    ///
+    /// Unlike `approve()`, this adds to the existing allowance rather than
+    /// overwriting it, preventing the front-running vulnerability where a
+    /// spender spends the old allowance before the new one takes effect.
+    ///
+    /// # Arguments
+    /// * `owner` - Token owner (must authorize)
+    /// * `spender` - Address whose allowance to increase
+    /// * `additional_amount` - Amount to add to the current allowance
+    /// * `expiration_ledger` - New expiration ledger (replaces old)
+    pub fn increase_allowance(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        additional_amount: i128,
+        expiration_ledger: u32,
+    ) {
+        owner.require_auth();
+
+        if additional_amount < 0 {
+            panic!("negative amount");
+        }
+
+        let current = storage::get_allowance(&env, &owner, &spender);
+        let new_amount = current + additional_amount;
+        storage::set_allowance(&env, &owner, &spender, new_amount, expiration_ledger);
+        events::approve(&env, &owner, &spender, new_amount, expiration_ledger);
+    }
+
+    /// Decrease the allowance for a spender (#77).
+    ///
+    /// Allows a granular reduction of the allowance without resetting it.
+    ///
+    /// # Arguments
+    /// * `owner` - Token owner (must authorize)
+    /// * `spender` - Address whose allowance to decrease
+    /// * `decrease_amount` - Amount to subtract from the current allowance
+    pub fn decrease_allowance(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        decrease_amount: i128,
+    ) {
+        owner.require_auth();
+
+        if decrease_amount < 0 {
+            panic!("negative amount");
+        }
+
+        let current = storage::get_allowance(&env, &owner, &spender);
+        if decrease_amount > current {
+            panic!("decrease exceeds allowance");
+        }
+        let new_amount = current - decrease_amount;
+        // Preserve existing expiration
+        let key = storage::AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        };
+        let data: storage::AllowanceData = env
+            .storage()
+            .persistent()
+            .get(&storage::DataKey::Allowance(key.clone()))
+            .expect("allowance not set");
+        storage::set_allowance(&env, &owner, &spender, new_amount, data.expiration_ledger);
+        events::approve(&env, &owner, &spender, new_amount, data.expiration_ledger);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Vec};
+    use soroban_sdk::{testutils::Address as _, Address, Env, IntoVal, String as SorobanString, Vec};
 
     fn setup(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
@@ -434,5 +542,180 @@ mod tests {
         let course_id = Symbol::new(&env, "math_101");
         let quiz_id = Symbol::new(&env, "quiz_math_101");
         client.claim_reward(&learner, &course_id, &quiz_id);
+    }
+
+    // ── #75: set_progress_tracker ────────────────────────────────────────────
+
+    #[test]
+    fn test_set_progress_tracker_updates_address() {
+        let env = Env::default();
+        let (admin, lt_contract_id, _old_pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        env.mock_all_auths();
+
+        // Create a new progress-tracker (simulating an upgrade)
+        let new_pt_id = env.register_contract(None, progress_tracker::ProgressTracker);
+        let new_pt_client = progress_tracker::ProgressTrackerClient::new(&env, &new_pt_id);
+        new_pt_client.initialize(&admin);
+
+        // Update the learn-token to point to the new progress-tracker
+        client.set_progress_tracker(&new_pt_id);
+
+        // Verify rewards now query the new progress-tracker
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_new");
+        let quiz_id = Symbol::new(&env, "quiz_new");
+
+        // Submit quiz on the NEW progress-tracker
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(quiz_id.clone());
+        new_pt_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+        new_pt_client.enroll(&learner, &course_id);
+        new_pt_client.submit_quiz_score(&learner, &course_id, &quiz_id, &90);
+
+        // Claim reward — should succeed using the new progress-tracker
+        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        assert_eq!(reward, 9000); // 90 * 100
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_progress_tracker_requires_admin() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let stranger = Address::generate(&env);
+        let fake_pt = Address::generate(&env);
+
+        // Only authorize a stranger — admin auth is missing, must panic
+        env.mock_auths(&[]);
+        client.set_progress_tracker(&fake_pt);
+    }
+
+    // ── #76: transfer to contract address ───────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "cannot transfer to contract")]
+    fn test_transfer_to_contract_address_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&alice, &500);
+        // Attempt to transfer to the contract itself — must panic
+        client.transfer(&alice, &lt_contract_id, &200);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot transfer to contract")]
+    fn test_transfer_from_to_contract_address_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &500, &999999);
+
+        // Attempt transfer_from to the contract itself — must panic
+        client.transfer_from(&spender, &owner, &lt_contract_id, &200);
+    }
+
+    // ── #77: increase_allowance / decrease_allowance ─────────────────────────
+
+    #[test]
+    fn test_increase_allowance_adds_to_existing() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &100, &999999);
+        assert_eq!(client.allowance(&owner, &spender), 100);
+
+        client.increase_allowance(&owner, &spender, &50, &999999);
+        assert_eq!(client.allowance(&owner, &spender), 150);
+    }
+
+    #[test]
+    fn test_decrease_allowance_subtracts_from_existing() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &200, &999999);
+        client.decrease_allowance(&owner, &spender, &80);
+        assert_eq!(client.allowance(&owner, &spender), 120);
+    }
+
+    #[test]
+    #[should_panic(expected = "decrease exceeds allowance")]
+    fn test_decrease_allowance_below_zero_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &50, &999999);
+        client.decrease_allowance(&owner, &spender, &100); // exceeds 50
+    }
+
+    #[test]
+    fn test_increase_then_decrease_allowance_roundtrip() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &100, &999999);
+        client.increase_allowance(&owner, &spender, &200, &999999);
+        assert_eq!(client.allowance(&owner, &spender), 300);
+
+        client.decrease_allowance(&owner, &spender, &150);
+        assert_eq!(client.allowance(&owner, &spender), 150);
+    }
+
+    // ── #78: reward cap ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_claim_reward_at_max_score_succeeds() {
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 100);
+
+        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        // 100 * 100 = 10_000 (equals MAX_REWARD_AMOUNT)
+        assert_eq!(reward, 10_000);
     }
 }
