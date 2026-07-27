@@ -106,6 +106,17 @@ pub fn mint_credential(
     // Store the course-credential mapping to prevent duplicates
     env.storage().persistent().set(&dup_key, &credential_id);
 
+    // Index credentials by course for reverse lookup (#105)
+    let mut course_creds: soroban_sdk::Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::CourseCredentials(course_id.clone()))
+        .unwrap_or(soroban_sdk::Vec::new(env));
+    course_creds.push_back(credential_id);
+    env.storage()
+        .persistent()
+        .set(&DataKey::CourseCredentials(course_id.clone()), &course_creds);
+
     // Emit mint event. `metadata_uri` is included so indexers can reconstruct the
     // full credential metadata from the event stream alone (#101).
     env.events().publish(

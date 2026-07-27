@@ -107,6 +107,20 @@ impl CredentialNft {
         verify::get_credential_count(&env, &learner)
     }
 
+    /// Get all credential IDs for a given course (reverse lookup).
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier to look up
+    ///
+    /// # Returns
+    /// A vector of credential IDs issued for this course.
+    pub fn get_credentials_by_course(env: Env, course_id: Symbol) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CourseCredentials(course_id))
+            .unwrap_or(Vec::new(&env))
+    }
+
     /// Check if a credential is valid (exists and not revoked).
     ///
     /// # Arguments
@@ -326,6 +340,68 @@ mod tests {
             &0,
             &(chainlearn_shared::MAX_CREDENTIALS_PAGE_SIZE + 1),
         );
+    }
+
+    // ── Issue #105: reverse lookup from course_id to credentials ──────────
+
+    #[test]
+    fn test_get_credentials_by_course_returns_minted() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner1 = Address::generate(&env);
+        let learner2 = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course = Symbol::new(&env, "rust_101");
+        let other_course = Symbol::new(&env, "web3_202");
+        let uri = Symbol::new(&env, "ipfs://meta");
+
+        let id1 = client.mint_credential(&learner1, &course, &80, &uri);
+        let id2 = client.mint_credential(&learner2, &course, &90, &uri);
+        client.mint_credential(&learner1, &other_course, &70, &uri);
+
+        let course_creds = client.get_credentials_by_course(&course);
+        assert_eq!(course_creds.len(), 2);
+        assert!(course_creds.contains(&id1));
+        assert!(course_creds.contains(&id2));
+    }
+
+    #[test]
+    fn test_get_credentials_by_course_unknown_returns_empty() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let unknown_course = Symbol::new(&env, "nonexistent");
+        let creds = client.get_credentials_by_course(&unknown_course);
+        assert_eq!(creds.len(), 0);
+    }
+
+    #[test]
+    fn test_get_credentials_by_course_multiple_courses() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_a = Symbol::new(&env, "course_a");
+        let course_b = Symbol::new(&env, "course_b");
+        let uri = Symbol::new(&env, "ipfs://meta");
+
+        let id_a = client.mint_credential(&learner, &course_a, &85, &uri);
+        let id_b = client.mint_credential(&learner, &course_b, &75, &uri);
+
+        let a_creds = client.get_credentials_by_course(&course_a);
+        assert_eq!(a_creds.len(), 1);
+        assert_eq!(a_creds.get(0).unwrap(), id_a);
+
+        let b_creds = client.get_credentials_by_course(&course_b);
+        assert_eq!(b_creds.len(), 1);
+        assert_eq!(b_creds.get(0).unwrap(), id_b);
     }
 
     #[test]
