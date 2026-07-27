@@ -71,6 +71,14 @@ echo "Network:           $NETWORK"
 echo "Admin Address:     $ADMIN_ADDRESS"
 echo ""
 
+echo "Verifying RPC reachability..."
+if ! curl -s --max-time 10 "$RPC_URL" > /dev/null; then
+    echo "Error: RPC endpoint $RPC_URL is not reachable."
+    exit 1
+fi
+echo "RPC reachable."
+echo ""
+
 # Initialize learn-token
 echo "[1/3] Initializing learn-token..."
 soroban contract invoke \

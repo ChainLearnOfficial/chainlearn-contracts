@@ -49,6 +49,14 @@ echo "Network:  $NETWORK"
 echo "RPC URL:  $RPC_URL"
 echo ""
 
+echo "Verifying RPC reachability..."
+if ! curl -s --max-time 10 "$RPC_URL" > /dev/null; then
+    echo "Error: RPC endpoint $RPC_URL is not reachable."
+    exit 1
+fi
+echo "RPC reachable."
+echo ""
+
 DEPLOY_FILE="deployments-${NETWORK}.json"
 if [ -f "$DEPLOY_FILE" ]; then
     echo "Error: Deployment already exists in $DEPLOY_FILE"
