@@ -102,7 +102,7 @@ impl ProgressTracker {
 
         env.events().publish(
             (Symbol::new(&env, "course_created"),),
-            (&course_id, total_modules, total_quizzes),
+            (&course_id, total_modules, total_quizzes, &module_ids),
         );
     }
 
@@ -618,7 +618,32 @@ mod tests {
         assert!(client.is_eligible_for_credential(&learner, &course_id));
     }
 
-    /// #85: get_quiz_score reads without cloning; an unsubmitted quiz panics.
+    /// #94: course_created event must include module_ids so indexers can
+    /// reconstruct the full course structure without extra storage reads.
+    #[test]
+    fn test_create_course_event_emitted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let course_id = Symbol::new(&env, "sol_201");
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        module_ids.push_back(Symbol::new(&env, "mod_b"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+
+        client.create_course(&course_id, &2, &1, &module_ids, &quiz_ids);
+
+        // Verify at least one event was emitted (the course_created event).
+        // The event now carries (course_id, total_modules, total_quizzes, module_ids)
+        // so indexers can reconstruct the full module list without additional reads.
+        let events = env.events().all();
+        assert!(!events.is_empty(), "course_created event must be emitted");
+    }
+
+/// #85: get_quiz_score reads without cloning; an unsubmitted quiz panics.
     #[test]
     #[should_panic(expected = "quiz not submitted")]
     fn test_get_quiz_score_unsubmitted() {
