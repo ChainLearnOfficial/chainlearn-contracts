@@ -7,15 +7,15 @@ use crate::ProgressTrackerClient;
 /// Mint a new credential NFT for a learner.
 ///
 /// The credential is only minted if the learner's score meets the minimum
-/// threshold and the progress-tracker contract confirms the learner actually
-/// completed the course. Each learner can only receive one credential per
-/// course.
+/// threshold, matches the score the progress-tracker recorded, and the
+/// progress-tracker confirms the learner actually completed the course. Each
+/// learner can only receive one credential per course.
 ///
 /// # Arguments
 /// * `env` - Soroban environment
 /// * `to` - Learner address receiving the credential
 /// * `course_id` - Identifier of the completed course
-/// * `score` - Final score (must be >= 50)
+/// * `score` - Final score (must be >= 50 and match the tracker's record)
 /// * `metadata_uri` - URI to off-chain metadata
 ///
 /// # Returns
@@ -25,6 +25,7 @@ use crate::ProgressTrackerClient;
 /// * If score is below the minimum threshold
 /// * If the learner already has a credential for this course
 /// * If the progress-tracker reports the learner is not eligible
+/// * If score does not match the progress-tracker's verified score
 /// * If the credential ID counter would overflow `u64`
 pub fn mint_credential(
     env: &Env,
@@ -57,6 +58,19 @@ pub fn mint_credential(
     let tracker = ProgressTrackerClient::new(env, &progress_tracker);
     if !tracker.is_eligible_for_credential(to, course_id) {
         panic!("learner has not completed the course requirements");
+    }
+
+    // Score gate: the caller supplies a score, but the progress-tracker is the
+    // only authority on what the learner actually earned. Without this check a
+    // caller could mint a credential reading 100 for a learner who scored 50
+    // (#34). The tracker's value is the average across the learner's submitted
+    // quizzes for this course.
+    let verified_score = tracker.get_course_score(to, course_id);
+    if score != verified_score {
+        panic!(
+            "score {} does not match verified score {}",
+            score, verified_score
+        );
     }
 
     // Generate unique credential ID. The counter is checked so it can never wrap

@@ -367,6 +367,42 @@ impl ProgressTracker {
         result.score
     }
 
+    /// Get a learner's verified course score: the average across every quiz
+    /// they have submitted for the course, floored to a whole number.
+    ///
+    /// This is the on-chain source of truth for the score recorded on a
+    /// credential. The credential contract calls it before minting so a caller
+    /// cannot claim a score the learner never earned (#34).
+    ///
+    /// The aggregates it divides (`total_quiz_score`, `quizzes_submitted`) are
+    /// already maintained on every submission, so this stays a single read.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// The average submitted quiz score (0-100).
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    /// * If the learner has not submitted any quiz for the course
+    pub fn get_course_score(env: Env, learner: Address, course_id: Symbol) -> u32 {
+        let progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Progress(learner, course_id))
+            .expect("not enrolled");
+
+        if progress.quizzes_submitted == 0 {
+            panic!("no quizzes submitted");
+        }
+
+        // Both aggregates are bounded (score <= MAX_QUIZ_SCORE per quiz), so the
+        // average always fits back into u32.
+        (progress.total_quiz_score / progress.quizzes_submitted as u64) as u32
+    }
+
     /// Check if a learner is eligible for a credential.
     ///
     /// `eligible_for_credential` is kept up to date on every write that could
@@ -451,6 +487,106 @@ mod tests {
         quiz_ids.push_back(Symbol::new(env, "quiz_2"));
         client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
         course_id
+    }
+
+    // ── Issue #34: verified course score ─────────────────────────────────
+
+    #[test]
+    fn test_get_course_score_single_quiz() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &73);
+
+        assert_eq!(client.get_course_score(&learner, &course_id), 73);
+    }
+
+    #[test]
+    fn test_get_course_score_averages_submitted_quizzes() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &90);
+
+        assert_eq!(client.get_course_score(&learner, &course_id), 85);
+    }
+
+    #[test]
+    fn test_get_course_score_floors_the_average() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        // (80 + 91) / 2 = 85.5 -> 85
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &91);
+
+        assert_eq!(client.get_course_score(&learner, &course_id), 85);
+    }
+
+    #[test]
+    fn test_get_course_score_is_per_learner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let strong = Address::generate(&env);
+        let weak = Address::generate(&env);
+
+        client.enroll(&strong, &course_id);
+        client.enroll(&weak, &course_id);
+        client.submit_quiz_score(&strong, &course_id, &Symbol::new(&env, "quiz_1"), &95);
+        client.submit_quiz_score(&weak, &course_id, &Symbol::new(&env, "quiz_1"), &55);
+
+        assert_eq!(client.get_course_score(&strong, &course_id), 95);
+        assert_eq!(client.get_course_score(&weak, &course_id), 55);
+    }
+
+    #[test]
+    #[should_panic(expected = "no quizzes submitted")]
+    fn test_get_course_score_without_submissions_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // Enrolled but no quiz taken — there is no score to verify against.
+        client.get_course_score(&learner, &course_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_get_course_score_for_unenrolled_learner_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let stranger = Address::generate(&env);
+
+        client.get_course_score(&stranger, &course_id);
     }
 
     #[test]

@@ -7,10 +7,12 @@ mod verify;
 use metadata::{CredentialInfo, DataKey};
 use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 
-/// Subset of the progress-tracker interface used to verify course completion.
+/// Subset of the progress-tracker interface used to verify course completion
+/// and the score a credential claims.
 #[soroban_sdk::contractclient(name = "ProgressTrackerClient")]
 pub trait ProgressTrackerInterface {
     fn is_eligible_for_credential(env: Env, learner: Address, course_id: Symbol) -> bool;
+    fn get_course_score(env: Env, learner: Address, course_id: Symbol) -> u32;
 }
 
 #[contracterror]
@@ -213,16 +215,42 @@ mod tests {
         tracker_client.create_course(course_id, &2, &1, &module_ids, &quiz_ids);
     }
 
-    /// Enroll the learner and finish every module and quiz in the course.
-    fn complete_course(env: &Env, tracker_id: &Address, learner: &Address, course_id: &Symbol) {
+    /// Enroll the learner and finish every module and quiz in the course,
+    /// recording `score` on the single quiz.
+    fn complete_course_with_score(
+        env: &Env,
+        tracker_id: &Address,
+        learner: &Address,
+        course_id: &Symbol,
+        score: u32,
+    ) {
         let tracker_client = progress_tracker::ProgressTrackerClient::new(env, tracker_id);
         tracker_client.enroll(learner, course_id);
         tracker_client.complete_module(learner, course_id, &Symbol::new(env, "mod_1"));
         tracker_client.complete_module(learner, course_id, &Symbol::new(env, "mod_2"));
-        tracker_client.submit_quiz_score(learner, course_id, &Symbol::new(env, "quiz_1"), &85);
+        tracker_client.submit_quiz_score(learner, course_id, &Symbol::new(env, "quiz_1"), &score);
     }
 
-    /// Create a course and take a learner all the way through it.
+    /// Enroll the learner and finish the course with the default score of 85.
+    fn complete_course(env: &Env, tracker_id: &Address, learner: &Address, course_id: &Symbol) {
+        complete_course_with_score(env, tracker_id, learner, course_id, 85);
+    }
+
+    /// Create a course and take a learner all the way through it, recording
+    /// `score`. Minting must use the same score, since the credential contract
+    /// verifies it against the tracker (#34).
+    fn enrolled_and_completed_with_score(
+        env: &Env,
+        tracker_id: &Address,
+        learner: &Address,
+        course_id: &Symbol,
+        score: u32,
+    ) {
+        create_course(env, tracker_id, course_id);
+        complete_course_with_score(env, tracker_id, learner, course_id, score);
+    }
+
+    /// Create a course and take a learner all the way through it at score 85.
     fn enrolled_and_completed(
         env: &Env,
         tracker_id: &Address,
@@ -268,8 +296,8 @@ mod tests {
         let course1 = Symbol::new(&env, "rust_101");
         let course2 = Symbol::new(&env, "sol_201");
         let uri = Symbol::new(&env, "ipfs_meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course1);
-        enrolled_and_completed(&env, &tracker_id, &learner, &course2);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course1, 90);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course2, 75);
 
         let cred1 = client.mint_credential(&learner, &course1, &90, &uri);
         let cred2 = client.mint_credential(&learner, &course2, &75, &uri);
@@ -295,9 +323,9 @@ mod tests {
         let course2 = Symbol::new(&env, "sol_201");
         let course3 = Symbol::new(&env, "web3_301");
         let uri = Symbol::new(&env, "ipfs_meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course1);
-        enrolled_and_completed(&env, &tracker_id, &learner, &course2);
-        enrolled_and_completed(&env, &tracker_id, &learner, &course3);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course1, 90);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course2, 75);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course3, 80);
 
         let cred1 = client.mint_credential(&learner, &course1, &90, &uri);
         let cred2 = client.mint_credential(&learner, &course2, &75, &uri);
@@ -353,12 +381,120 @@ mod tests {
         );
     }
 
+    // ── Issue #34: score verified on-chain against the progress-tracker ───
+
+    #[test]
+    #[should_panic(expected = "score 100 does not match verified score 50")]
+    fn test_mint_rejects_inflated_score() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        // The learner actually scored 50.
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 50);
+
+        // Claiming 100 must be rejected, not silently recorded.
+        client.mint_credential(&learner, &course_id, &100, &uri);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match verified score")]
+    fn test_mint_rejects_understated_score() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
+
+        // A credential must record what the tracker recorded, in either direction.
+        client.mint_credential(&learner, &course_id, &80, &uri);
+    }
+
+    #[test]
+    fn test_mint_accepts_verified_score() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 72);
+
+        let cred_id = client.mint_credential(&learner, &course_id, &72, &uri);
+        assert_eq!(client.verify_credential(&cred_id).score, 72);
+    }
+
+    #[test]
+    fn test_mint_verifies_against_average_of_all_quizzes() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let tracker = progress_tracker::ProgressTrackerClient::new(&env, &tracker_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "multi_quiz");
+        let uri = Symbol::new(&env, "ipfs_meta");
+
+        // A two-quiz course: 80 and 90 average to 85.
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_1"));
+        quiz_ids.push_back(Symbol::new(&env, "quiz_2"));
+        tracker.create_course(&course_id, &1, &2, &module_ids, &quiz_ids);
+
+        tracker.enroll(&learner, &course_id);
+        tracker.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        tracker.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        tracker.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &90);
+
+        assert_eq!(tracker.get_course_score(&learner, &course_id), 85);
+
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+        assert_eq!(client.verify_credential(&cred_id).score, 85);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match verified score")]
+    fn test_mint_rejects_score_from_a_different_learner() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let strong_learner = Address::generate(&env);
+        let weak_learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &strong_learner, &course_id, 95);
+        complete_course_with_score(&env, &tracker_id, &weak_learner, &course_id, 60);
+
+        // Borrowing the strong learner's score for the weak learner must fail.
+        client.mint_credential(&weak_learner, &course_id, &95, &uri);
+    }
+
     // ── Issue #105: reverse lookup from course_id to credentials ──────────
 
     #[test]
     fn test_get_credentials_by_course_returns_minted() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner1 = Address::generate(&env);
@@ -367,7 +503,13 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         let other_course = Symbol::new(&env, "web3_202");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        // Symbols cannot contain ':' or '/', so the fixture uses a symbol-safe
+        // stand-in for the metadata URI.
+        let uri = Symbol::new(&env, "ipfs_meta");
+
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner1, &course, 80);
+        complete_course_with_score(&env, &tracker_id, &learner2, &course, 90);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner1, &other_course, 70);
 
         let id1 = client.mint_credential(&learner1, &course, &80, &uri);
         let id2 = client.mint_credential(&learner2, &course, &90, &uri);
@@ -393,7 +535,7 @@ mod tests {
     #[test]
     fn test_get_credentials_by_course_multiple_courses() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -401,7 +543,12 @@ mod tests {
 
         let course_a = Symbol::new(&env, "course_a");
         let course_b = Symbol::new(&env, "course_b");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        // Symbols cannot contain ':' or '/', so the fixture uses a symbol-safe
+        // stand-in for the metadata URI.
+        let uri = Symbol::new(&env, "ipfs_meta");
+
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_a, 85);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_b, 75);
 
         let id_a = client.mint_credential(&learner, &course_a, &85, &uri);
         let id_b = client.mint_credential(&learner, &course_b, &75, &uri);
@@ -427,7 +574,7 @@ mod tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
 
         // Drive the counter to the point where the next ID would wrap to 0.
         env.as_contract(&contract_id, || {
@@ -480,7 +627,7 @@ mod tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
         let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
@@ -529,10 +676,10 @@ mod tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
 
         client.mint_credential(&learner, &course_id, &90, &uri);
-        client.mint_credential(&learner, &course_id, &95, &uri); // should panic
+        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
     }
 
     #[test]
@@ -613,7 +760,7 @@ mod tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
         let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
         assert!(client.is_credential_valid(&cred_id));
@@ -638,14 +785,16 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+        // Symbols cannot contain ':' or '/', so the fixture uses a symbol-safe
+        // stand-in for the metadata URI.
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 80);
 
         client.mint_credential(&learner, &course, &80, &uri);
         assert_eq!(client.get_total_credentials_count(), 1);
 
         let learner2 = Address::generate(&env);
-        enrolled_and_completed(&env, &tracker_id, &learner2, &course);
+        complete_course_with_score(&env, &tracker_id, &learner2, &course, 90);
         client.mint_credential(&learner2, &course, &90, &uri);
         assert_eq!(client.get_total_credentials_count(), 2);
     }
@@ -661,8 +810,10 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+        // Symbols cannot contain ':' or '/', so the fixture uses a symbol-safe
+        // stand-in for the metadata URI.
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 80);
 
         let cred_id = client.mint_credential(&learner, &course, &80, &uri);
 
@@ -687,8 +838,10 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
-        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+        // Symbols cannot contain ':' or '/', so the fixture uses a symbol-safe
+        // stand-in for the metadata URI.
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 80);
 
         let cred_id = client.mint_credential(&learner, &course, &80, &uri);
 
