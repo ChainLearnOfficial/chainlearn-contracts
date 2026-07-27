@@ -35,7 +35,11 @@ impl CredentialNft {
     /// * `admin` - Address that can revoke credentials
     /// * `progress_tracker` - Address of the progress-tracker contract used to
     ///   verify course completion before minting
-    pub fn initialize(env: Env, admin: Address, progress_tracker: Address) -> Result<(), ContractError> {
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        progress_tracker: Address,
+    ) -> Result<(), ContractError> {
         if env.storage().persistent().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }

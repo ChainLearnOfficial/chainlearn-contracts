@@ -4,7 +4,9 @@ mod events;
 mod storage;
 
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
-use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, String as SorobanString, Symbol};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, Address, Env, String as SorobanString, Symbol,
+};
 use soroban_token_sdk::metadata::TokenMetadata;
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
@@ -367,12 +369,7 @@ impl LearnToken {
     /// * `owner` - Token owner (must authorize)
     /// * `spender` - Address whose allowance to decrease
     /// * `decrease_amount` - Amount to subtract from the current allowance
-    pub fn decrease_allowance(
-        env: Env,
-        owner: Address,
-        spender: Address,
-        decrease_amount: i128,
-    ) {
+    pub fn decrease_allowance(env: Env, owner: Address, spender: Address, decrease_amount: i128) {
         owner.require_auth();
 
         if decrease_amount < 0 {
@@ -402,7 +399,9 @@ impl LearnToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env, IntoVal, String as SorobanString, Vec};
+    use soroban_sdk::{
+        testutils::Address as _, Address, Env, IntoVal, String as SorobanString, Vec,
+    };
 
     fn setup(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
