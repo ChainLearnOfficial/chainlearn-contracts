@@ -111,9 +111,10 @@ pub fn mint_credential(
         .get(&DataKey::CourseCredentials(course_id.clone()))
         .unwrap_or(soroban_sdk::Vec::new(env));
     course_creds.push_back(credential_id);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CourseCredentials(course_id.clone()), &course_creds);
+    env.storage().persistent().set(
+        &DataKey::CourseCredentials(course_id.clone()),
+        &course_creds,
+    );
 
     // Emit mint event. `metadata_uri` is included so indexers can reconstruct the
     // full credential metadata from the event stream alone (#101).

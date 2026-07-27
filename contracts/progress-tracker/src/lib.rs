@@ -745,7 +745,7 @@ mod tests {
         assert!(!events.is_empty(), "course_created event must be emitted");
     }
 
-/// #85: get_quiz_score reads without cloning; an unsubmitted quiz panics.
+    /// #85: get_quiz_score reads without cloning; an unsubmitted quiz panics.
     #[test]
     #[should_panic(expected = "quiz not submitted")]
     fn test_get_quiz_score_unsubmitted() {
@@ -868,8 +868,14 @@ mod tests {
 
         let course = client.get_course(&course_id);
         assert_eq!(course.module_ids.len(), 3);
-        assert_eq!(course.module_ids.get(0).unwrap(), Symbol::new(&env, "mod_1"));
-        assert_eq!(course.module_ids.get(2).unwrap(), Symbol::new(&env, "mod_3"));
+        assert_eq!(
+            course.module_ids.get(0).unwrap(),
+            Symbol::new(&env, "mod_1")
+        );
+        assert_eq!(
+            course.module_ids.get(2).unwrap(),
+            Symbol::new(&env, "mod_3")
+        );
 
         let learner = Address::generate(&env);
         client.enroll(&learner, &course_id);

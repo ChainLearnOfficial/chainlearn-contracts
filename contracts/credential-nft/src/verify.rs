@@ -139,11 +139,14 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
         .persistent()
         .get(&DataKey::LearnerCredentials(info.learner.clone()))
         .unwrap_or(Vec::new(env));
-    if let Some(pos) = (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id) {
+    if let Some(pos) =
+        (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
+    {
         learner_list.remove(pos);
-        env.storage()
-            .persistent()
-            .set(&DataKey::LearnerCredentials(info.learner.clone()), &learner_list);
+        env.storage().persistent().set(
+            &DataKey::LearnerCredentials(info.learner.clone()),
+            &learner_list,
+        );
     }
 
     // #104 — prune from course credential index
@@ -152,11 +155,14 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
         .persistent()
         .get(&DataKey::CourseCredentials(info.course_id.clone()))
         .unwrap_or(Vec::new(env));
-    if let Some(pos) = (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id) {
+    if let Some(pos) =
+        (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
+    {
         course_list.remove(pos);
-        env.storage()
-            .persistent()
-            .set(&DataKey::CourseCredentials(info.course_id.clone()), &course_list);
+        env.storage().persistent().set(
+            &DataKey::CourseCredentials(info.course_id.clone()),
+            &course_list,
+        );
     }
 
     // Emit the learner, course and revoking admin alongside the ID so revocations

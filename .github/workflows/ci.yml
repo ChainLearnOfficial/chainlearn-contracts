@@ -29,17 +29,36 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles("**/Cargo.lock") }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles("**/Cargo.lock", "**/Cargo.toml") }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build contracts
         run: cargo build --release --target wasm32-unknown-unknown
 
+      - name: Verify wasm build output
+        run: |
+          set -euo pipefail
+          out_dir="target/wasm32-unknown-unknown/release"
+          expected="credential_nft learn_token progress_tracker"
+          for name in $expected; do
+            wasm_file="$out_dir/$name.wasm"
+            if [ ! -f "$wasm_file" ]; then
+              echo "::error::Expected wasm output missing: $wasm_file"
+              exit 1
+            fi
+            size=$(stat -c%s "$wasm_file")
+            if [ "$size" -eq 0 ]; then
+              echo "::error::Wasm output is empty: $wasm_file"
+              exit 1
+            fi
+            echo "OK: $wasm_file ($size bytes)"
+          done
+
       - name: Run tests
         run: cargo test --workspace
 
       - name: Run clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -49,3 +68,8 @@ jobs:
 
       - name: Run security audit
         run: cargo audit
+
+      - name: Check licenses, advisories & banned dependencies
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check all

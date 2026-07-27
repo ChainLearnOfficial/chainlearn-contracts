@@ -173,7 +173,8 @@ impl LearnToken {
             panic!("negative amount");
         }
 
-        let (exists, is_expired, expiration_ledger) = storage::check_allowance_expired(&env, &from, &spender);
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &from, &spender);
         if exists && is_expired {
             events::allowance_expired(&env, &from, &spender, expiration_ledger);
         }
@@ -227,7 +228,8 @@ impl LearnToken {
     /// Returns the allowance for a spender on behalf of an owner.
     /// Emits an allowance_expired event if the allowance has expired.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
-        let (exists, is_expired, expiration_ledger) = storage::check_allowance_expired(&env, &owner, &spender);
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &owner, &spender);
 
         if exists && is_expired {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
@@ -419,9 +421,7 @@ impl LearnToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{
-        testutils::Address as _, Address, Env, IntoVal, String as SorobanString, Vec,
-    };
+    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Vec};
 
     fn setup(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
@@ -607,7 +607,6 @@ mod tests {
         let (_, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
-        let stranger = Address::generate(&env);
         let fake_pt = Address::generate(&env);
 
         // Only authorize a stranger — admin auth is missing, must panic

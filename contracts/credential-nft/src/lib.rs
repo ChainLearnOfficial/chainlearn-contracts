@@ -73,7 +73,7 @@ impl CredentialNft {
     /// env.mock_all_auths();
     /// let learner = Address::generate(&env);
     /// let course_id = Symbol::new(&env, "rust_101");
-    /// let metadata_uri = Symbol::new(&env, "ipfs://Qm...");
+    /// let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     ///
     /// // Set up and complete a course in progress-tracker
     /// let mut modules = Vec::new(&env);
@@ -111,7 +111,7 @@ impl CredentialNft {
     /// ```ignore
     /// let learner = Address::generate(&env);
     /// let course_id = Symbol::new(&env, "rust_101");
-    /// let uri = Symbol::new(&env, "ipfs://meta");
+    /// let uri = Symbol::new(&env, "ipfs_meta");
     /// env.mock_all_auths();
     ///
     /// // After completing course and minting credential...
@@ -143,7 +143,7 @@ impl CredentialNft {
     /// ```ignore
     /// let learner = Address::generate(&env);
     /// let course_id = Symbol::new(&env, "rust_101");
-    /// let uri = Symbol::new(&env, "ipfs://meta");
+    /// let uri = Symbol::new(&env, "ipfs_meta");
     /// env.mock_all_auths();
     ///
     /// // Complete course and mint credential...
@@ -262,7 +262,7 @@ impl CredentialNft {
     ///
     /// # Panics
     /// Always panics with a message explaining credentials are non-transferable.
-    pub fn transfer(env: Env, from: Address, to: Address, credential_id: u64) {
+    pub fn transfer(_env: Env, from: Address, _to: Address, _credential_id: u64) {
         from.require_auth();
         panic!("credentials are soulbound and non-transferable");
     }
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn test_get_credentials_by_course_returns_minted() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner1 = Address::generate(&env);
@@ -456,7 +456,11 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         let other_course = Symbol::new(&env, "web3_202");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
+
+        enrolled_and_completed(&env, &tracker_id, &learner1, &course);
+        complete_course(&env, &tracker_id, &learner2, &course);
+        enrolled_and_completed(&env, &tracker_id, &learner1, &other_course);
 
         let id1 = client.mint_credential(&learner1, &course, &80, &uri);
         let id2 = client.mint_credential(&learner2, &course, &90, &uri);
@@ -464,8 +468,8 @@ mod tests {
 
         let course_creds = client.get_credentials_by_course(&course);
         assert_eq!(course_creds.len(), 2);
-        assert!(course_creds.contains(&id1));
-        assert!(course_creds.contains(&id2));
+        assert!(course_creds.contains(id1));
+        assert!(course_creds.contains(id2));
     }
 
     #[test]
@@ -482,7 +486,7 @@ mod tests {
     #[test]
     fn test_get_credentials_by_course_multiple_courses() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -490,7 +494,10 @@ mod tests {
 
         let course_a = Symbol::new(&env, "course_a");
         let course_b = Symbol::new(&env, "course_b");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
+
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_a);
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_b);
 
         let id_a = client.mint_credential(&learner, &course_a, &85, &uri);
         let id_b = client.mint_credential(&learner, &course_b, &75, &uri);
@@ -727,14 +734,14 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed(&env, &tracker_id, &learner, &course);
 
         client.mint_credential(&learner, &course, &80, &uri);
         assert_eq!(client.get_total_credentials_count(), 1);
 
         let learner2 = Address::generate(&env);
-        enrolled_and_completed(&env, &tracker_id, &learner2, &course);
+        complete_course(&env, &tracker_id, &learner2, &course);
         client.mint_credential(&learner2, &course, &90, &uri);
         assert_eq!(client.get_total_credentials_count(), 2);
     }
@@ -750,7 +757,7 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed(&env, &tracker_id, &learner, &course);
 
         let cred_id = client.mint_credential(&learner, &course, &80, &uri);
@@ -776,7 +783,7 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs://meta");
+        let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed(&env, &tracker_id, &learner, &course);
 
         let cred_id = client.mint_credential(&learner, &course, &80, &uri);
