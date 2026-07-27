@@ -3,7 +3,7 @@
 mod rewards;
 mod types;
 
-use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 use types::{Course, DataKey, ProgressInfo, QuizResult};
 
 #[contracterror]
@@ -102,7 +102,7 @@ impl ProgressTracker {
 
         env.events().publish(
             (Symbol::new(&env, "course_created"),),
-            (&course_id, total_modules, total_quizzes, &module_ids),
+            (&course_id, total_modules, total_quizzes, module_ids.clone()),
         );
     }
 
@@ -143,7 +143,7 @@ impl ProgressTracker {
         env.storage().persistent().set(&key, &progress);
 
         env.events()
-            .publish((Symbol::new(&env, "enrolled"),), (&learner, &course_id));
+            .publish((symbol_short!("enrolled"),), (&learner, &course_id));
     }
 
     /// Mark a module as completed for a learner.
@@ -414,7 +414,7 @@ impl ProgressTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Events as _};
 
     fn setup_contract(env: &Env) -> (Address, Address) {
         let admin = Address::generate(env);
