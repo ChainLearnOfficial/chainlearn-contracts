@@ -66,6 +66,30 @@ impl CredentialNft {
     ///
     /// # Returns
     /// The unique credential ID.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// let metadata_uri = Symbol::new(&env, "ipfs://Qm...");
+    ///
+    /// // Set up and complete a course in progress-tracker
+    /// let mut modules = Vec::new(&env);
+    /// modules.push_back(Symbol::new(&env, "mod_1"));
+    /// let mut quizzes = Vec::new(&env);
+    /// quizzes.push_back(Symbol::new(&env, "quiz_1"));
+    ///
+    /// tracker_client.create_course(&course_id, &1, &1, &modules, &quizzes);
+    /// tracker_client.enroll(&learner, &course_id);
+    /// tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+    /// tracker_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+    ///
+    /// // Mint the credential
+    /// let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    /// assert_eq!(cred_id, 1);
+    /// ```
     pub fn mint_credential(
         env: Env,
         to: Address,
@@ -81,6 +105,24 @@ impl CredentialNft {
     ///
     /// # Arguments
     /// * `credential_id` - The credential to verify
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// let uri = Symbol::new(&env, "ipfs://meta");
+    /// env.mock_all_auths();
+    ///
+    /// // After completing course and minting credential...
+    /// let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+    ///
+    /// let info = client.verify_credential(&cred_id);
+    /// assert_eq!(info.learner, learner);
+    /// assert_eq!(info.course_id, course_id);
+    /// assert_eq!(info.score, 85);
+    /// assert!(!info.revoked);
+    /// ```
     pub fn verify_credential(env: Env, credential_id: u64) -> CredentialInfo {
         verify::verify_credential(&env, credential_id)
     }
@@ -95,6 +137,24 @@ impl CredentialNft {
     /// * `learner` - The learner address
     /// * `start` - Zero-based index of the first credential to return
     /// * `limit` - Page size (1..=`MAX_CREDENTIALS_PAGE_SIZE`)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let learner = Address::generate(&env);
+    /// let course_id = Symbol::new(&env, "rust_101");
+    /// let uri = Symbol::new(&env, "ipfs://meta");
+    /// env.mock_all_auths();
+    ///
+    /// // Complete course and mint credential...
+    /// client.mint_credential(&learner, &course_id, &85, &uri);
+    ///
+    /// let count = client.get_credential_count(&learner);
+    /// assert_eq!(count, 1);
+    ///
+    /// let credentials = client.get_credentials_for(&learner, &0, &10);
+    /// assert_eq!(credentials.len(), 1);
+    /// ```
     pub fn get_credentials_for(env: Env, learner: Address, start: u32, limit: u32) -> Vec<u64> {
         verify::get_credentials_for(&env, &learner, start, limit)
     }
@@ -103,6 +163,17 @@ impl CredentialNft {
     ///
     /// # Arguments
     /// * `learner` - The learner address
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let learner = Address::generate(&env);
+    /// assert_eq!(client.get_credential_count(&learner), 0);
+    ///
+    /// // After completing a course and minting...
+    /// client.mint_credential(&learner, &course_id, &85, &uri);
+    /// assert_eq!(client.get_credential_count(&learner), 1);
+    /// ```
     pub fn get_credential_count(env: Env, learner: Address) -> u32 {
         verify::get_credential_count(&env, &learner)
     }
@@ -176,6 +247,24 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
         env.storage().persistent().set(&DataKey::Admin, &new_admin);
+    }
+
+    /// Reject transfer of a credential.
+    ///
+    /// Credentials are soulbound (non-transferable) and permanently bound to the
+    /// learner who earned them. This function enforces that policy by rejecting
+    /// all transfer attempts.
+    ///
+    /// # Arguments
+    /// * `from` - The current holder (must authorize)
+    /// * `to` - The intended recipient (not used, transfer rejected)
+    /// * `credential_id` - The credential being transferred (not used, transfer rejected)
+    ///
+    /// # Panics
+    /// Always panics with a message explaining credentials are non-transferable.
+    pub fn transfer(env: Env, from: Address, to: Address, credential_id: u64) {
+        from.require_auth();
+        panic!("credentials are soulbound and non-transferable");
     }
 }
 

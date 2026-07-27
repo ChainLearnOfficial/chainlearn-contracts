@@ -17,7 +17,7 @@ The reward token for the platform. Implements the SEP-41 fungible token standard
 
 ### credential-nft (Course Certificates)
 
-Non-transferable credential NFTs that certify course completion:
+Non-transferable (soulbound) credential NFTs that certify course completion:
 
 - **Minting**: `mint_credential(to, course_id, score, metadata_uri)` -- score-gated at 50+
 - **Completion-gated**: Minting calls `progress-tracker.is_eligible_for_credential()` and rejects
@@ -27,6 +27,7 @@ Non-transferable credential NFTs that certify course completion:
   credential IDs; `get_credential_count(learner)` returns the total so callers can page
 - **Revocation**: Admin can revoke credentials if needed
 - **One per course**: Each learner can only receive one credential per course
+- **Non-transferable**: `transfer()` is rejected -- credentials are permanently bound to the earner
 - **Events**: `credential_minted(learner, course_id, credential_id, score, metadata_uri)` and
   `credential_revoked(learner, course_id, credential_id, admin)`
 
@@ -260,12 +261,14 @@ struct QuizResult {
 
 ## Progress Calculation
 
-Overall progress is calculated as a weighted average:
+Overall progress is calculated as a weighted average using integer division:
 
 - **Module completion**: 70% weight (proportion of modules completed)
 - **Quiz performance**: 30% weight (average quiz score / 100)
 
-Formula: `progress = (completed_modules / total_modules * 70) + (avg_quiz_score / 100 * 30)`
+Formula: `progress = (completed_modules * 70 / total_modules) + (avg_quiz_score * 30 / 100)`
+
+**Note**: Integer division is used throughout; calculations are performed left-to-right with rounding down at each step.
 
 ## Credential Eligibility
 
@@ -281,9 +284,10 @@ A learner is eligible for a credential when:
 - **Verified progress**: Credential minting is gated on the progress-tracker's eligibility check,
   so a credential cannot be self-issued without actually completing the course
 - **Double-claim prevention**: Token rewards and quiz submissions are tracked to prevent duplicates
-- **Score gating**: Credentials require a minimum passing score
+- **Score gating**: Credentials require a minimum passing score (50)
 - **Admin controls**: Only the admin can create courses, mint tokens, and revoke credentials
-- **Non-transferable credentials**: Credential NFTs are soulbound (not transferable)
+- **Soulbound enforcement**: Credential NFTs are permanently bound to the earner; `transfer()` is rejected
+  to prevent trading or theft of credentials
 
 ## License
 
