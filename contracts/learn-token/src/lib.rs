@@ -68,7 +68,7 @@ impl LearnToken {
         };
         env.storage()
             .persistent()
-            .set(&storage::DataKey::TokenMetadata, &metadata);
+            .set(&storage::TokenDataKey::TokenMetadata, &metadata);
         Ok(())
     }
 
@@ -79,7 +79,7 @@ impl LearnToken {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::TokenMetadata)
+            .get(&storage::TokenDataKey::TokenMetadata)
             .expect("not initialized");
         metadata.name
     }
@@ -89,7 +89,7 @@ impl LearnToken {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::TokenMetadata)
+            .get(&storage::TokenDataKey::TokenMetadata)
             .expect("not initialized");
         metadata.symbol
     }
@@ -99,7 +99,7 @@ impl LearnToken {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::TokenMetadata)
+            .get(&storage::TokenDataKey::TokenMetadata)
             .expect("not initialized");
         metadata.decimal
     }
@@ -173,7 +173,8 @@ impl LearnToken {
             panic!("negative amount");
         }
 
-        let (exists, is_expired, expiration_ledger) = storage::check_allowance_expired(&env, &from, &spender);
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &from, &spender);
         if exists && is_expired {
             events::allowance_expired(&env, &from, &spender, expiration_ledger);
         }
@@ -227,7 +228,8 @@ impl LearnToken {
     /// Returns the allowance for a spender on behalf of an owner.
     /// Emits an allowance_expired event if the allowance has expired.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
-        let (exists, is_expired, expiration_ledger) = storage::check_allowance_expired(&env, &owner, &spender);
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &owner, &spender);
 
         if exists && is_expired {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
@@ -381,6 +383,33 @@ impl LearnToken {
         events::approve(&env, &owner, &spender, new_amount, expiration_ledger);
     }
 
+    /// Remove an expired allowance from persistent storage (#111).
+    ///
+    /// Until now, an expired `AllowanceData` entry was only pruned as a side
+    /// effect of someone calling `allowance()` or `transfer_from()` for that
+    /// exact owner/spender pair -- if nobody ever touched it again, it stayed
+    /// in persistent storage indefinitely. This gives anyone (no auth
+    /// required, since it can only remove data that is already expired and
+    /// therefore already worthless) an explicit way to prune a known expired
+    /// allowance, e.g. from an indexer that watched the `approve` event and
+    /// noticed its `expiration_ledger` has passed.
+    ///
+    /// # Arguments
+    /// * `owner` - Token owner
+    /// * `spender` - Approved spender
+    ///
+    /// # Returns
+    /// `true` if an expired allowance was found and removed, `false` if the
+    /// allowance does not exist or has not yet expired.
+    pub fn prune_expired_allowance(env: Env, owner: Address, spender: Address) -> bool {
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &owner, &spender);
+        if exists && is_expired {
+            events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+        }
+        exists && is_expired
+    }
+
     /// Decrease the allowance for a spender (#77).
     ///
     /// Allows a granular reduction of the allowance without resetting it.
@@ -409,7 +438,7 @@ impl LearnToken {
         let data: storage::AllowanceData = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::Allowance(key.clone()))
+            .get(&storage::TokenDataKey::Allowance(key.clone()))
             .expect("allowance not set");
         storage::set_allowance(&env, &owner, &spender, new_amount, data.expiration_ledger);
         events::approve(&env, &owner, &spender, new_amount, data.expiration_ledger);
@@ -420,7 +449,8 @@ impl LearnToken {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        testutils::Address as _, Address, Env, IntoVal, String as SorobanString, Vec,
+        testutils::{storage::Persistent as _, Address as _, Ledger as _},
+        Address, Env, IntoVal, String as SorobanString, Vec,
     };
 
     fn setup(env: &Env) -> (Address, Address, Address) {
@@ -736,5 +766,99 @@ mod tests {
         let reward = client.claim_reward(&learner, &course_id, &quiz_id);
         // 100 * 100 = 10_000 (equals MAX_REWARD_AMOUNT)
         assert_eq!(reward, 10_000);
+    }
+
+    // ── #111: expired allowances can be explicitly pruned ────────────────────
+
+    #[test]
+    fn test_prune_expired_allowance_removes_stale_entry() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        let expiration_ledger = env.ledger().sequence() + 10;
+        client.approve(&owner, &spender, &100, &expiration_ledger);
+
+        // Nobody ever calls allowance() or transfer_from() for this pair again
+        // -- advance past expiration and prune it directly.
+        env.ledger()
+            .with_mut(|l| l.sequence_number = expiration_ledger + 1);
+
+        assert!(client.prune_expired_allowance(&owner, &spender));
+
+        let key = storage::TokenDataKey::Allowance(storage::AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        });
+        env.as_contract(&lt_contract_id, || {
+            assert!(!env.storage().persistent().has(&key));
+        });
+    }
+
+    #[test]
+    fn test_prune_expired_allowance_is_noop_for_active_allowance() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &100, &(env.ledger().sequence() + 999));
+
+        assert!(!client.prune_expired_allowance(&owner, &spender));
+        assert_eq!(client.allowance(&owner, &spender), 100);
+    }
+
+    #[test]
+    fn test_prune_expired_allowance_is_noop_when_none_exists() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+
+        assert!(!client.prune_expired_allowance(&owner, &spender));
+    }
+
+    // ── #112: RewardClaimed entries have their TTL extended on write ─────────
+
+    #[test]
+    fn test_claim_reward_extends_reward_claimed_ttl() {
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let key = storage::TokenDataKey::RewardClaimed(storage::RewardKey {
+            learner: learner.clone(),
+            quiz_id: quiz_id.clone(),
+        });
+        env.as_contract(&lt_contract_id, || {
+            let ttl = env.storage().persistent().get_ttl(&key);
+            // The entry must outlive the default minimum persistent TTL, since
+            // it is the only guard against double-claiming a reward and can
+            // never be allowed to lapse into archival (#112).
+            assert!(
+                ttl >= chainlearn_shared::PERSISTENT_TTL_EXTEND_TO - 1,
+                "expected RewardClaimed TTL to be extended, got {}",
+                ttl
+            );
+        });
     }
 }

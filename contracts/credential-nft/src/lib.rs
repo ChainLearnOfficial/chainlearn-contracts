@@ -4,7 +4,7 @@ mod metadata;
 mod mint;
 mod verify;
 
-use metadata::{CredentialInfo, DataKey};
+use metadata::{CredentialDataKey, CredentialInfo};
 use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 
 /// Subset of the progress-tracker interface used to verify course completion.
@@ -40,16 +40,18 @@ impl CredentialNft {
         admin: Address,
         progress_tracker: Address,
     ) -> Result<(), ContractError> {
-        if env.storage().persistent().has(&DataKey::Admin) {
+        if env.storage().persistent().has(&CredentialDataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
-        env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage()
             .persistent()
-            .set(&DataKey::ProgressTracker, &progress_tracker);
+            .set(&CredentialDataKey::Admin, &admin);
         env.storage()
             .persistent()
-            .set(&DataKey::CredentialCounter, &0u64);
+            .set(&CredentialDataKey::ProgressTracker, &progress_tracker);
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::CredentialCounter, &0u64);
         Ok(())
     }
 
@@ -114,7 +116,7 @@ impl CredentialNft {
     pub fn get_total_credentials_count(env: Env) -> u64 {
         env.storage()
             .persistent()
-            .get(&DataKey::CredentialCounter)
+            .get(&CredentialDataKey::CredentialCounter)
             .unwrap_or(0)
     }
 
@@ -128,7 +130,7 @@ impl CredentialNft {
     pub fn get_credentials_by_course(env: Env, course_id: Symbol) -> Vec<u64> {
         env.storage()
             .persistent()
-            .get(&DataKey::CourseCredentials(course_id))
+            .get(&CredentialDataKey::CourseCredentials(course_id))
             .unwrap_or(Vec::new(&env))
     }
 
@@ -152,7 +154,7 @@ impl CredentialNft {
     pub fn admin(env: Env) -> Address {
         env.storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&CredentialDataKey::Admin)
             .expect("not initialized")
     }
 
@@ -160,7 +162,7 @@ impl CredentialNft {
     pub fn progress_tracker(env: Env) -> Address {
         env.storage()
             .persistent()
-            .get(&DataKey::ProgressTracker)
+            .get(&CredentialDataKey::ProgressTracker)
             .expect("not initialized")
     }
 
@@ -172,10 +174,12 @@ impl CredentialNft {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&DataKey::Admin, &new_admin);
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::Admin, &new_admin);
     }
 }
 
@@ -433,7 +437,7 @@ mod tests {
         env.as_contract(&contract_id, || {
             env.storage()
                 .persistent()
-                .set(&DataKey::CredentialCounter, &u64::MAX);
+                .set(&CredentialDataKey::CredentialCounter, &u64::MAX);
         });
 
         client.mint_credential(&learner, &course_id, &90, &uri); // should panic
