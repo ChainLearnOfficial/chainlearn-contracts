@@ -85,12 +85,26 @@ impl CredentialNft {
         verify::verify_credential(&env, credential_id)
     }
 
-    /// Get all credential IDs for a learner.
+    /// Get a page of credential IDs for a learner.
+    ///
+    /// Reads are paginated so learners holding many credentials do not produce
+    /// unbounded responses. Pair with `get_credential_count` to page through the
+    /// full list.
     ///
     /// # Arguments
     /// * `learner` - The learner address
-    pub fn get_credentials_for(env: Env, learner: Address) -> Vec<u64> {
-        verify::get_credentials_for(&env, &learner)
+    /// * `start` - Zero-based index of the first credential to return
+    /// * `limit` - Page size (1..=`MAX_CREDENTIALS_PAGE_SIZE`)
+    pub fn get_credentials_for(env: Env, learner: Address, start: u32, limit: u32) -> Vec<u64> {
+        verify::get_credentials_for(&env, &learner, start, limit)
+    }
+
+    /// Get the total number of credentials a learner holds.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    pub fn get_credential_count(env: Env, learner: Address) -> u32 {
+        verify::get_credential_count(&env, &learner)
     }
 
     /// Check if a credential is valid (exists and not revoked).
@@ -143,7 +157,10 @@ impl CredentialNft {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address};
+    use soroban_sdk::{
+        testutils::{Address as _, Events as _},
+        vec, Address, IntoVal,
+    };
 
     /// Register both contracts and return `(admin, credential_id, tracker_id)`.
     fn setup_contract(env: &Env) -> (Address, Address, Address) {
@@ -229,11 +246,171 @@ mod tests {
         enrolled_and_completed(&env, &tracker_id, &learner, &course1);
         enrolled_and_completed(&env, &tracker_id, &learner, &course2);
 
-        client.mint_credential(&learner, &course1, &90, &uri);
-        client.mint_credential(&learner, &course2, &75, &uri);
+        let cred1 = client.mint_credential(&learner, &course1, &90, &uri);
+        let cred2 = client.mint_credential(&learner, &course2, &75, &uri);
 
-        let creds = client.get_credentials_for(&learner);
+        assert_eq!(client.get_credential_count(&learner), 2);
+
+        let creds = client.get_credentials_for(&learner, &0, &10);
         assert_eq!(creds.len(), 2);
+        assert_eq!(creds.get(0).unwrap(), cred1);
+        assert_eq!(creds.get(1).unwrap(), cred2);
+    }
+
+    #[test]
+    fn test_get_credentials_for_paginates() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course1 = Symbol::new(&env, "rust_101");
+        let course2 = Symbol::new(&env, "sol_201");
+        let course3 = Symbol::new(&env, "web3_301");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course1);
+        enrolled_and_completed(&env, &tracker_id, &learner, &course2);
+        enrolled_and_completed(&env, &tracker_id, &learner, &course3);
+
+        let cred1 = client.mint_credential(&learner, &course1, &90, &uri);
+        let cred2 = client.mint_credential(&learner, &course2, &75, &uri);
+        let cred3 = client.mint_credential(&learner, &course3, &80, &uri);
+
+        // First page.
+        let page = client.get_credentials_for(&learner, &0, &2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page.get(0).unwrap(), cred1);
+        assert_eq!(page.get(1).unwrap(), cred2);
+
+        // Second (partial) page: the limit is clamped to what remains.
+        let page = client.get_credentials_for(&learner, &2, &2);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page.get(0).unwrap(), cred3);
+
+        // Past the end.
+        assert_eq!(client.get_credentials_for(&learner, &3, &2).len(), 0);
+    }
+
+    #[test]
+    fn test_get_credentials_for_unknown_learner_is_empty() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        assert_eq!(client.get_credential_count(&learner), 0);
+        assert_eq!(client.get_credentials_for(&learner, &0, &10).len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "limit must be greater than zero")]
+    fn test_get_credentials_for_rejects_zero_limit() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        client.get_credentials_for(&Address::generate(&env), &0, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds maximum page size")]
+    fn test_get_credentials_for_rejects_oversized_limit() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        client.get_credentials_for(
+            &Address::generate(&env),
+            &0,
+            &(chainlearn_shared::MAX_CREDENTIALS_PAGE_SIZE + 1),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "credential ID counter overflow")]
+    fn test_mint_rejects_counter_overflow() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+
+        // Drive the counter to the point where the next ID would wrap to 0.
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::CredentialCounter, &u64::MAX);
+        });
+
+        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
+    }
+
+    #[test]
+    fn test_minted_event_includes_metadata_uri() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "credential_minted"),).into_val(&env),
+                    (learner, course_id, cred_id, 85u32, uri).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_revoked_event_includes_audit_details() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+
+        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        client.revoke_credential(&cred_id);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "credential_revoked"),).into_val(&env),
+                    (learner, course_id, cred_id, admin).into_val(&env),
+                )
+            ]
+        );
     }
 
     #[test]

@@ -23,9 +23,12 @@ Non-transferable credential NFTs that certify course completion:
 - **Completion-gated**: Minting calls `progress-tracker.is_eligible_for_credential()` and rejects
   learners who have not completed every module and quiz in the course
 - **Verification**: `verify_credential(credential_id)` returns full credential info
-- **Lookup**: `get_credentials_for(learner)` lists all credentials for a learner
+- **Lookup**: `get_credentials_for(learner, start, limit)` returns one page of a learner's
+  credential IDs; `get_credential_count(learner)` returns the total so callers can page
 - **Revocation**: Admin can revoke credentials if needed
 - **One per course**: Each learner can only receive one credential per course
+- **Events**: `credential_minted(learner, course_id, credential_id, score, metadata_uri)` and
+  `credential_revoked(learner, course_id, credential_id, admin)`
 
 ### progress-tracker (On-chain Progress)
 
@@ -46,6 +49,7 @@ Common types and constants used across all contracts:
 - `MAX_QUIZ_SCORE` (100): Maximum possible quiz score
 - `TOKEN_DECIMALS` (7): Token decimal places
 - `BASE_REWARD_PER_POINT` (100): Tokens minted per quiz point
+- `MAX_CREDENTIALS_PAGE_SIZE` (50): Maximum credentials returned by one paginated read
 
 ## Directory Structure
 
@@ -199,6 +203,12 @@ soroban contract invoke --id <TOKEN_ID> -- claim_reward \
 soroban contract invoke --id <CREDENTIAL_ID> -- mint_credential \
     --to <ADDRESS> --course_id "rust_101" --score 80 \
     --metadata_uri "ipfs://Qm..."
+
+# List a learner's credentials, one page at a time
+soroban contract invoke --id <CREDENTIAL_ID> -- get_credential_count \
+    --learner <ADDRESS>
+soroban contract invoke --id <CREDENTIAL_ID> -- get_credentials_for \
+    --learner <ADDRESS> --start 0 --limit 50
 ```
 
 ## Data Types

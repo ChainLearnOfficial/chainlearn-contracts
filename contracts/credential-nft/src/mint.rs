@@ -25,6 +25,7 @@ use crate::ProgressTrackerClient;
 /// * If score is below the minimum threshold
 /// * If the learner already has a credential for this course
 /// * If the progress-tracker reports the learner is not eligible
+/// * If the credential ID counter would overflow `u64`
 pub fn mint_credential(
     env: &Env,
     to: &Address,
@@ -58,13 +59,17 @@ pub fn mint_credential(
         panic!("learner has not completed the course requirements");
     }
 
-    // Generate unique credential ID
+    // Generate unique credential ID. The counter is checked so it can never wrap
+    // around to an already-issued ID and overwrite an existing credential (#99).
     let counter: u64 = env
         .storage()
         .persistent()
         .get(&DataKey::CredentialCounter)
         .unwrap_or(0);
-    let credential_id = counter + 1;
+    let credential_id = match counter.checked_add(1) {
+        Some(id) => id,
+        None => panic!("credential ID counter overflow"),
+    };
     env.storage()
         .persistent()
         .set(&DataKey::CredentialCounter, &credential_id);
@@ -101,10 +106,11 @@ pub fn mint_credential(
     // Store the course-credential mapping to prevent duplicates
     env.storage().persistent().set(&dup_key, &credential_id);
 
-    // Emit mint event
+    // Emit mint event. `metadata_uri` is included so indexers can reconstruct the
+    // full credential metadata from the event stream alone (#101).
     env.events().publish(
         (Symbol::new(env, "credential_minted"),),
-        (to, course_id, credential_id, score),
+        (to, course_id, credential_id, score, metadata_uri),
     );
 
     credential_id
