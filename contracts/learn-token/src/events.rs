@@ -1,9 +1,11 @@
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{Address, Env, Symbol};
 
 /// Emitted when a learner claims a reward for completing a quiz.
 ///
 /// Topics: ["reward_claimed"]
 /// Data: (learner, quiz_id, score, reward_amount, course_id)
+/// Topics: ["reward"]
+/// Data: (learner, quiz_id, score, reward_amount)
 pub fn reward_claimed(
     env: &Env,
     learner: &Address,
@@ -12,7 +14,9 @@ pub fn reward_claimed(
     reward_amount: i128,
     course_id: &Symbol,
 ) {
-    let topics = (symbol_short!("reward"),);
+    // Symbol::new (not symbol_short!) so topic construction matches
+    // progress-tracker and credential-nft, which indexers rely on (#118).
+    let topics = (Symbol::new(env, "reward"),);
     env.events()
         .publish(topics, (learner, quiz_id, score, reward_amount, course_id));
 }
@@ -22,7 +26,7 @@ pub fn reward_claimed(
 /// Topics: ["transfer"]
 /// Data: (from, to, amount)
 pub fn transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
-    let topics = (symbol_short!("transfer"),);
+    let topics = (Symbol::new(env, "transfer"),);
     env.events().publish(topics, (from, to, amount));
 }
 
@@ -40,7 +44,7 @@ pub fn transfer_from(env: &Env, spender: &Address, from: &Address, to: &Address,
 /// Topics: ["mint"]
 /// Data: (to, amount)
 pub fn mint(env: &Env, to: &Address, amount: i128) {
-    let topics = (symbol_short!("mint"),);
+    let topics = (Symbol::new(env, "mint"),);
     env.events().publish(topics, (to, amount));
 }
 
@@ -55,17 +59,17 @@ pub fn approve(
     amount: i128,
     expiration_ledger: u32,
 ) {
-    let topics = (symbol_short!("approve"),);
+    let topics = (Symbol::new(env, "approve"),);
     env.events()
         .publish(topics, (owner, spender, amount, expiration_ledger));
 }
 
 /// Emitted when the progress-tracker address is updated (#75).
 ///
-/// Topics: ["progress_tracker"]
+/// Topics: ["progress"]
 /// Data: (new_address,)
 pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
-    let topics = (symbol_short!("progress"),);
+    let topics = (Symbol::new(env, "progress"),);
     env.events().publish(topics, (new_address,));
 }
 

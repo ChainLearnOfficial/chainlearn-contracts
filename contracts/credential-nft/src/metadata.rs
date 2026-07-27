@@ -26,7 +26,6 @@ pub enum DataKey {
     ProgressTracker,
     CredentialCounter,
     Credential(u64),
-    CredentialOwner(u64),
     LearnerCredentials(Address),
     CourseCredential(Address, Symbol),
     CourseCredentials(Symbol),

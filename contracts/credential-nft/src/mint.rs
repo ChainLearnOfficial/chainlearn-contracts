@@ -84,13 +84,11 @@ pub fn mint_credential(
         metadata_uri: metadata_uri.clone(),
     };
 
-    // Store credential data
+    // Store credential data. The owner is available as `info.learner`, so no
+    // separate owner key is kept (#116).
     env.storage()
         .persistent()
         .set(&DataKey::Credential(credential_id), &info);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CredentialOwner(credential_id), to);
 
     // Track credentials per learner
     let mut learner_creds: soroban_sdk::Vec<u64> = env
