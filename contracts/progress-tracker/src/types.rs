@@ -10,6 +10,8 @@ pub struct Course {
     pub total_modules: u32,
     /// Number of quizzes in the course.
     pub total_quizzes: u32,
+    /// Ordered list of module IDs for the course.
+    pub module_ids: Vec<Symbol>,
     /// List of valid quiz IDs for the course.
     pub quiz_ids: Vec<Symbol>,
 }
@@ -41,6 +43,10 @@ pub struct QuizResult {
 }
 
 /// A learner's progress in a specific course.
+///
+/// Individual quiz submissions are stored under [`ProgressTrackerDataKey::QuizResult`]; this
+/// struct only keeps the aggregates needed to derive progress and eligibility,
+/// so a quiz result is never written twice.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgressInfo {
@@ -51,6 +57,9 @@ pub struct ProgressInfo {
     /// Number of quizzes submitted.
     pub quizzes_submitted: u32,
     /// Sum of quiz scores.
+    /// Number of quizzes submitted for this course.
+    pub quizzes_submitted: u32,
+    /// Sum of every submitted quiz score, used to derive the average.
     pub total_quiz_score: u64,
     /// Overall progress percentage (0-100).
     pub overall_progress: u32,
@@ -61,10 +70,9 @@ pub struct ProgressInfo {
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataKey {
+pub enum ProgressTrackerDataKey {
     Admin,
     Course(Symbol),
-    CourseModules(Symbol),
     Progress(Address, Symbol),
     ModuleCompleted(Address, Symbol, Symbol),
     QuizResult(Address, Symbol, Symbol),
