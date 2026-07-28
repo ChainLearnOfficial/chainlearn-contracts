@@ -286,7 +286,7 @@ mod progress_unit_tests {
         env.as_contract(&contract_id, || {
             env.storage()
                 .persistent()
-                .set(&progress_tracker::DataKey::Course(course_id.clone()), &course);
+                .set(&progress_tracker::ProgressTrackerDataKey::Course(course_id.clone()), &course);
         });
 
         let learner = Address::generate(&env);
@@ -353,14 +353,14 @@ mod progress_unit_tests {
         assert_eq!(progress.overall_progress, 70);
     }
 
-    // ── Issue #82: modules_completed Vec removed (no redundant tracking) ──────
+    // ── Issue #82 / #113: modules_completed Vec removed (no redundant tracking) ──
 
     #[test]
     fn test_progress_info_has_no_modules_completed_field() {
         // After removing the redundant modules_completed Vec, ProgressInfo
         // should only have: enrolled_at, quiz_scores, overall_progress,
         // eligible_for_credential. Module completion is tracked solely via
-        // the ModuleCompleted storage key.
+        // the ModuleCompleted storage key -- never duplicated into a Vec (#113).
         let env = Env::default();
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
@@ -383,7 +383,7 @@ mod progress_unit_tests {
 
     #[test]
     fn test_quiz_result_stored_only_under_quiz_key() {
-        // A submitted quiz lives in DataKey::QuizResult; ProgressInfo keeps
+        // A submitted quiz lives in ProgressTrackerDataKey::QuizResult; ProgressInfo keeps
         // only the aggregates derived from it. If the struct still carried a
         // quiz_scores Vec, this wouldn't compile.
         let env = Env::default();
@@ -656,7 +656,7 @@ mod progress_unit_tests {
         progress.eligible_for_credential = true;
         env.as_contract(&contract_id, || {
             env.storage().persistent().set(
-                &progress_tracker::DataKey::Progress(learner.clone(), course_id.clone()),
+                &progress_tracker::ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
                 &progress,
             );
         });

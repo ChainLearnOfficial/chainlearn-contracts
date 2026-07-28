@@ -1,7 +1,7 @@
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::types::{Course, DataKey, ProgressInfo};
+use crate::types::{Course, ProgressInfo, ProgressTrackerDataKey};
 
 /// Count how many modules a learner has completed in a course.
 ///
@@ -17,7 +17,11 @@ pub fn count_completed_modules(
 ) -> u32 {
     let mut count = 0u32;
     for module_id in modules.iter() {
-        let key = DataKey::ModuleCompleted(learner.clone(), course_id.clone(), module_id.clone());
+        let key = ProgressTrackerDataKey::ModuleCompleted(
+            learner.clone(),
+            course_id.clone(),
+            module_id.clone(),
+        );
         if env.storage().persistent().has(&key) {
             count += 1;
         }

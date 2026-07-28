@@ -13,6 +13,11 @@ The reward token for the platform. Implements the SEP-41 fungible token standard
 - **Standard interface**: `initialize`, `mint`, `transfer`, `balance`, `total_supply`, `approve`, `allowance`
 - **Reward system**: `claim_reward(learner, course_id, quiz_id)` looks up the learner's score for
   that quiz from progress-tracker and mints tokens proportional to it
+- **Standard interface**: `initialize`, `mint`, `transfer`, `transfer_from`, `burn`, `burn_from`,
+  `balance`, `total_supply`, `approve`, `allowance`
+- **Burning**: `burn(from, amount)` and `burn_from(spender, from, amount)` destroy tokens and
+  reduce `total_supply`; `burn_from` spends the caller's approved allowance
+- **Reward system**: `claim_reward(learner, quiz_id, score)` mints tokens proportional to quiz score
 - **Anti-fraud**: Each quiz reward can only be claimed once per learner
 - **Reward formula**: `score * BASE_REWARD_PER_POINT` (100 tokens per point)
 
@@ -23,6 +28,9 @@ Non-transferable (soulbound) credential NFTs that certify course completion:
 - **Minting**: `mint_credential(to, course_id, score, metadata_uri)` -- score-gated at 50+
 - **Completion-gated**: Minting calls `progress-tracker.is_eligible_for_credential()` and rejects
   learners who have not completed every module and quiz in the course
+- **Score-verified**: Minting also calls `progress-tracker.get_course_score()` and rejects any
+  `score` that does not match the learner's on-chain average, so a caller cannot inflate a
+  credential
 - **Verification**: `verify_credential(credential_id)` returns full credential info
 - **Lookup**: `get_credentials_for(learner, start, limit)` returns one page of a learner's
   credential IDs; `get_credential_count(learner)` returns the total so callers can page
@@ -40,6 +48,9 @@ Tracks learner enrollment, module completion, and quiz scores:
 - **Module tracking**: `complete_module(learner, course_id, module_id)`
 - **Quiz scores**: `submit_quiz_score(learner, course_id, quiz_id, score)`
 - **Progress view**: `get_progress(learner, course_id)` returns `ProgressInfo`
+- **Verified scores**: `get_quiz_score(learner, course_id, quiz_id)` for one quiz and
+  `get_course_score(learner, course_id)` for the course average -- the values learn-token and
+  credential-nft check before minting
 - **Eligibility**: Automatic credential eligibility calculation
 - **Weighted progress**: 70% module completion + 30% quiz performance
 - **Events**: `enrolled(learner, course_id, enrolled_at)`,
@@ -170,6 +181,10 @@ export STELLAR_SECRET_KEY="S..."
 ```bash
 ./scripts/initialize.sh testnet
 ```
+
+The script initializes in dependency order -- progress-tracker first, then learn-token and
+credential-nft, which each store the tracker's address -- and verifies the wiring landed before
+reporting success.
 
 ### Mainnet
 

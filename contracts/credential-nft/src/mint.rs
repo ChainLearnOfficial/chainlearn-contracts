@@ -1,21 +1,21 @@
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
 use soroban_sdk::{Address, Env, Symbol};
 
-use crate::metadata::{CredentialInfo, DataKey};
+use crate::metadata::{CredentialDataKey, CredentialInfo};
 use crate::ProgressTrackerClient;
 
 /// Mint a new credential NFT for a learner.
 ///
 /// The credential is only minted if the learner's score meets the minimum
-/// threshold and the progress-tracker contract confirms the learner actually
-/// completed the course. Each learner can only receive one credential per
-/// course.
+/// threshold, matches the score the progress-tracker recorded, and the
+/// progress-tracker confirms the learner actually completed the course. Each
+/// learner can only receive one credential per course.
 ///
 /// # Arguments
 /// * `env` - Soroban environment
 /// * `to` - Learner address receiving the credential
 /// * `course_id` - Identifier of the completed course
-/// * `score` - Final score (must be >= 50)
+/// * `score` - Final score (must be >= 50 and match the tracker's record)
 /// * `metadata_uri` - URI to off-chain metadata
 ///
 /// # Returns
@@ -25,6 +25,7 @@ use crate::ProgressTrackerClient;
 /// * If score is below the minimum threshold
 /// * If the learner already has a credential for this course
 /// * If the progress-tracker reports the learner is not eligible
+/// * If score does not match the progress-tracker's verified score
 /// * If the credential ID counter would overflow `u64`
 pub fn mint_credential(
     env: &Env,
@@ -42,7 +43,7 @@ pub fn mint_credential(
     }
 
     // Check for duplicate: one credential per learner per course
-    let dup_key = DataKey::CourseCredential(to.clone(), course_id.clone());
+    let dup_key = CredentialDataKey::CourseCredential(to.clone(), course_id.clone());
     if env.storage().persistent().has(&dup_key) {
         panic!("credential already exists for this learner and course");
     }
@@ -52,11 +53,24 @@ pub fn mint_credential(
     let progress_tracker: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::ProgressTracker)
+        .get(&CredentialDataKey::ProgressTracker)
         .expect("not initialized");
     let tracker = ProgressTrackerClient::new(env, &progress_tracker);
     if !tracker.is_eligible_for_credential(to, course_id) {
         panic!("learner has not completed the course requirements");
+    }
+
+    // Score gate: the caller supplies a score, but the progress-tracker is the
+    // only authority on what the learner actually earned. Without this check a
+    // caller could mint a credential reading 100 for a learner who scored 50
+    // (#34). The tracker's value is the average across the learner's submitted
+    // quizzes for this course.
+    let verified_score = tracker.get_course_score(to, course_id);
+    if score != verified_score {
+        panic!(
+            "score {} does not match verified score {}",
+            score, verified_score
+        );
     }
 
     // Generate unique credential ID. The counter is checked so it can never wrap
@@ -64,7 +78,7 @@ pub fn mint_credential(
     let counter: u64 = env
         .storage()
         .persistent()
-        .get(&DataKey::CredentialCounter)
+        .get(&CredentialDataKey::CredentialCounter)
         .unwrap_or(0);
     let credential_id = match counter.checked_add(1) {
         Some(id) => id,
@@ -72,7 +86,7 @@ pub fn mint_credential(
     };
     env.storage()
         .persistent()
-        .set(&DataKey::CredentialCounter, &credential_id);
+        .set(&CredentialDataKey::CredentialCounter, &credential_id);
 
     // Build credential info
     let info = CredentialInfo {
@@ -88,18 +102,19 @@ pub fn mint_credential(
     // separate owner key is kept (#116).
     env.storage()
         .persistent()
-        .set(&DataKey::Credential(credential_id), &info);
+        .set(&CredentialDataKey::Credential(credential_id), &info);
 
     // Track credentials per learner
     let mut learner_creds: soroban_sdk::Vec<u64> = env
         .storage()
         .persistent()
-        .get(&DataKey::LearnerCredentials(to.clone()))
+        .get(&CredentialDataKey::LearnerCredentials(to.clone()))
         .unwrap_or(soroban_sdk::Vec::new(env));
     learner_creds.push_back(credential_id);
-    env.storage()
-        .persistent()
-        .set(&DataKey::LearnerCredentials(to.clone()), &learner_creds);
+    env.storage().persistent().set(
+        &CredentialDataKey::LearnerCredentials(to.clone()),
+        &learner_creds,
+    );
 
     // Store the course-credential mapping to prevent duplicates
     env.storage().persistent().set(&dup_key, &credential_id);
@@ -108,12 +123,13 @@ pub fn mint_credential(
     let mut course_creds: soroban_sdk::Vec<u64> = env
         .storage()
         .persistent()
-        .get(&DataKey::CourseCredentials(course_id.clone()))
+        .get(&CredentialDataKey::CourseCredentials(course_id.clone()))
         .unwrap_or(soroban_sdk::Vec::new(env));
     course_creds.push_back(credential_id);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CourseCredentials(course_id.clone()), &course_creds);
+    env.storage().persistent().set(
+        &CredentialDataKey::CourseCredentials(course_id.clone()),
+        &course_creds,
+    );
 
     // Emit mint event. `metadata_uri` is included so indexers can reconstruct the
     // full credential metadata from the event stream alone (#101).

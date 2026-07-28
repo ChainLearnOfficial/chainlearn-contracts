@@ -4,7 +4,7 @@ mod rewards;
 mod types;
 
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
-use types::{Course, DataKey, ProgressInfo, QuizResult};
+use types::{Course, ProgressInfo, ProgressTrackerDataKey, QuizResult};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -24,10 +24,16 @@ pub struct ProgressTracker;
 impl ProgressTracker {
     /// Initialize the progress tracker with an admin.
     pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
-        if env.storage().persistent().has(&DataKey::Admin) {
+        if env
+            .storage()
+            .persistent()
+            .has(&ProgressTrackerDataKey::Admin)
+        {
             return Err(ContractError::AlreadyInitialized);
         }
-        env.storage().persistent().set(&DataKey::Admin, &admin);
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Admin, &admin);
         Ok(())
     }
 
@@ -67,14 +73,14 @@ impl ProgressTracker {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
 
         if env
             .storage()
             .persistent()
-            .has(&DataKey::Course(course_id.clone()))
+            .has(&ProgressTrackerDataKey::Course(course_id.clone()))
         {
             panic!("course already exists");
         }
@@ -113,7 +119,7 @@ impl ProgressTracker {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_created"),),
@@ -144,7 +150,7 @@ impl ProgressTracker {
         let course: Course = env
             .storage()
             .persistent()
-            .get(&DataKey::Course(course_id.clone()))
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
         // Verify course has at least one module (#80)
@@ -153,7 +159,7 @@ impl ProgressTracker {
         }
 
         // Check not already enrolled
-        let key = DataKey::Progress(learner.clone(), course_id.clone());
+        let key = ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone());
         if env.storage().persistent().has(&key) {
             panic!("already enrolled");
         }
@@ -199,12 +205,18 @@ impl ProgressTracker {
         let mut progress: ProgressInfo = env
             .storage()
             .persistent()
-            .get(&DataKey::Progress(learner.clone(), course_id.clone()))
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
             .expect("not enrolled");
 
         // Check not already completed
-        let completed_key =
-            DataKey::ModuleCompleted(learner.clone(), course_id.clone(), module_id.clone());
+        let completed_key = ProgressTrackerDataKey::ModuleCompleted(
+            learner.clone(),
+            course_id.clone(),
+            module_id.clone(),
+        );
         if env.storage().persistent().has(&completed_key) {
             panic!("module already completed");
         }
@@ -216,7 +228,7 @@ impl ProgressTracker {
         let course: Course = env
             .storage()
             .persistent()
-            .get(&DataKey::Course(course_id.clone()))
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
         if !course.module_ids.contains(&module_id) {
@@ -234,7 +246,7 @@ impl ProgressTracker {
         if let Some(idx) = module_index {
             if idx > 0 {
                 let prev_module = course.module_ids.get(idx - 1).unwrap();
-                let prev_key = DataKey::ModuleCompleted(
+                let prev_key = ProgressTrackerDataKey::ModuleCompleted(
                     learner.clone(),
                     course_id.clone(),
                     prev_module.clone(),
@@ -256,7 +268,7 @@ impl ProgressTracker {
             rewards::is_eligible_for_credential(&env, &learner, &course_id, &course, &progress);
 
         env.storage().persistent().set(
-            &DataKey::Progress(learner.clone(), course_id.clone()),
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
 
@@ -312,11 +324,15 @@ impl ProgressTracker {
         let mut progress: ProgressInfo = env
             .storage()
             .persistent()
-            .get(&DataKey::Progress(learner.clone(), course_id.clone()))
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
             .expect("not enrolled");
 
         // Check not already submitted
-        let quiz_key = DataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
+        let quiz_key =
+            ProgressTrackerDataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
         if env.storage().persistent().has(&quiz_key) {
             panic!("quiz already submitted");
         }
@@ -325,7 +341,7 @@ impl ProgressTracker {
         let course: Course = env
             .storage()
             .persistent()
-            .get(&DataKey::Course(course_id.clone()))
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
         if !course.quiz_ids.contains(&quiz_id) {
@@ -358,7 +374,7 @@ impl ProgressTracker {
 
         // Single write with all updated fields
         env.storage().persistent().set(
-            &DataKey::Progress(learner.clone(), course_id.clone()),
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
 
@@ -407,7 +423,7 @@ impl ProgressTracker {
     pub fn get_progress(env: Env, learner: Address, course_id: Symbol) -> ProgressInfo {
         env.storage()
             .persistent()
-            .get(&DataKey::Progress(learner, course_id))
+            .get(&ProgressTrackerDataKey::Progress(learner, course_id))
             .expect("not enrolled")
     }
 
@@ -429,9 +445,47 @@ impl ProgressTracker {
         let result: QuizResult = env
             .storage()
             .persistent()
-            .get(&DataKey::QuizResult(learner, course_id, quiz_id))
+            .get(&ProgressTrackerDataKey::QuizResult(
+                learner, course_id, quiz_id,
+            ))
             .expect("quiz not submitted");
         result.score
+    }
+
+    /// Get a learner's verified course score: the average across every quiz
+    /// they have submitted for the course, floored to a whole number.
+    ///
+    /// This is the on-chain source of truth for the score recorded on a
+    /// credential. The credential contract calls it before minting so a caller
+    /// cannot claim a score the learner never earned (#34).
+    ///
+    /// The aggregates it divides (`total_quiz_score`, `quizzes_submitted`) are
+    /// already maintained on every submission, so this stays a single read.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// The average submitted quiz score (0-100).
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    /// * If the learner has not submitted any quiz for the course
+    pub fn get_course_score(env: Env, learner: Address, course_id: Symbol) -> u32 {
+        let progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Progress(learner, course_id))
+            .expect("not enrolled");
+
+        if progress.quizzes_submitted == 0 {
+            panic!("no quizzes submitted");
+        }
+
+        // Both aggregates are bounded (score <= MAX_QUIZ_SCORE per quiz), so the
+        // average always fits back into u32.
+        (progress.total_quiz_score / progress.quizzes_submitted as u64) as u32
     }
 
     /// Check if a learner is eligible for a credential.
@@ -470,7 +524,7 @@ impl ProgressTracker {
         let progress: ProgressInfo = env
             .storage()
             .persistent()
-            .get(&DataKey::Progress(learner, course_id))
+            .get(&ProgressTrackerDataKey::Progress(learner, course_id))
             .expect("not enrolled");
 
         progress.eligible_for_credential
@@ -483,7 +537,7 @@ impl ProgressTracker {
     pub fn get_course(env: Env, course_id: Symbol) -> Course {
         env.storage()
             .persistent()
-            .get(&DataKey::Course(course_id))
+            .get(&ProgressTrackerDataKey::Course(course_id))
             .expect("course not found")
     }
 
@@ -491,7 +545,7 @@ impl ProgressTracker {
     pub fn admin(env: Env) -> Address {
         env.storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized")
     }
 
@@ -503,10 +557,12 @@ impl ProgressTracker {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&DataKey::Admin, &new_admin);
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Admin, &new_admin);
     }
 }
 
@@ -537,6 +593,106 @@ mod tests {
         quiz_ids.push_back(Symbol::new(env, "quiz_2"));
         client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
         course_id
+    }
+
+    // ── Issue #34: verified course score ─────────────────────────────────
+
+    #[test]
+    fn test_get_course_score_single_quiz() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &73);
+
+        assert_eq!(client.get_course_score(&learner, &course_id), 73);
+    }
+
+    #[test]
+    fn test_get_course_score_averages_submitted_quizzes() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &90);
+
+        assert_eq!(client.get_course_score(&learner, &course_id), 85);
+    }
+
+    #[test]
+    fn test_get_course_score_floors_the_average() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        // (80 + 91) / 2 = 85.5 -> 85
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &91);
+
+        assert_eq!(client.get_course_score(&learner, &course_id), 85);
+    }
+
+    #[test]
+    fn test_get_course_score_is_per_learner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let strong = Address::generate(&env);
+        let weak = Address::generate(&env);
+
+        client.enroll(&strong, &course_id);
+        client.enroll(&weak, &course_id);
+        client.submit_quiz_score(&strong, &course_id, &Symbol::new(&env, "quiz_1"), &95);
+        client.submit_quiz_score(&weak, &course_id, &Symbol::new(&env, "quiz_1"), &55);
+
+        assert_eq!(client.get_course_score(&strong, &course_id), 95);
+        assert_eq!(client.get_course_score(&weak, &course_id), 55);
+    }
+
+    #[test]
+    #[should_panic(expected = "no quizzes submitted")]
+    fn test_get_course_score_without_submissions_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // Enrolled but no quiz taken — there is no score to verify against.
+        client.get_course_score(&learner, &course_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_get_course_score_for_unenrolled_learner_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let stranger = Address::generate(&env);
+
+        client.get_course_score(&stranger, &course_id);
     }
 
     #[test]
@@ -745,7 +901,7 @@ mod tests {
         assert!(!events.is_empty(), "course_created event must be emitted");
     }
 
-/// #85: get_quiz_score reads without cloning; an unsubmitted quiz panics.
+    /// #85: get_quiz_score reads without cloning; an unsubmitted quiz panics.
     #[test]
     #[should_panic(expected = "quiz not submitted")]
     fn test_get_quiz_score_unsubmitted() {
@@ -869,8 +1025,14 @@ mod tests {
 
         let course = client.get_course(&course_id);
         assert_eq!(course.module_ids.len(), 3);
-        assert_eq!(course.module_ids.get(0).unwrap(), Symbol::new(&env, "mod_1"));
-        assert_eq!(course.module_ids.get(2).unwrap(), Symbol::new(&env, "mod_3"));
+        assert_eq!(
+            course.module_ids.get(0).unwrap(),
+            Symbol::new(&env, "mod_1")
+        );
+        assert_eq!(
+            course.module_ids.get(2).unwrap(),
+            Symbol::new(&env, "mod_3")
+        );
 
         let learner = Address::generate(&env);
         client.enroll(&learner, &course_id);
@@ -901,7 +1063,7 @@ mod tests {
         progress.eligible_for_credential = true;
         env.as_contract(&contract_id, || {
             env.storage().persistent().set(
-                &DataKey::Progress(learner.clone(), course_id.clone()),
+                &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
                 &progress,
             );
         });
