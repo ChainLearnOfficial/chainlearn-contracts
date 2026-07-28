@@ -32,6 +32,7 @@ pub struct AllowanceData {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardKey {
     pub learner: Address,
+    pub course_id: soroban_sdk::Symbol,
     pub quiz_id: soroban_sdk::Symbol,
 }
 
@@ -176,10 +177,16 @@ pub fn reduce_allowance(env: &Env, owner: &Address, spender: &Address, spend: i1
         .set(&DataKey::Allowance(key), &updated);
 }
 
-/// Check if a reward has already been claimed for a given learner + quiz.
-pub fn is_reward_claimed(env: &Env, learner: &Address, quiz_id: &soroban_sdk::Symbol) -> bool {
+/// Check if a reward has already been claimed for a given learner + course + quiz.
+pub fn is_reward_claimed(
+    env: &Env,
+    learner: &Address,
+    course_id: &soroban_sdk::Symbol,
+    quiz_id: &soroban_sdk::Symbol,
+) -> bool {
     let key = RewardKey {
         learner: learner.clone(),
+        course_id: course_id.clone(),
         quiz_id: quiz_id.clone(),
     };
     env.storage()
@@ -189,9 +196,15 @@ pub fn is_reward_claimed(env: &Env, learner: &Address, quiz_id: &soroban_sdk::Sy
 }
 
 /// Mark a reward as claimed.
-pub fn set_reward_claimed(env: &Env, learner: &Address, quiz_id: &soroban_sdk::Symbol) {
+pub fn set_reward_claimed(
+    env: &Env,
+    learner: &Address,
+    course_id: &soroban_sdk::Symbol,
+    quiz_id: &soroban_sdk::Symbol,
+) {
     let key = RewardKey {
         learner: learner.clone(),
+        course_id: course_id.clone(),
         quiz_id: quiz_id.clone(),
     };
     env.storage()
