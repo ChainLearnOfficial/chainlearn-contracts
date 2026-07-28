@@ -77,12 +77,7 @@ pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
 ///
 /// Topics: ["allowance_expired"]
 /// Data: (owner, spender, expiration_ledger)
-pub fn allowance_expired(
-    env: &Env,
-    owner: &Address,
-    spender: &Address,
-    expiration_ledger: u32,
-) {
+pub fn allowance_expired(env: &Env, owner: &Address, spender: &Address, expiration_ledger: u32) {
     let topics = (Symbol::new(env, "allowance_expired"),);
     env.events()
         .publish(topics, (owner, spender, expiration_ledger));
