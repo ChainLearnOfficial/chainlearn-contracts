@@ -22,6 +22,7 @@ pub fn calculate_progress(
     learner: &soroban_sdk::Address,
     course_id: &Symbol,
     course: &Course,
+    progress: &ProgressInfo,
 ) -> u32 {
     let scale = 10000u64;
 
@@ -35,7 +36,7 @@ pub fn calculate_progress(
 
     // Quiz performance component (30% weight)
     let quiz_progress_scaled = if course.total_quizzes > 0 {
-        let avg_score = average_quiz_score(env, learner, course_id);
+        let avg_score = average_quiz_score(progress);
         (avg_score as u64 * 30 * scale) / 100
     } else {
         0
@@ -69,13 +70,7 @@ fn count_completed_modules(env: &Env, learner: &soroban_sdk::Address, course_id:
 }
 
 /// Calculate the average quiz score for a learner in a course.
-fn average_quiz_score(env: &Env, learner: &soroban_sdk::Address, course_id: &Symbol) -> u32 {
-    let progress: ProgressInfo = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Progress(learner.clone(), course_id.clone()))
-        .expect("not enrolled");
-
+pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
     if progress.quiz_scores.is_empty() {
         return 0;
     }
@@ -102,6 +97,7 @@ fn average_quiz_score(env: &Env, learner: &soroban_sdk::Address, course_id: &Sym
 /// * `learner` - The learner address
 /// * `course_id` - The course identifier
 /// * `course` - The course configuration
+/// * `progress` - The learner's current progress record
 ///
 /// # Returns
 /// `true` if the learner qualifies for a credential.
@@ -110,6 +106,7 @@ pub fn is_eligible_for_credential(
     learner: &soroban_sdk::Address,
     course_id: &Symbol,
     course: &Course,
+    progress: &ProgressInfo,
 ) -> bool {
     // Check all modules completed
     let completed = count_completed_modules(env, learner, course_id);
@@ -118,19 +115,9 @@ pub fn is_eligible_for_credential(
     }
 
     // Check quiz scores
-    let progress: Option<ProgressInfo> = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Progress(learner.clone(), course_id.clone()));
-
-    match progress {
-        Some(p) => {
-            if p.quiz_scores.len() < course.total_quizzes {
-                return false;
-            }
-            let avg = average_quiz_score(env, learner, course_id);
-            avg >= MIN_CREDENTIAL_SCORE
-        }
-        None => false,
+    if progress.quiz_scores.len() < course.total_quizzes {
+        return false;
     }
+    let avg = average_quiz_score(progress);
+    avg >= MIN_CREDENTIAL_SCORE
 }
