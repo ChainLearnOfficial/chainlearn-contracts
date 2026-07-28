@@ -1,10 +1,11 @@
+use chainlearn_shared::{PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD};
 use soroban_sdk::{contracttype, Address, Env};
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataKey {
+pub enum TokenDataKey {
     Admin,
     TokenMetadata,
     Balance(Address),
@@ -40,19 +41,19 @@ pub struct RewardKey {
 
 /// Check whether the contract has been initialized.
 pub fn is_initialized(env: &Env) -> bool {
-    env.storage().persistent().has(&DataKey::Admin)
+    env.storage().persistent().has(&TokenDataKey::Admin)
 }
 
 /// Store the admin address.
 pub fn set_admin(env: &Env, admin: &Address) {
-    env.storage().persistent().set(&DataKey::Admin, admin);
+    env.storage().persistent().set(&TokenDataKey::Admin, admin);
 }
 
 /// Retrieve the admin address.
 pub fn get_admin(env: &Env) -> Address {
     env.storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&TokenDataKey::Admin)
         .expect("contract not initialized")
 }
 
@@ -60,7 +61,7 @@ pub fn get_admin(env: &Env) -> Address {
 pub fn get_balance(env: &Env, address: &Address) -> i128 {
     env.storage()
         .persistent()
-        .get(&DataKey::Balance(address.clone()))
+        .get(&TokenDataKey::Balance(address.clone()))
         .unwrap_or(0)
 }
 
@@ -68,14 +69,14 @@ pub fn get_balance(env: &Env, address: &Address) -> i128 {
 pub fn set_balance(env: &Env, address: &Address, amount: i128) {
     env.storage()
         .persistent()
-        .set(&DataKey::Balance(address.clone()), &amount);
+        .set(&TokenDataKey::Balance(address.clone()), &amount);
 }
 
 /// Get the total supply.
 pub fn get_total_supply(env: &Env) -> i128 {
     env.storage()
         .persistent()
-        .get(&DataKey::TotalSupply)
+        .get(&TokenDataKey::TotalSupply)
         .unwrap_or(0)
 }
 
@@ -83,7 +84,7 @@ pub fn get_total_supply(env: &Env) -> i128 {
 pub fn set_total_supply(env: &Env, amount: i128) {
     env.storage()
         .persistent()
-        .set(&DataKey::TotalSupply, &amount);
+        .set(&TokenDataKey::TotalSupply, &amount);
 }
 
 /// Get the allowance for an owner-spender pair.
@@ -93,11 +94,11 @@ pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
         owner: owner.clone(),
         spender: spender.clone(),
     };
-    let data_key = DataKey::Allowance(key);
+    let data_key = TokenDataKey::Allowance(key);
     match env
         .storage()
         .persistent()
-        .get::<DataKey, AllowanceData>(&data_key)
+        .get::<TokenDataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
             if env.ledger().sequence() > data.expiration_ledger {
@@ -118,11 +119,11 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
         owner: owner.clone(),
         spender: spender.clone(),
     };
-    let data_key = DataKey::Allowance(key);
+    let data_key = TokenDataKey::Allowance(key);
     match env
         .storage()
         .persistent()
-        .get::<DataKey, AllowanceData>(&data_key)
+        .get::<TokenDataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
             let is_expired = env.ledger().sequence() > data.expiration_ledger;
@@ -153,7 +154,7 @@ pub fn set_allowance(
     };
     env.storage()
         .persistent()
-        .set(&DataKey::Allowance(key), &data);
+        .set(&TokenDataKey::Allowance(key), &data);
 }
 
 /// Reduce the allowance amount while preserving the expiration ledger.
@@ -165,7 +166,7 @@ pub fn reduce_allowance(env: &Env, owner: &Address, spender: &Address, spend: i1
     let data: AllowanceData = env
         .storage()
         .persistent()
-        .get(&DataKey::Allowance(key.clone()))
+        .get(&TokenDataKey::Allowance(key.clone()))
         .expect("allowance not set");
     let new_amount = data.amount - spend;
     let updated = AllowanceData {
@@ -174,7 +175,7 @@ pub fn reduce_allowance(env: &Env, owner: &Address, spender: &Address, spend: i1
     };
     env.storage()
         .persistent()
-        .set(&DataKey::Allowance(key), &updated);
+        .set(&TokenDataKey::Allowance(key), &updated);
 }
 
 /// Check if a reward has already been claimed for a given learner + course + quiz.
@@ -191,7 +192,7 @@ pub fn is_reward_claimed(
     };
     env.storage()
         .persistent()
-        .get(&DataKey::RewardClaimed(key))
+        .get(&TokenDataKey::RewardClaimed(key))
         .unwrap_or(false)
 }
 
@@ -207,22 +208,26 @@ pub fn set_reward_claimed(
         course_id: course_id.clone(),
         quiz_id: quiz_id.clone(),
     };
-    env.storage()
-        .persistent()
-        .set(&DataKey::RewardClaimed(key), &true);
+    let data_key = TokenDataKey::RewardClaimed(key);
+    env.storage().persistent().set(&data_key, &true);
+    env.storage().persistent().extend_ttl(
+        &data_key,
+        PERSISTENT_TTL_THRESHOLD,
+        PERSISTENT_TTL_EXTEND_TO,
+    );
 }
 
 /// Store the progress-tracker contract address.
 pub fn set_progress_tracker(env: &Env, address: &Address) {
     env.storage()
         .persistent()
-        .set(&DataKey::ProgressTracker, address);
+        .set(&TokenDataKey::ProgressTracker, address);
 }
 
 /// Retrieve the progress-tracker contract address.
 pub fn get_progress_tracker(env: &Env) -> Address {
     env.storage()
         .persistent()
-        .get(&DataKey::ProgressTracker)
+        .get(&TokenDataKey::ProgressTracker)
         .expect("progress tracker not set")
 }

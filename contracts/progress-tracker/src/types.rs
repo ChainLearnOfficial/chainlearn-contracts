@@ -44,7 +44,7 @@ pub struct QuizResult {
 
 /// A learner's progress in a specific course.
 ///
-/// Individual quiz submissions are stored under [`DataKey::QuizResult`]; this
+/// Individual quiz submissions are stored under [`ProgressTrackerDataKey::QuizResult`]; this
 /// struct only keeps the aggregates needed to derive progress and eligibility,
 /// so a quiz result is never written twice.
 #[contracttype]
@@ -65,7 +65,7 @@ pub struct ProgressInfo {
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataKey {
+pub enum ProgressTrackerDataKey {
     Admin,
     Course(Symbol),
     Progress(Address, Symbol),

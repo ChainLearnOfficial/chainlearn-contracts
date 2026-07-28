@@ -39,6 +39,24 @@ pub fn transfer_from(env: &Env, spender: &Address, from: &Address, to: &Address,
     env.events().publish(topics, (spender, from, to, amount));
 }
 
+/// Emitted when tokens are burned by their owner.
+///
+/// Topics: ["burn"]
+/// Data: (from, amount)
+pub fn burn(env: &Env, from: &Address, amount: i128) {
+    let topics = (Symbol::new(env, "burn"),);
+    env.events().publish(topics, (from, amount));
+}
+
+/// Emitted when tokens are burned by an approved spender (delegated).
+///
+/// Topics: ["burn_from"]
+/// Data: (spender, from, amount)
+pub fn burn_from(env: &Env, spender: &Address, from: &Address, amount: i128) {
+    let topics = (Symbol::new(env, "burn_from"),);
+    env.events().publish(topics, (spender, from, amount));
+}
+
 /// Emitted when tokens are minted.
 ///
 /// Topics: ["mint"]
@@ -77,12 +95,7 @@ pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
 ///
 /// Topics: ["allowance_expired"]
 /// Data: (owner, spender, expiration_ledger)
-pub fn allowance_expired(
-    env: &Env,
-    owner: &Address,
-    spender: &Address,
-    expiration_ledger: u32,
-) {
+pub fn allowance_expired(env: &Env, owner: &Address, spender: &Address, expiration_ledger: u32) {
     let topics = (Symbol::new(env, "allowance_expired"),);
     env.events()
         .publish(topics, (owner, spender, expiration_ledger));
