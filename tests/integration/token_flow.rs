@@ -8,7 +8,7 @@ use learn_token::LearnTokenClient;
 use progress_tracker::ProgressTrackerClient;
 use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
 
-/// Create a minimal course (no modules, just the given quiz ids) and enroll
+/// Create a minimal course (one module, just the given quiz ids) and enroll
 /// `learner` in it. `claim_reward` only requires enrollment plus a submitted
 /// quiz score -- not module completion -- so tests that only exercise the
 /// reward flow don't need a full course.
@@ -19,12 +19,13 @@ fn setup_course_and_enroll(
     course_id: &Symbol,
     quiz_ids: &[Symbol],
 ) {
-    let module_ids: Vec<Symbol> = Vec::new(env);
+    let mut module_ids = Vec::new(env);
+    module_ids.push_back(Symbol::new(env, "mod_1"));
     let mut quiz_ids_vec = Vec::new(env);
     for q in quiz_ids {
         quiz_ids_vec.push_back(q.clone());
     }
-    progress_client.create_course(course_id, &0, &(quiz_ids.len() as u32), &module_ids, &quiz_ids_vec);
+    progress_client.create_course(course_id, &1, &(quiz_ids.len() as u32), &module_ids, &quiz_ids_vec);
     progress_client.enroll(learner, course_id);
 }
 
