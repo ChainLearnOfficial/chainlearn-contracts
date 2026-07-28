@@ -10,6 +10,9 @@ The workspace contains three interconnected contracts and a shared utilities pac
 
 The reward token for the platform. Implements the SEP-41 fungible token standard with additional reward logic:
 
+- **Standard interface**: `initialize`, `mint`, `transfer`, `balance`, `total_supply`, `approve`, `allowance`
+- **Reward system**: `claim_reward(learner, course_id, quiz_id)` looks up the learner's score for
+  that quiz from progress-tracker and mints tokens proportional to it
 - **Standard interface**: `initialize`, `mint`, `transfer`, `transfer_from`, `burn`, `burn_from`,
   `balance`, `total_supply`, `approve`, `allowance`
 - **Burning**: `burn(from, amount)` and `burn_from(spender, from, amount)` destroy tokens and
@@ -50,7 +53,8 @@ Tracks learner enrollment, module completion, and quiz scores:
   credential-nft check before minting
 - **Eligibility**: Automatic credential eligibility calculation
 - **Weighted progress**: 70% module completion + 30% quiz performance
-- **Events**: `enrolled(learner, course_id, enrolled_at)`, `module_completed(learner, course_id, module_id)`,
+- **Events**: `enrolled(learner, course_id, enrolled_at)`,
+  `module_completed(learner, course_id, module_id, overall_progress)`,
   `quiz_submitted(learner, course_id, quiz_id, score)`, and `credential_eligible(learner, course_id)` --
   published once, the moment eligibility flips from false to true, so indexers don't have to poll
   `get_progress`
@@ -64,6 +68,23 @@ Common types and constants used across all contracts:
 - `TOKEN_DECIMALS` (7): Token decimal places
 - `BASE_REWARD_PER_POINT` (100): Tokens minted per quiz point
 - `MAX_CREDENTIALS_PAGE_SIZE` (50): Maximum credentials returned by one paginated read
+
+### Cross-Contract Dependencies
+
+`learn-token` and `credential-nft` both call back into `progress-tracker` to verify on-chain
+progress before releasing a reward or credential, so the `progress-tracker` contract ID must be
+known and supplied when the other two are initialized:
+
+- **learn-token**: `initialize(admin, name, symbol, decimal, progress_tracker)` stores the
+  `progress-tracker` address. `claim_reward` calls `progress-tracker.get_quiz_score()` to read
+  the learner's verified score before minting -- the score cannot be supplied directly by the caller.
+- **credential-nft**: `initialize(admin, progress_tracker)` stores the same address.
+  `mint_credential` calls `progress-tracker.is_eligible_for_credential()` and rejects the mint if
+  the learner has not completed every module and quiz in the course.
+- `./scripts/deploy.sh` deploys all three contracts and writes their contract IDs to
+  `deployments-<network>.json`. `./scripts/initialize.sh` then reads that file and passes the
+  `progress-tracker` contract ID as the `progress_tracker` argument to both
+  `learn-token.initialize` and `credential-nft.initialize`.
 
 ## Directory Structure
 
@@ -215,7 +236,7 @@ soroban contract invoke --id <PROGRESS_ID> -- submit_quiz_score \
 
 # Claim token reward
 soroban contract invoke --id <TOKEN_ID> -- claim_reward \
-    --learner <ADDRESS> --quiz_id "quiz_1" --score 85
+    --learner <ADDRESS> --course_id "rust_101" --quiz_id "quiz_1"
 
 # Mint credential (after completing all modules and quizzes)
 soroban contract invoke --id <CREDENTIAL_ID> -- mint_credential \

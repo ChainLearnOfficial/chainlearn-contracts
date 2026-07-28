@@ -274,7 +274,7 @@ impl ProgressTracker {
 
         env.events().publish(
             (Symbol::new(&env, "module_completed"),),
-            (&learner, &course_id, &module_id),
+            (&learner, &course_id, &module_id, progress.overall_progress),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
@@ -981,6 +981,7 @@ mod tests {
                         learner.clone(),
                         course_id.clone(),
                         Symbol::new(&env, "mod_2"),
+                        46u32,
                     )
                         .into_val(&env),
                 )

@@ -573,6 +573,7 @@ mod progress_unit_tests {
                         learner.clone(),
                         course_id.clone(),
                         Symbol::new(&env, "mod_2"),
+                        46u32,
                     )
                         .into_val(&env),
                 )
