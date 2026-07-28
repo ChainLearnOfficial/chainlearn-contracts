@@ -25,6 +25,7 @@ mod token_unit_tests {
             &SorobanString::from_str(env, "CLRN"),
             &7,
             &pt_contract_id,
+            &1_000_000_000_000_000,
         );
 
         (admin, contract_id, pt_contract_id)
@@ -249,5 +250,102 @@ mod token_unit_tests {
         let recipient = Address::generate(&env);
         // We do NOT mock auths, so mint should fail auth requirement
         client.mint(&recipient, &1000);
+    }
+
+    #[test]
+    fn test_mint_up_to_and_exactly_at_cap() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let cap = 5000;
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &cap,
+        );
+
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Mint up to the cap
+        client.mint(&recipient, &3000);
+        assert_eq!(client.balance(&recipient), 3000);
+        assert_eq!(client.total_supply(), 3000);
+
+        // Mint exactly to the cap boundary
+        client.mint(&recipient, &2000);
+        assert_eq!(client.balance(&recipient), 5000);
+        assert_eq!(client.total_supply(), 5000);
+    }
+
+    #[test]
+    #[should_panic(expected = "maximum supply cap exceeded")]
+    fn test_mint_exceeding_cap_fails() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let cap = 5000;
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &cap,
+        );
+
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Mint exceeding the cap
+        client.mint(&recipient, &5001);
+    }
+
+    #[test]
+    fn test_admin_configures_max_supply_cap() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let cap = 5000;
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &cap,
+        );
+
+        assert_eq!(client.max_supply(), 5000);
+
+        env.mock_all_auths();
+        // Update cap to 10000
+        client.set_max_supply(&10000);
+        assert_eq!(client.max_supply(), 10000);
+
+        let recipient = Address::generate(&env);
+        client.mint(&recipient, &6000);
+        assert_eq!(client.balance(&recipient), 6000);
     }
 }

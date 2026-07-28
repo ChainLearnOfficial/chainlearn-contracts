@@ -46,6 +46,7 @@ impl LearnToken {
     /// * `symbol` - Token symbol (e.g., "CLRN")
     /// * `decimal` - Number of decimal places
     /// * `progress_tracker` - Address of the progress-tracker contract
+    /// * `max_supply` - On-chain maximum token supply cap
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -53,13 +54,18 @@ impl LearnToken {
         symbol: SorobanString,
         decimal: u32,
         progress_tracker: Address,
+        max_supply: i128,
     ) -> Result<(), ContractError> {
         if storage::is_initialized(&env) {
             return Err(ContractError::AlreadyInitialized);
         }
+        if max_supply < 0 {
+            panic!("max supply cannot be negative");
+        }
         storage::set_admin(&env, &admin);
         storage::set_total_supply(&env, 0);
         storage::set_progress_tracker(&env, &progress_tracker);
+        storage::set_max_supply(&env, max_supply);
 
         let metadata = TokenMetadata {
             name,
@@ -337,10 +343,15 @@ impl LearnToken {
             panic!("negative amount");
         }
 
+        let current_supply = storage::get_total_supply(&env);
+        let max_supply = storage::get_max_supply(&env);
+        if current_supply + amount > max_supply {
+            panic!("maximum supply cap exceeded");
+        }
+
         let current_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, current_balance + amount);
 
-        let current_supply = storage::get_total_supply(&env);
         storage::set_total_supply(&env, current_supply + amount);
 
         events::mint(&env, &to, amount);
@@ -413,6 +424,25 @@ impl LearnToken {
     /// `claim_reward` panics (#31).
     pub fn progress_tracker(env: Env) -> Address {
         storage::get_progress_tracker(&env)
+    }
+
+    /// Returns the maximum supply cap.
+    pub fn max_supply(env: Env) -> i128 {
+        storage::get_max_supply(&env)
+    }
+
+    /// Update the maximum supply cap. Admin only.
+    pub fn set_max_supply(env: Env, new_max_supply: i128) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        if new_max_supply < 0 {
+            panic!("max supply cannot be negative");
+        }
+        let current_supply = storage::get_total_supply(&env);
+        if new_max_supply < current_supply {
+            panic!("new cap cannot be less than current total supply");
+        }
+        storage::set_max_supply(&env, new_max_supply);
     }
 
     /// Transfer admin rights to a new address.
@@ -567,6 +597,7 @@ mod tests {
             &SorobanString::from_str(env, "CLRN"),
             &7,
             &pt_contract_id,
+            &1_000_000_000_000_000,
         );
 
         (admin, lt_contract_id, pt_contract_id)

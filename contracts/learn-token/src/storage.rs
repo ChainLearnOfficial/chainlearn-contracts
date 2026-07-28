@@ -13,6 +13,7 @@ pub enum TokenDataKey {
     TotalSupply,
     RewardClaimed(RewardKey),
     ProgressTracker,
+    MaxSupply,
 }
 
 #[contracttype]
@@ -273,4 +274,19 @@ pub fn get_progress_tracker(env: &Env) -> Address {
         .persistent()
         .get(&TokenDataKey::ProgressTracker)
         .expect("progress tracker not set")
+}
+
+/// Store the maximum supply cap.
+pub fn set_max_supply(env: &Env, cap: i128) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::MaxSupply, &cap);
+}
+
+/// Retrieve the maximum supply cap.
+pub fn get_max_supply(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::MaxSupply)
+        .expect("max supply not set")
 }
