@@ -361,7 +361,7 @@ impl LearnToken {
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> i128 {
         learner.require_auth();
 
-        if storage::is_reward_claimed(&env, &learner, &quiz_id) {
+        if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
             panic!("reward already claimed");
         }
 
@@ -394,7 +394,7 @@ impl LearnToken {
         storage::set_total_supply(&env, current_supply + reward_amount);
 
         // Mark reward as claimed to prevent double-claiming
-        storage::set_reward_claimed(&env, &learner, &quiz_id);
+        storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
 

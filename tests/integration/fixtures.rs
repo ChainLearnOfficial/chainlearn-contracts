@@ -6,7 +6,7 @@
 use learn_token::{LearnToken, LearnTokenClient};
 use credential_nft::{CredentialNft, CredentialNftClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 
 /// Represents a fully deployed ChainLearn test environment.
 pub struct ChainLearnEnv {
@@ -35,8 +35,8 @@ pub fn setup_chainlearn_env() -> ChainLearnEnv {
     let token_client = LearnTokenClient::new(&env, &token_contract_id);
     token_client.initialize(
         &admin,
-        &Symbol::new(&env, "CLearn"),
-        &Symbol::new(&env, "CLRN"),
+        &SorobanString::from_str(&env, "CLearn"),
+        &SorobanString::from_str(&env, "CLRN"),
         &7,
         &progress_contract_id,
     );
