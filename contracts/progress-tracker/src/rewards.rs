@@ -23,23 +23,26 @@ pub fn calculate_progress(
     course_id: &Symbol,
     course: &Course,
 ) -> u32 {
+    let scale = 10000u64;
+
     // Module completion component (70% weight)
-    let module_progress = if course.total_modules > 0 {
+    let module_progress_scaled = if course.total_modules > 0 {
         let completed = count_completed_modules(env, learner, course_id);
-        (completed * 70) / course.total_modules
+        (completed as u64 * 70 * scale) / course.total_modules as u64
     } else {
         0
     };
 
     // Quiz performance component (30% weight)
-    let quiz_progress = if course.total_quizzes > 0 {
+    let quiz_progress_scaled = if course.total_quizzes > 0 {
         let avg_score = average_quiz_score(env, learner, course_id);
-        (avg_score * 30) / 100
+        (avg_score as u64 * 30 * scale) / 100
     } else {
         0
     };
 
-    let total = module_progress + quiz_progress;
+    let total_scaled = module_progress_scaled + quiz_progress_scaled;
+    let total = (total_scaled / scale) as u32;
     if total > 100 {
         100
     } else {
