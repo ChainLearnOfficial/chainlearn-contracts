@@ -650,6 +650,24 @@ mod tests {
         client.enroll(&learner, &course_id); // should panic
     }
 
+    #[test]
+    #[should_panic(expected = "course already exists")]
+    fn test_create_course_rejects_duplicate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        // Try to create a course with the same ID — should panic
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    }
+
     /// #83: a quiz result is written once, under its own key. ProgressInfo
     /// only carries the aggregates derived from it.
     #[test]
