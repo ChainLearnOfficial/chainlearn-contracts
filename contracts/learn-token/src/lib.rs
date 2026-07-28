@@ -229,13 +229,13 @@ impl LearnToken {
     /// Emits an allowance_expired event if the allowance has expired.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
         let (exists, is_expired, expiration_ledger) =
-            storage::check_allowance_expired(&env, &owner, &spender);
+            storage::check_allowance_expired_readonly(&env, &owner, &spender);
 
         if exists && is_expired {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
         }
 
-        storage::get_allowance(&env, &owner, &spender)
+        storage::get_allowance_readonly(&env, &owner, &spender)
     }
 
     // ── SEP-41 Burning ────────────────────────────────────────────────────
@@ -1125,6 +1125,35 @@ mod tests {
         });
         env.as_contract(&lt_contract_id, || {
             assert!(!env.storage().persistent().has(&key));
+        });
+    }
+
+    #[test]
+    fn test_allowance_getter_does_not_remove_stale_entry() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        let expiration_ledger = env.ledger().sequence() + 10;
+        client.approve(&owner, &spender, &100, &expiration_ledger);
+
+        env.ledger()
+            .with_mut(|l| l.sequence_number = expiration_ledger + 1);
+
+        // Call the getter allowance()
+        assert_eq!(client.allowance(&owner, &spender), 0);
+
+        // Confirm the key STILL exists in storage because the getter did not mutate it
+        let key = storage::TokenDataKey::Allowance(storage::AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        });
+        env.as_contract(&lt_contract_id, || {
+            assert!(env.storage().persistent().has(&key));
         });
     }
 
