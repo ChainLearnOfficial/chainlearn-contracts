@@ -120,10 +120,9 @@ mod token_unit_tests {
         let quiz_id = Symbol::new(&env, "quiz_1");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
 
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id);
 
         // 80 * 100 (BASE_REWARD_PER_POINT) = 8000
-        assert_eq!(reward, 8000);
         assert_eq!(client.balance(&learner), 8000);
         assert_eq!(client.total_supply(), 8000);
     }

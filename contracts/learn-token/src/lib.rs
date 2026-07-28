@@ -358,7 +358,7 @@ impl LearnToken {
     /// * `learner` - The learner claiming the reward (must authorize)
     /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - Unique identifier for the quiz
-    pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> i128 {
+    pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
         learner.require_auth();
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
@@ -397,8 +397,6 @@ impl LearnToken {
         storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
-
-        reward_amount
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────
@@ -644,10 +642,9 @@ mod tests {
         let quiz_id = Symbol::new(&env, "quiz_math_101");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
 
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id);
 
         // 85 * 100 (BASE_REWARD_PER_POINT) = 8500
-        assert_eq!(reward, 8500);
         assert_eq!(client.balance(&learner), 8500);
     }
 
@@ -744,8 +741,8 @@ mod tests {
         new_pt_client.submit_quiz_score(&learner, &course_id, &quiz_id, &90);
 
         // Claim reward — should succeed using the new progress-tracker
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
-        assert_eq!(reward, 9000); // 90 * 100
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        assert_eq!(client.balance(&learner), 9000); // 90 * 100
     }
 
     #[test]
@@ -1092,9 +1089,9 @@ mod tests {
         let quiz_id = Symbol::new(&env, "quiz_math_101");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 100);
 
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id);
         // 100 * 100 = 10_000 (equals MAX_REWARD_AMOUNT)
-        assert_eq!(reward, 10_000);
+        assert_eq!(client.balance(&learner), 10_000);
     }
 
     // ── #111: expired allowances can be explicitly pruned ────────────────────
