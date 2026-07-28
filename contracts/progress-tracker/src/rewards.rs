@@ -71,18 +71,10 @@ fn count_completed_modules(env: &Env, learner: &soroban_sdk::Address, course_id:
 
 /// Calculate the average quiz score for a learner in a course.
 pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
-    if progress.quiz_scores.is_empty() {
+    if progress.quizzes_submitted == 0 {
         return 0;
     }
-
-    let mut total_score: u64 = 0;
-    let count = progress.quiz_scores.len() as u64;
-
-    for quiz in progress.quiz_scores.iter() {
-        total_score += quiz.score as u64;
-    }
-
-    (total_score / count) as u32
+    (progress.total_quiz_score / progress.quizzes_submitted as u64) as u32
 }
 
 /// Determine if a learner is eligible for a credential.
@@ -115,7 +107,7 @@ pub fn is_eligible_for_credential(
     }
 
     // Check quiz scores
-    if progress.quiz_scores.len() < course.total_quizzes {
+    if progress.quizzes_submitted < course.total_quizzes {
         return false;
     }
     let avg = average_quiz_score(progress);
