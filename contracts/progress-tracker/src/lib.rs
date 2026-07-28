@@ -132,7 +132,8 @@ impl ProgressTracker {
         let progress = ProgressInfo {
             enrolled_at: env.ledger().timestamp(),
             modules_completed_bitmap: 0,
-            quiz_scores: Vec::new(&env),
+            quizzes_submitted: 0,
+            total_quiz_score: 0,
             overall_progress: 0,
             eligible_for_credential: false,
         };
@@ -264,11 +265,11 @@ impl ProgressTracker {
         };
 
         env.storage().persistent().set(&quiz_key, &result);
-        progress.quiz_scores.push_back(result);
+        
+        progress.quizzes_submitted += 1;
+        progress.total_quiz_score += score as u64;
 
         // Recalculate progress with updated quiz scores
-        // Note: calculate_progress reads from storage, but we've already updated quiz_scores in memory
-        // This avoids a redundant write by calculating everything before the final storage update
         progress.overall_progress =
             rewards::calculate_progress(&env, &learner, &course_id, &course, &progress);
         progress.eligible_for_credential =

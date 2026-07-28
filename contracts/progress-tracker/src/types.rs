@@ -48,8 +48,10 @@ pub struct ProgressInfo {
     pub enrolled_at: u64,
     /// Bitmap tracking completed module indices.
     pub modules_completed_bitmap: u64,
-    /// Quiz results for this course.
-    pub quiz_scores: Vec<QuizResult>,
+    /// Number of quizzes submitted.
+    pub quizzes_submitted: u32,
+    /// Sum of quiz scores.
+    pub total_quiz_score: u64,
     /// Overall progress percentage (0-100).
     pub overall_progress: u32,
     /// Whether the learner qualifies for a credential.

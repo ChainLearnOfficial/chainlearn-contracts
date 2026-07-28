@@ -44,7 +44,8 @@ mod progress_unit_tests {
         assert_eq!(progress.overall_progress, 0);
         assert!(!progress.eligible_for_credential);
         assert_eq!(progress.modules_completed_bitmap.count_ones(), 0);
-        assert_eq!(progress.quiz_scores.len(), 0);
+        assert_eq!(progress.quizzes_submitted, 0);
+        assert_eq!(progress.total_quiz_score, 0);
     }
 
     #[test]
@@ -79,8 +80,8 @@ mod progress_unit_tests {
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
 
         let progress = client.get_progress(&learner, &course_id);
-        assert_eq!(progress.quiz_scores.len(), 1);
-        assert_eq!(progress.quiz_scores.get(0).unwrap().score, 85);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 85);
     }
 
     #[test]
