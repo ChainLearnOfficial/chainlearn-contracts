@@ -24,7 +24,7 @@ fn test_end_to_end_credential_flow() {
     fixtures::complete_full_course(env, learner, &course_id, &progress_client);
 
     // Mint credential (average score = (85+75)/2 = 80)
-    let metadata_uri = Symbol::new(env, "ipfs://QmCredential123");
+    let metadata_uri = Symbol::new(env, "ipfs_QmCredential123");
     let cred_id = credential_client.mint_credential(learner, &course_id, &80, &metadata_uri);
 
     // Verify
@@ -45,7 +45,7 @@ fn test_public_verification() {
     let credential_client = CredentialNftClient::new(env, &setup.credential_contract_id);
 
     let course_id = Symbol::new(env, "rust_101");
-    let uri = Symbol::new(env, "ipfs://Qm123");
+    let uri = Symbol::new(env, "ipfs_Qm123");
 
     let cred_id = credential_client.mint_credential(learner, &course_id, &90, &uri);
 
@@ -63,7 +63,7 @@ fn test_multiple_course_credentials() {
 
     let credential_client = CredentialNftClient::new(env, &setup.credential_contract_id);
 
-    let uri = Symbol::new(env, "ipfs://meta");
+    let uri = Symbol::new(env, "ipfs_meta");
 
     let cred1 = credential_client.mint_credential(learner, &Symbol::new(env, "rust_101"), &85, &uri);
     let cred2 = credential_client.mint_credential(learner, &Symbol::new(env, "sol_201"), &90, &uri);
@@ -84,7 +84,7 @@ fn test_revoked_credential_shows_revoked_status() {
     let credential_client = CredentialNftClient::new(env, &setup.credential_contract_id);
 
     let course_id = Symbol::new(env, "rust_101");
-    let uri = Symbol::new(env, "ipfs://meta");
+    let uri = Symbol::new(env, "ipfs_meta");
 
     let cred_id = credential_client.mint_credential(learner, &course_id, &80, &uri);
     assert!(credential_client.is_credential_valid(&cred_id));
@@ -106,7 +106,7 @@ fn test_credential_metadata_uri() {
     let credential_client = CredentialNftClient::new(env, &setup.credential_contract_id);
 
     let course_id = Symbol::new(env, "rust_101");
-    let expected_uri = Symbol::new(env, "ipfs://QmTestMetadata");
+    let expected_uri = Symbol::new(env, "ipfs_QmTestMetadata");
 
     let cred_id = credential_client.mint_credential(learner, &course_id, &75, &expected_uri);
 
@@ -124,7 +124,7 @@ fn test_credential_has_issuance_timestamp() {
     let credential_client = CredentialNftClient::new(env, &setup.credential_contract_id);
 
     let course_id = Symbol::new(env, "rust_101");
-    let uri = Symbol::new(env, "ipfs://meta");
+    let uri = Symbol::new(env, "ipfs_meta");
 
     let cred_id = credential_client.mint_credential(learner, &course_id, &80, &uri);
 

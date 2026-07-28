@@ -1,7 +1,33 @@
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
-use soroban_sdk::{Env, Symbol, Vec};
+use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::types::{Course, DataKey, ProgressInfo};
+use crate::types::{Course, ProgressInfo, ProgressTrackerDataKey};
+
+/// Count how many modules a learner has completed in a course.
+///
+/// `modules` is passed in by the caller instead of being re-fetched here,
+/// since `Course::module_ids` already holds it (#97): the top-level entry
+/// point reads `Course` once and threads the same list through to both the
+/// progress and eligibility calculations below.
+pub fn count_completed_modules(
+    env: &Env,
+    learner: &Address,
+    course_id: &Symbol,
+    modules: &Vec<Symbol>,
+) -> u32 {
+    let mut count = 0u32;
+    for module_id in modules.iter() {
+        let key = ProgressTrackerDataKey::ModuleCompleted(
+            learner.clone(),
+            course_id.clone(),
+            module_id.clone(),
+        );
+        if env.storage().persistent().has(&key) {
+            count += 1;
+        }
+    }
+    count
+}
 
 /// Calculate the overall progress percentage for a learner in a course.
 ///
@@ -14,12 +40,13 @@ use crate::types::{Course, DataKey, ProgressInfo};
 /// * `learner` - The learner address
 /// * `course_id` - The course identifier
 /// * `course` - The course configuration
+/// * `progress` - The learner's current progress record
 ///
 /// # Returns
 /// Progress percentage (0-100).
 pub fn calculate_progress(
     env: &Env,
-    learner: &soroban_sdk::Address,
+    learner: &Address,
     course_id: &Symbol,
     course: &Course,
     progress: &ProgressInfo,
@@ -30,6 +57,9 @@ pub fn calculate_progress(
     let module_progress_scaled = if course.total_modules > 0 {
         let completed = count_completed_modules(env, learner, course_id);
         (completed as u64 * 70 * scale) / course.total_modules as u64
+    let module_progress = if course.total_modules > 0 {
+        let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
+        (completed * 70) / course.total_modules
     } else {
         0
     };
@@ -38,6 +68,8 @@ pub fn calculate_progress(
     let quiz_progress_scaled = if course.total_quizzes > 0 {
         let avg_score = average_quiz_score(progress);
         (avg_score as u64 * 30 * scale) / 100
+    let quiz_progress = if course.total_quizzes > 0 {
+        (average_quiz_score(progress) * 30) / 100
     } else {
         0
     };
@@ -70,10 +102,15 @@ fn count_completed_modules(env: &Env, learner: &soroban_sdk::Address, course_id:
 }
 
 /// Calculate the average quiz score for a learner in a course.
+/// Calculate the average quiz score from the aggregates on `ProgressInfo`.
+///
+/// Derived from the running total kept at submission time, so no quiz result
+/// has to be re-read from storage.
 pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
     if progress.quizzes_submitted == 0 {
         return 0;
     }
+
     (progress.total_quiz_score / progress.quizzes_submitted as u64) as u32
 }
 
@@ -95,13 +132,13 @@ pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
 /// `true` if the learner qualifies for a credential.
 pub fn is_eligible_for_credential(
     env: &Env,
-    learner: &soroban_sdk::Address,
+    learner: &Address,
     course_id: &Symbol,
     course: &Course,
     progress: &ProgressInfo,
 ) -> bool {
     // Check all modules completed
-    let completed = count_completed_modules(env, learner, course_id);
+    let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
     if completed < course.total_modules {
         return false;
     }
@@ -112,4 +149,11 @@ pub fn is_eligible_for_credential(
     }
     let avg = average_quiz_score(progress);
     avg >= MIN_CREDENTIAL_SCORE
+    // Check all quizzes submitted
+    if progress.quizzes_submitted < course.total_quizzes {
+        return false;
+    }
+
+    // Check average score meets minimum
+    average_quiz_score(progress) >= MIN_CREDENTIAL_SCORE
 }

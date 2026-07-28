@@ -21,12 +21,12 @@ pub struct CredentialInfo {
 /// Counter key for generating unique credential IDs.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataKey {
+pub enum CredentialDataKey {
     Admin,
     ProgressTracker,
     CredentialCounter,
     Credential(u64),
-    CredentialOwner(u64),
     LearnerCredentials(Address),
     CourseCredential(Address, Symbol),
+    CourseCredentials(Symbol),
 }
