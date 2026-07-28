@@ -51,7 +51,12 @@ pub fn calculate_progress(
     course: &Course,
     progress: &ProgressInfo,
 ) -> u32 {
+    let scale = 10000u64;
+
     // Module completion component (70% weight)
+    let module_progress_scaled = if course.total_modules > 0 {
+        let completed = count_completed_modules(env, learner, course_id);
+        (completed as u64 * 70 * scale) / course.total_modules as u64
     let module_progress = if course.total_modules > 0 {
         let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
         (completed * 70) / course.total_modules
@@ -60,13 +65,17 @@ pub fn calculate_progress(
     };
 
     // Quiz performance component (30% weight)
+    let quiz_progress_scaled = if course.total_quizzes > 0 {
+        let avg_score = average_quiz_score(progress);
+        (avg_score as u64 * 30 * scale) / 100
     let quiz_progress = if course.total_quizzes > 0 {
         (average_quiz_score(progress) * 30) / 100
     } else {
         0
     };
 
-    let total = module_progress + quiz_progress;
+    let total_scaled = module_progress_scaled + quiz_progress_scaled;
+    let total = (total_scaled / scale) as u32;
     if total > 100 {
         100
     } else {
@@ -74,6 +83,25 @@ pub fn calculate_progress(
     }
 }
 
+/// Count how many modules a learner has completed in a course.
+fn count_completed_modules(env: &Env, learner: &soroban_sdk::Address, course_id: &Symbol) -> u32 {
+    let modules: Vec<Symbol> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::CourseModules(course_id.clone()))
+        .unwrap_or(Vec::new(env));
+
+    let mut count = 0u32;
+    for module_id in modules.iter() {
+        let key = DataKey::ModuleCompleted(learner.clone(), course_id.clone(), module_id.clone());
+        if env.storage().persistent().has(&key) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Calculate the average quiz score for a learner in a course.
 /// Calculate the average quiz score from the aggregates on `ProgressInfo`.
 ///
 /// Derived from the running total kept at submission time, so no quiz result
@@ -115,6 +143,12 @@ pub fn is_eligible_for_credential(
         return false;
     }
 
+    // Check quiz scores
+    if progress.quizzes_submitted < course.total_quizzes {
+        return false;
+    }
+    let avg = average_quiz_score(progress);
+    avg >= MIN_CREDENTIAL_SCORE
     // Check all quizzes submitted
     if progress.quizzes_submitted < course.total_quizzes {
         return false;

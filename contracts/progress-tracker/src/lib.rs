@@ -3,6 +3,10 @@
 mod rewards;
 mod types;
 
+use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
+use types::{Course, DataKey, ProgressInfo, QuizResult};
+
+
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 use types::{Course, ProgressInfo, ProgressTrackerDataKey, QuizResult};
 
@@ -166,6 +170,7 @@ impl ProgressTracker {
 
         let progress = ProgressInfo {
             enrolled_at: env.ledger().timestamp(),
+            modules_completed_bitmap: 0,
             quizzes_submitted: 0,
             total_quiz_score: 0,
             overall_progress: 0,
@@ -221,6 +226,8 @@ impl ProgressTracker {
             panic!("module already completed");
         }
 
+        // Verify module exists in course and get its index
+        let modules: Vec<Symbol> = env
         // Single read serves both the module lookup/ordering check below and
         // the progress/eligibility recalculation further down -- Course
         // carries module_ids, so there is no second fetch under a separate
@@ -231,6 +238,16 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
+        let mut module_index: Option<u32> = None;
+        for (i, m) in modules.iter().enumerate() {
+            if m == module_id {
+                module_index = Some(i as u32);
+                break;
+            }
+        }
+        let idx = module_index.expect("module not found in course");
+        if idx >= 64 {
+            panic!("module index exceeds bitmap capacity");
         if !course.module_ids.contains(&module_id) {
             panic!("module not found in course");
         }
@@ -259,6 +276,7 @@ impl ProgressTracker {
 
         // Mark module as completed
         env.storage().persistent().set(&completed_key, &true);
+        progress.modules_completed_bitmap |= 1 << idx;
 
         let was_eligible = progress.eligible_for_credential;
 
@@ -359,6 +377,11 @@ impl ProgressTracker {
         };
 
         env.storage().persistent().set(&quiz_key, &result);
+        
+        progress.quizzes_submitted += 1;
+        progress.total_quiz_score += score as u64;
+
+        // Recalculate progress with updated quiz scores
 
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
@@ -527,6 +550,13 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Progress(learner, course_id))
             .expect("not enrolled");
 
+        let progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Progress(learner.clone(), course_id.clone()))
+            .expect("not enrolled");
+
+        rewards::is_eligible_for_credential(&env, &learner, &course_id, &course, &progress)
         progress.eligible_for_credential
     }
 

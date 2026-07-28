@@ -46,6 +46,7 @@ mod progress_unit_tests {
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.overall_progress, 0);
         assert!(!progress.eligible_for_credential);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 0);
         assert_eq!(progress.quizzes_submitted, 0);
         assert_eq!(progress.total_quiz_score, 0);
     }
@@ -64,6 +65,7 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
 
         let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 1);
         assert!(progress.overall_progress > 0);
     }
 

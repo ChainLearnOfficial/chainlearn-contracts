@@ -52,6 +52,11 @@ pub struct QuizResult {
 pub struct ProgressInfo {
     /// When the learner enrolled.
     pub enrolled_at: u64,
+    /// Bitmap tracking completed module indices.
+    pub modules_completed_bitmap: u64,
+    /// Number of quizzes submitted.
+    pub quizzes_submitted: u32,
+    /// Sum of quiz scores.
     /// Number of quizzes submitted for this course.
     pub quizzes_submitted: u32,
     /// Sum of every submitted quiz score, used to derive the average.
