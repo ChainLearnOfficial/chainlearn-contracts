@@ -365,9 +365,9 @@ impl LearnToken {
             panic!("reward already claimed");
         }
 
-        // Verify score by querying the progress-tracker contract
-        let progress_tracker = storage::get_progress_tracker(&env);
-        let client = ProgressTrackerClient::new(&env, &progress_tracker);
+        // Verify score by querying the progress-tracker contract.
+        // We construct the client once per call to avoid redundant loading gas overhead.
+        let client = get_progress_client(&env);
         let score = client.get_quiz_score(&learner, &course_id, &quiz_id);
 
         if score == 0 {
@@ -535,6 +535,12 @@ impl LearnToken {
         events::approve(&env, &owner, &spender, new_amount, data.expiration_ledger);
     }
 }
+
+fn get_progress_client(env: &Env) -> ProgressTrackerClient<'_> {
+    let address = storage::get_progress_tracker(env);
+    ProgressTrackerClient::new(env, &address)
+}
+
 
 #[cfg(test)]
 mod tests {
