@@ -68,7 +68,7 @@ impl LearnToken {
         };
         env.storage()
             .persistent()
-            .set(&storage::DataKey::TokenMetadata, &metadata);
+            .set(&storage::TokenDataKey::TokenMetadata, &metadata);
         Ok(())
     }
 
@@ -79,7 +79,7 @@ impl LearnToken {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::TokenMetadata)
+            .get(&storage::TokenDataKey::TokenMetadata)
             .expect("not initialized");
         metadata.name
     }
@@ -89,7 +89,7 @@ impl LearnToken {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::TokenMetadata)
+            .get(&storage::TokenDataKey::TokenMetadata)
             .expect("not initialized");
         metadata.symbol
     }
@@ -99,7 +99,7 @@ impl LearnToken {
         let metadata: TokenMetadata = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::TokenMetadata)
+            .get(&storage::TokenDataKey::TokenMetadata)
             .expect("not initialized");
         metadata.decimal
     }
@@ -238,6 +238,90 @@ impl LearnToken {
         storage::get_allowance(&env, &owner, &spender)
     }
 
+    // ── SEP-41 Burning ────────────────────────────────────────────────────
+
+    /// Burn tokens held by their owner, permanently reducing the total supply.
+    ///
+    /// Required by SEP-41. Burning is unrestricted: any holder may destroy
+    /// their own tokens, with no admin involvement.
+    ///
+    /// # Arguments
+    /// * `from` - Token owner whose balance is reduced (must authorize)
+    /// * `amount` - Amount to burn
+    ///
+    /// # Panics
+    /// * If `amount` is negative
+    /// * If `from` holds less than `amount`
+    pub fn burn(env: Env, from: Address, amount: i128) {
+        from.require_auth();
+
+        if amount < 0 {
+            panic!("negative amount");
+        }
+
+        let from_balance = storage::get_balance(&env, &from);
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+
+        storage::set_balance(&env, &from, from_balance - amount);
+
+        // Total supply tracks circulating tokens, so burning reduces it —
+        // otherwise the supply would overstate what actually exists.
+        let current_supply = storage::get_total_supply(&env);
+        storage::set_total_supply(&env, current_supply - amount);
+
+        events::burn(&env, &from, amount);
+    }
+
+    /// Burn tokens on behalf of an owner, drawing on an approved allowance.
+    ///
+    /// Required by SEP-41. The spender authorizes; the owner's balance and the
+    /// spender's allowance are both reduced, mirroring `transfer_from`.
+    ///
+    /// # Arguments
+    /// * `spender` - Address spending the allowance (must authorize)
+    /// * `from` - Token owner whose balance is reduced
+    /// * `amount` - Amount to burn
+    ///
+    /// # Panics
+    /// * If `amount` is negative
+    /// * If the spender's allowance is below `amount`
+    /// * If `from` holds less than `amount`
+    pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
+        spender.require_auth();
+
+        if amount < 0 {
+            panic!("negative amount");
+        }
+
+        // Surface an expired allowance the same way transfer_from does, so
+        // indexers see one consistent signal regardless of which path spent it.
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &from, &spender);
+        if exists && is_expired {
+            events::allowance_expired(&env, &from, &spender, expiration_ledger);
+        }
+
+        let allowance = storage::get_allowance(&env, &from, &spender);
+        if allowance < amount {
+            panic!("insufficient allowance");
+        }
+
+        let from_balance = storage::get_balance(&env, &from);
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+
+        storage::reduce_allowance(&env, &from, &spender, amount);
+        storage::set_balance(&env, &from, from_balance - amount);
+
+        let current_supply = storage::get_total_supply(&env);
+        storage::set_total_supply(&env, current_supply - amount);
+
+        events::burn_from(&env, &spender, &from, amount);
+    }
+
     // ── Minting (Admin Only) ──────────────────────────────────────────────
 
     /// Mint new tokens to an address. Admin only.
@@ -277,7 +361,7 @@ impl LearnToken {
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> i128 {
         learner.require_auth();
 
-        if storage::is_reward_claimed(&env, &learner, &quiz_id) {
+        if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
             panic!("reward already claimed");
         }
 
@@ -310,7 +394,7 @@ impl LearnToken {
         storage::set_total_supply(&env, current_supply + reward_amount);
 
         // Mark reward as claimed to prevent double-claiming
-        storage::set_reward_claimed(&env, &learner, &quiz_id);
+        storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
 
@@ -322,6 +406,15 @@ impl LearnToken {
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
+    }
+
+    /// Returns the progress-tracker address rewards are verified against.
+    ///
+    /// Read-only. Deployment scripts use this to confirm the wiring actually
+    /// landed, instead of discovering an unset tracker when the first
+    /// `claim_reward` panics (#31).
+    pub fn progress_tracker(env: Env) -> Address {
+        storage::get_progress_tracker(&env)
     }
 
     /// Transfer admin rights to a new address.
@@ -383,6 +476,33 @@ impl LearnToken {
         events::approve(&env, &owner, &spender, new_amount, expiration_ledger);
     }
 
+    /// Remove an expired allowance from persistent storage (#111).
+    ///
+    /// Until now, an expired `AllowanceData` entry was only pruned as a side
+    /// effect of someone calling `allowance()` or `transfer_from()` for that
+    /// exact owner/spender pair -- if nobody ever touched it again, it stayed
+    /// in persistent storage indefinitely. This gives anyone (no auth
+    /// required, since it can only remove data that is already expired and
+    /// therefore already worthless) an explicit way to prune a known expired
+    /// allowance, e.g. from an indexer that watched the `approve` event and
+    /// noticed its `expiration_ledger` has passed.
+    ///
+    /// # Arguments
+    /// * `owner` - Token owner
+    /// * `spender` - Approved spender
+    ///
+    /// # Returns
+    /// `true` if an expired allowance was found and removed, `false` if the
+    /// allowance does not exist or has not yet expired.
+    pub fn prune_expired_allowance(env: Env, owner: Address, spender: Address) -> bool {
+        let (exists, is_expired, expiration_ledger) =
+            storage::check_allowance_expired(&env, &owner, &spender);
+        if exists && is_expired {
+            events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+        }
+        exists && is_expired
+    }
+
     /// Decrease the allowance for a spender (#77).
     ///
     /// Allows a granular reduction of the allowance without resetting it.
@@ -411,7 +531,7 @@ impl LearnToken {
         let data: storage::AllowanceData = env
             .storage()
             .persistent()
-            .get(&storage::DataKey::Allowance(key.clone()))
+            .get(&storage::TokenDataKey::Allowance(key.clone()))
             .expect("allowance not set");
         storage::set_allowance(&env, &owner, &spender, new_amount, data.expiration_ledger);
         events::approve(&env, &owner, &spender, new_amount, data.expiration_ledger);
@@ -421,7 +541,10 @@ impl LearnToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Vec};
+    use soroban_sdk::{
+        testutils::{storage::Persistent as _, Address as _, Ledger as _},
+        Address, Env, IntoVal, String as SorobanString, Vec,
+    };
 
     fn setup(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
@@ -561,6 +684,31 @@ mod tests {
         let course_id = Symbol::new(&env, "math_101");
         let quiz_id = Symbol::new(&env, "quiz_math_101");
         client.claim_reward(&learner, &course_id, &quiz_id);
+    }
+
+    // ── #31: progress-tracker wiring is readable after initialize ───────────
+
+    #[test]
+    fn test_progress_tracker_returns_configured_address() {
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        assert_eq!(client.progress_tracker(), pt_contract_id);
+    }
+
+    #[test]
+    fn test_progress_tracker_reflects_updates() {
+        let env = Env::default();
+        let (admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        env.mock_all_auths();
+
+        let new_pt_id = env.register_contract(None, progress_tracker::ProgressTracker);
+        progress_tracker::ProgressTrackerClient::new(&env, &new_pt_id).initialize(&admin);
+
+        client.set_progress_tracker(&new_pt_id);
+        assert_eq!(client.progress_tracker(), new_pt_id);
     }
 
     // ── #75: set_progress_tracker ────────────────────────────────────────────
@@ -716,6 +864,217 @@ mod tests {
         assert_eq!(client.allowance(&owner, &spender), 150);
     }
 
+    // ── #33: SEP-41 burn / burn_from ────────────────────────────────────────
+
+    #[test]
+    fn test_burn_reduces_balance_and_supply() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&alice, &1000);
+        client.burn(&alice, &400);
+
+        assert_eq!(client.balance(&alice), 600);
+        assert_eq!(client.total_supply(), 600);
+    }
+
+    #[test]
+    fn test_burn_entire_balance() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&alice, &500);
+        client.burn(&alice, &500);
+
+        assert_eq!(client.balance(&alice), 0);
+        assert_eq!(client.total_supply(), 0);
+    }
+
+    #[test]
+    fn test_burn_zero_is_a_noop() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&alice, &100);
+        client.burn(&alice, &0);
+
+        assert_eq!(client.balance(&alice), 100);
+        assert_eq!(client.total_supply(), 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient balance")]
+    fn test_burn_more_than_balance_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&alice, &100);
+        client.burn(&alice, &101);
+    }
+
+    #[test]
+    #[should_panic(expected = "negative amount")]
+    fn test_burn_negative_amount_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&alice, &100);
+        client.burn(&alice, &-1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_burn_requires_owner_auth() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+        client.mint(&alice, &100);
+
+        // Nobody authorizes the burn — the owner's auth is required.
+        env.mock_auths(&[]);
+        client.burn(&alice, &50);
+    }
+
+    #[test]
+    fn test_burn_from_spends_allowance() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &300, &999999);
+
+        client.burn_from(&spender, &owner, &200);
+
+        assert_eq!(client.balance(&owner), 800);
+        assert_eq!(client.total_supply(), 800);
+        assert_eq!(client.allowance(&owner, &spender), 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient allowance")]
+    fn test_burn_from_beyond_allowance_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &100, &999999);
+
+        client.burn_from(&spender, &owner, &101);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient balance")]
+    fn test_burn_from_beyond_balance_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &50);
+        // Allowance exceeds what the owner actually holds.
+        client.approve(&owner, &spender, &500, &999999);
+
+        client.burn_from(&spender, &owner, &100);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient allowance")]
+    fn test_burn_from_without_allowance_panics() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.burn_from(&spender, &owner, &1);
+    }
+
+    #[test]
+    fn test_burn_from_leaves_other_allowances_untouched() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender_a = Address::generate(&env);
+        let spender_b = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender_a, &300, &999999);
+        client.approve(&owner, &spender_b, &400, &999999);
+
+        client.burn_from(&spender_a, &owner, &100);
+
+        assert_eq!(client.allowance(&owner, &spender_a), 200);
+        assert_eq!(client.allowance(&owner, &spender_b), 400);
+    }
+
+    #[test]
+    fn test_burned_supply_is_not_reminted_by_claim() {
+        // Burning must not free up headroom that lets a learner claim twice.
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        client.burn(&learner, &8500);
+
+        assert_eq!(client.balance(&learner), 0);
+        assert_eq!(client.total_supply(), 0);
+
+        // The claim is still recorded, so the reward cannot be taken again.
+        let result = client.try_claim_reward(&learner, &course_id, &quiz_id);
+        assert!(result.is_err());
+    }
+
     // ── #78: reward cap ─────────────────────────────────────────────────────
 
     #[test]
@@ -735,5 +1094,99 @@ mod tests {
         let reward = client.claim_reward(&learner, &course_id, &quiz_id);
         // 100 * 100 = 10_000 (equals MAX_REWARD_AMOUNT)
         assert_eq!(reward, 10_000);
+    }
+
+    // ── #111: expired allowances can be explicitly pruned ────────────────────
+
+    #[test]
+    fn test_prune_expired_allowance_removes_stale_entry() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        let expiration_ledger = env.ledger().sequence() + 10;
+        client.approve(&owner, &spender, &100, &expiration_ledger);
+
+        // Nobody ever calls allowance() or transfer_from() for this pair again
+        // -- advance past expiration and prune it directly.
+        env.ledger()
+            .with_mut(|l| l.sequence_number = expiration_ledger + 1);
+
+        assert!(client.prune_expired_allowance(&owner, &spender));
+
+        let key = storage::TokenDataKey::Allowance(storage::AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        });
+        env.as_contract(&lt_contract_id, || {
+            assert!(!env.storage().persistent().has(&key));
+        });
+    }
+
+    #[test]
+    fn test_prune_expired_allowance_is_noop_for_active_allowance() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &100, &(env.ledger().sequence() + 999));
+
+        assert!(!client.prune_expired_allowance(&owner, &spender));
+        assert_eq!(client.allowance(&owner, &spender), 100);
+    }
+
+    #[test]
+    fn test_prune_expired_allowance_is_noop_when_none_exists() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+
+        assert!(!client.prune_expired_allowance(&owner, &spender));
+    }
+
+    // ── #112: RewardClaimed entries have their TTL extended on write ─────────
+
+    #[test]
+    fn test_claim_reward_extends_reward_claimed_ttl() {
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let key = storage::TokenDataKey::RewardClaimed(storage::RewardKey {
+            learner: learner.clone(),
+            quiz_id: quiz_id.clone(),
+        });
+        env.as_contract(&lt_contract_id, || {
+            let ttl = env.storage().persistent().get_ttl(&key);
+            // The entry must outlive the default minimum persistent TTL, since
+            // it is the only guard against double-claiming a reward and can
+            // never be allowed to lapse into archival (#112).
+            assert!(
+                ttl >= chainlearn_shared::PERSISTENT_TTL_EXTEND_TO - 1,
+                "expected RewardClaimed TTL to be extended, got {}",
+                ttl
+            );
+        });
     }
 }

@@ -1,13 +1,13 @@
 use chainlearn_shared::MAX_CREDENTIALS_PAGE_SIZE;
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::metadata::{CredentialInfo, DataKey};
+use crate::metadata::{CredentialDataKey, CredentialInfo};
 
 /// Read the full list of credential IDs owned by a learner.
 fn learner_credentials(env: &Env, learner: &Address) -> Vec<u64> {
     env.storage()
         .persistent()
-        .get(&DataKey::LearnerCredentials(learner.clone()))
+        .get(&CredentialDataKey::LearnerCredentials(learner.clone()))
         .unwrap_or(Vec::new(env))
 }
 
@@ -25,7 +25,7 @@ fn learner_credentials(env: &Env, learner: &Address) -> Vec<u64> {
 pub fn verify_credential(env: &Env, credential_id: u64) -> CredentialInfo {
     env.storage()
         .persistent()
-        .get(&DataKey::Credential(credential_id))
+        .get(&CredentialDataKey::Credential(credential_id))
         .expect("credential not found")
 }
 
@@ -94,7 +94,7 @@ pub fn is_credential_valid(env: &Env, credential_id: u64) -> bool {
     match env
         .storage()
         .persistent()
-        .get::<DataKey, CredentialInfo>(&DataKey::Credential(credential_id))
+        .get::<CredentialDataKey, CredentialInfo>(&CredentialDataKey::Credential(credential_id))
     {
         Some(info) => !info.revoked,
         None => false,
@@ -114,14 +114,14 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&CredentialDataKey::Admin)
         .expect("not initialized");
     admin.require_auth();
 
     let mut info: CredentialInfo = env
         .storage()
         .persistent()
-        .get(&DataKey::Credential(credential_id))
+        .get(&CredentialDataKey::Credential(credential_id))
         .expect("credential not found");
 
     if info.revoked {
@@ -131,20 +131,20 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     info.revoked = true;
     env.storage()
         .persistent()
-        .set(&DataKey::Credential(credential_id), &info);
+        .set(&CredentialDataKey::Credential(credential_id), &info);
 
     // #104 — prune from learner's credential list
     let mut learner_list: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&DataKey::LearnerCredentials(info.learner.clone()))
+        .get(&CredentialDataKey::LearnerCredentials(info.learner.clone()))
         .unwrap_or(Vec::new(env));
     if let Some(pos) =
         (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
     {
         learner_list.remove(pos);
         env.storage().persistent().set(
-            &DataKey::LearnerCredentials(info.learner.clone()),
+            &CredentialDataKey::LearnerCredentials(info.learner.clone()),
             &learner_list,
         );
     }
@@ -153,14 +153,16 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     let mut course_list: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&DataKey::CourseCredentials(info.course_id.clone()))
+        .get(&CredentialDataKey::CourseCredentials(
+            info.course_id.clone(),
+        ))
         .unwrap_or(Vec::new(env));
     if let Some(pos) =
         (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
     {
         course_list.remove(pos);
         env.storage().persistent().set(
-            &DataKey::CourseCredentials(info.course_id.clone()),
+            &CredentialDataKey::CourseCredentials(info.course_id.clone()),
             &course_list,
         );
     }

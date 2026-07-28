@@ -18,6 +18,16 @@ pub const MAX_MODULES_PER_COURSE: u32 = 64;
 /// Maximum number of credential IDs a single paginated read may return.
 pub const MAX_CREDENTIALS_PAGE_SIZE: u32 = 50;
 
+/// TTL threshold (in ledgers) below which a persistent entry's lifetime is
+/// extended. Assumes a ~5s average ledger close time, so this is roughly 30
+/// days out.
+pub const PERSISTENT_TTL_THRESHOLD: u32 = 518_400;
+
+/// TTL (in ledgers) a persistent entry is extended to once it drops below
+/// [`PERSISTENT_TTL_THRESHOLD`]. Roughly 90 days, comfortably under Soroban's
+/// network-wide max entry TTL.
+pub const PERSISTENT_TTL_EXTEND_TO: u32 = 1_555_200;
+
 /// Status of a learner's enrollment in a course.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
