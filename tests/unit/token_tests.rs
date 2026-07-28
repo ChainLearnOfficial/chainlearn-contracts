@@ -183,4 +183,72 @@ mod token_unit_tests {
         assert_eq!(client.balance(&recipient), 300);
         assert_eq!(client.allowance(&owner, &spender), 200);
     }
+
+    #[test]
+    #[should_panic(expected = "insufficient allowance")]
+    fn test_transfer_from_insufficient_allowance() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &200, &999999);
+        client.transfer_from(&spender, &owner, &recipient, &500);
+    }
+
+    #[test]
+    #[should_panic(expected = "allowance expired")]
+    fn test_transfer_from_expired_allowance() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &500, &10);
+
+        env.ledger().with_mut(|l| {
+            l.sequence = 20;
+        });
+
+        client.transfer_from(&spender, &owner, &recipient, &100);
+    }
+
+    #[test]
+    fn test_approve_zero_allowance_revokes() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &500, &999999);
+        assert_eq!(client.allowance(&owner, &spender), 500);
+
+        client.approve(&owner, &spender, &0, &999999);
+        assert_eq!(client.allowance(&owner, &spender), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_mint_without_admin_auth_fails() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let recipient = Address::generate(&env);
+        // We do NOT mock auths, so mint should fail auth requirement
+        client.mint(&recipient, &1000);
+    }
 }

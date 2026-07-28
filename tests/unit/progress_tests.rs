@@ -668,4 +668,38 @@ mod progress_unit_tests {
         // field instead.
         assert!(client.is_eligible_for_credential(&learner, &course_id));
     }
+
+    #[test]
+    #[should_panic(expected = "module does not belong to course")]
+    fn test_complete_module_non_existent_module_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        create_test_course(&env, &client, &course_id);
+
+        env.mock_all_auths();
+        client.enroll(&learner, &course_id);
+
+        let non_existent_mod = Symbol::new(&env, "invalid_mod");
+        client.complete_module(&learner, &course_id, &non_existent_mod);
+    }
+
+    #[test]
+    #[should_panic(expected = "learner is not enrolled in course")]
+    fn test_submit_quiz_score_without_enrollment_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        create_test_course(&env, &client, &course_id);
+
+        env.mock_all_auths();
+        // Skip enrollment
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+    }
 }

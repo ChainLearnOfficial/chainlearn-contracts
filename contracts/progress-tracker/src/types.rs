@@ -16,18 +16,6 @@ pub struct Course {
     pub quiz_ids: Vec<Symbol>,
 }
 
-/// Represents a single module within a course.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Module {
-    /// Module identifier.
-    pub module_id: Symbol,
-    /// Parent course identifier.
-    pub course_id: Symbol,
-    /// Whether this module requires a quiz to complete.
-    pub requires_quiz: bool,
-}
-
 /// Represents a quiz submission.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,9 +42,6 @@ pub struct ProgressInfo {
     pub enrolled_at: u64,
     /// Bitmap tracking completed module indices.
     pub modules_completed_bitmap: u64,
-    /// Number of quizzes submitted.
-    pub quizzes_submitted: u32,
-    /// Sum of quiz scores.
     /// Number of quizzes submitted for this course.
     pub quizzes_submitted: u32,
     /// Sum of every submitted quiz score, used to derive the average.
