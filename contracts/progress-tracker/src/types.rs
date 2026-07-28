@@ -46,8 +46,8 @@ pub struct QuizResult {
 pub struct ProgressInfo {
     /// When the learner enrolled.
     pub enrolled_at: u64,
-    /// IDs of completed modules.
-    pub modules_completed: Vec<Symbol>,
+    /// Bitmap tracking completed module indices.
+    pub modules_completed_bitmap: u64,
     /// Quiz results for this course.
     pub quiz_scores: Vec<QuizResult>,
     /// Overall progress percentage (0-100).

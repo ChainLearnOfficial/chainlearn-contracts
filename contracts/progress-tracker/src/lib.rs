@@ -131,7 +131,7 @@ impl ProgressTracker {
 
         let progress = ProgressInfo {
             enrolled_at: env.ledger().timestamp(),
-            modules_completed: Vec::new(&env),
+            modules_completed_bitmap: 0,
             quiz_scores: Vec::new(&env),
             overall_progress: 0,
             eligible_for_credential: false,
@@ -166,20 +166,28 @@ impl ProgressTracker {
             panic!("module already completed");
         }
 
-        // Verify module exists in course
+        // Verify module exists in course and get its index
         let modules: Vec<Symbol> = env
             .storage()
             .persistent()
             .get(&DataKey::CourseModules(course_id.clone()))
             .expect("course modules not found");
 
-        if !modules.contains(&module_id) {
-            panic!("module not found in course");
+        let mut module_index: Option<u32> = None;
+        for (i, m) in modules.iter().enumerate() {
+            if m == module_id {
+                module_index = Some(i as u32);
+                break;
+            }
+        }
+        let idx = module_index.expect("module not found in course");
+        if idx >= 64 {
+            panic!("module index exceeds bitmap capacity");
         }
 
         // Mark module as completed
         env.storage().persistent().set(&completed_key, &true);
-        progress.modules_completed.push_back(module_id.clone());
+        progress.modules_completed_bitmap |= 1 << idx;
 
         // Recalculate progress
         let course: Course = env
