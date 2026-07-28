@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - README progress formula documentation now accurately reflects integer division implementation (#130)
 - Credential transfer mechanism now enforces non-transferability (soulbound) (#127)
+- `module_completed` event now includes `overall_progress` so indexers don't have to follow up with a `get_progress` call (#123)
+- README now documents the actual `claim_reward(learner, course_id, quiz_id)` signature (#124)
+- README now documents the cross-contract dependency between `learn-token`/`credential-nft` and `progress-tracker` (#125)
+- README now documents that `initialize.sh` passes the `progress-tracker` address to `learn-token` (#126)
 
 ## [1.0.0] - Initial Release
 
