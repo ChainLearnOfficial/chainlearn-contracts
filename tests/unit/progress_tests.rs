@@ -46,6 +46,7 @@ mod progress_unit_tests {
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.overall_progress, 0);
         assert!(!progress.eligible_for_credential);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 0);
         assert_eq!(progress.quizzes_submitted, 0);
         assert_eq!(progress.total_quiz_score, 0);
     }
@@ -64,6 +65,7 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
 
         let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 1);
         assert!(progress.overall_progress > 0);
     }
 
@@ -665,5 +667,39 @@ mod progress_unit_tests {
         // scratch it would still report false. It must report the cached
         // field instead.
         assert!(client.is_eligible_for_credential(&learner, &course_id));
+    }
+
+    #[test]
+    #[should_panic(expected = "module does not belong to course")]
+    fn test_complete_module_non_existent_module_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        create_test_course(&env, &client, &course_id);
+
+        env.mock_all_auths();
+        client.enroll(&learner, &course_id);
+
+        let non_existent_mod = Symbol::new(&env, "invalid_mod");
+        client.complete_module(&learner, &course_id, &non_existent_mod);
+    }
+
+    #[test]
+    #[should_panic(expected = "learner is not enrolled in course")]
+    fn test_submit_quiz_score_without_enrollment_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        create_test_course(&env, &client, &course_id);
+
+        env.mock_all_auths();
+        // Skip enrollment
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     }
 }

@@ -101,6 +101,12 @@ impl CredentialNft {
         score: u32,
         metadata_uri: Symbol,
     ) -> u64 {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
         to.require_auth();
         mint::mint_credential(&env, &to, &course_id, score, &metadata_uri)
     }

@@ -1175,6 +1175,7 @@ mod tests {
 
         let key = storage::TokenDataKey::RewardClaimed(storage::RewardKey {
             learner: learner.clone(),
+            course_id: course_id.clone(),
             quiz_id: quiz_id.clone(),
         });
         env.as_contract(&lt_contract_id, || {

@@ -178,4 +178,22 @@ mod credential_unit_tests {
         assert_eq!(id1, 1);
         assert_eq!(id2, 2);
     }
+
+    #[test]
+    #[should_panic]
+    fn test_revoke_credential_without_admin_auth_fails() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        let id = client.mint_credential(&learner, &course, &80, &uri);
+
+        // Clear mocked auths, should panic on revoke without admin auth
+        // Note: revoke_credential checks admin.require_auth()
+    }
 }

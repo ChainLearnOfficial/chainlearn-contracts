@@ -89,6 +89,10 @@ impl ProgressTracker {
             panic!("total_modules must be greater than zero");
         }
 
+        if total_modules > chainlearn_shared::MAX_MODULES_PER_COURSE {
+            panic!("total_modules exceeds maximum modules per course");
+        }
+
         if total_quizzes == 0 {
             panic!("total_quizzes must be greater than zero");
         }
@@ -166,6 +170,7 @@ impl ProgressTracker {
 
         let progress = ProgressInfo {
             enrolled_at: env.ledger().timestamp(),
+            modules_completed_bitmap: 0,
             quizzes_submitted: 0,
             total_quiz_score: 0,
             overall_progress: 0,
@@ -221,21 +226,13 @@ impl ProgressTracker {
             panic!("module already completed");
         }
 
-        // Single read serves both the module lookup/ordering check below and
-        // the progress/eligibility recalculation further down -- Course
-        // carries module_ids, so there is no second fetch under a separate
-        // key for the same course configuration (#97).
+        // Verify module exists in course and get its index
         let course: Course = env
             .storage()
             .persistent()
             .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
-        if !course.module_ids.contains(&module_id) {
-            panic!("module not found in course");
-        }
-
-        // Enforce sequential ordering: module at index N requires module N-1 completed
         let mut module_index: Option<u32> = None;
         for (i, m) in course.module_ids.iter().enumerate() {
             if m == module_id {
@@ -243,22 +240,27 @@ impl ProgressTracker {
                 break;
             }
         }
-        if let Some(idx) = module_index {
-            if idx > 0 {
-                let prev_module = course.module_ids.get(idx - 1).unwrap();
-                let prev_key = ProgressTrackerDataKey::ModuleCompleted(
-                    learner.clone(),
-                    course_id.clone(),
-                    prev_module.clone(),
-                );
-                if !env.storage().persistent().has(&prev_key) {
-                    panic!("previous module not completed");
-                }
+        let idx = module_index.expect("module not found in course");
+        if idx >= 64 {
+            panic!("module index exceeds bitmap capacity");
+        }
+
+        // Enforce sequential ordering: module at index N requires module N-1 completed
+        if idx > 0 {
+            let prev_module = course.module_ids.get(idx - 1).unwrap();
+            let prev_key = ProgressTrackerDataKey::ModuleCompleted(
+                learner.clone(),
+                course_id.clone(),
+                prev_module.clone(),
+            );
+            if !env.storage().persistent().has(&prev_key) {
+                panic!("previous module not completed");
             }
         }
 
         // Mark module as completed
         env.storage().persistent().set(&completed_key, &true);
+        progress.modules_completed_bitmap |= 1 << idx;
 
         let was_eligible = progress.eligible_for_credential;
 
@@ -359,7 +361,7 @@ impl ProgressTracker {
         };
 
         env.storage().persistent().set(&quiz_key, &result);
-
+        
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
 
@@ -476,7 +478,7 @@ impl ProgressTracker {
         let progress: ProgressInfo = env
             .storage()
             .persistent()
-            .get(&DataKey::Progress(learner, course_id))
+            .get(&ProgressTrackerDataKey::Progress(learner, course_id))
             .expect("not enrolled");
 
         if progress.quizzes_submitted == 0 {
