@@ -1,4 +1,4 @@
-use chainlearn_shared::{PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD};
+use chainlearn_shared::{ContractMetadata, PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD};
 use soroban_sdk::{contracttype, Address, Env};
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
@@ -16,6 +16,8 @@ pub enum TokenDataKey {
     RewardClaimed(RewardKey),
     ProgressTracker,
     MaxSupply,
+    /// On-chain contract name/version, set on `initialize()` (#107).
+    Metadata,
 }
 
 #[contracttype]
@@ -100,12 +102,12 @@ pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
     let data_key = TokenDataKey::Allowance(key);
     match env
         .storage()
-        .persistent()
+        .temporary()
         .get::<TokenDataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
             if env.ledger().sequence() > data.expiration_ledger {
-                env.storage().persistent().remove(&data_key);
+                env.storage().temporary().remove(&data_key);
                 0
             } else {
                 data.amount
@@ -124,7 +126,7 @@ pub fn get_allowance_readonly(env: &Env, owner: &Address, spender: &Address) -> 
     let data_key = TokenDataKey::Allowance(key);
     match env
         .storage()
-        .persistent()
+        .temporary()
         .get::<TokenDataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
@@ -148,13 +150,13 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
     let data_key = TokenDataKey::Allowance(key);
     match env
         .storage()
-        .persistent()
+        .temporary()
         .get::<TokenDataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
             let is_expired = env.ledger().sequence() > data.expiration_ledger;
             if is_expired {
-                env.storage().persistent().remove(&data_key);
+                env.storage().temporary().remove(&data_key);
             }
             (true, is_expired, data.expiration_ledger)
         }
@@ -171,7 +173,7 @@ pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Ad
     let data_key = TokenDataKey::Allowance(key);
     match env
         .storage()
-        .persistent()
+        .temporary()
         .get::<TokenDataKey, AllowanceData>(&data_key)
     {
         Some(data) => {
@@ -183,6 +185,13 @@ pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Ad
 }
 
 /// Set the allowance for an owner-spender pair with an expiration ledger.
+///
+/// Allowances are short-lived by nature -- every entry already carries its own
+/// `expiration_ledger` -- so they belong in temporary storage rather than
+/// persistent storage, which is priced for data meant to live indefinitely
+/// (#110). The entry's TTL is extended to cover exactly the ledgers until it
+/// expires; once past `expiration_ledger` the network is free to archive it
+/// without the contract paying rent to keep dead allowances around.
 pub fn set_allowance(
     env: &Env,
     owner: &Address,
@@ -194,13 +203,13 @@ pub fn set_allowance(
         owner: owner.clone(),
         spender: spender.clone(),
     };
+    let data_key = TokenDataKey::Allowance(key);
     let data = AllowanceData {
         amount,
         expiration_ledger,
     };
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Allowance(key), &data);
+    env.storage().temporary().set(&data_key, &data);
+    extend_allowance_ttl(env, &data_key, expiration_ledger);
 }
 
 /// Reduce the allowance amount while preserving the expiration ledger.
@@ -209,19 +218,28 @@ pub fn reduce_allowance(env: &Env, owner: &Address, spender: &Address, spend: i1
         owner: owner.clone(),
         spender: spender.clone(),
     };
+    let data_key = TokenDataKey::Allowance(key);
     let data: AllowanceData = env
         .storage()
-        .persistent()
-        .get(&TokenDataKey::Allowance(key.clone()))
+        .temporary()
+        .get(&data_key)
         .expect("allowance not set");
     let new_amount = data.amount - spend;
     let updated = AllowanceData {
         amount: new_amount,
         expiration_ledger: data.expiration_ledger,
     };
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Allowance(key), &updated);
+    env.storage().temporary().set(&data_key, &updated);
+}
+
+/// Extend a temporary allowance entry's TTL so it survives at least until its
+/// `expiration_ledger`, since `set()` on temporary storage does not by itself
+/// guarantee the entry lives past the current ledger.
+fn extend_allowance_ttl(env: &Env, data_key: &TokenDataKey, expiration_ledger: u32) {
+    let ttl = expiration_ledger.saturating_sub(env.ledger().sequence());
+    if ttl > 0 {
+        env.storage().temporary().extend_ttl(data_key, ttl, ttl);
+    }
 }
 
 /// Check if a reward has already been claimed for a given learner + course + quiz.
@@ -291,4 +309,20 @@ pub fn get_max_supply(env: &Env) -> i128 {
         .persistent()
         .get(&TokenDataKey::MaxSupply)
         .expect("max supply not set")
+}
+
+/// Store the contract's on-chain name/version metadata (#107).
+pub fn set_contract_metadata(env: &Env) {
+    env.storage().persistent().set(
+        &TokenDataKey::Metadata,
+        &ContractMetadata::new(env, "learn-token"),
+    );
+}
+
+/// Retrieve the contract's on-chain name/version metadata (#107).
+pub fn get_contract_metadata(env: &Env) -> ContractMetadata {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::Metadata)
+        .expect("not initialized")
 }

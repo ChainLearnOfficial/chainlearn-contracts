@@ -22,6 +22,7 @@ use crate::ProgressTrackerClient;
 /// The unique credential ID.
 ///
 /// # Panics
+/// * If `course_id` does not correspond to a known course
 /// * If score is below the minimum threshold
 /// * If the learner already has a credential for this course
 /// * If the progress-tracker reports the learner is not eligible
@@ -56,6 +57,14 @@ pub fn mint_credential(
         .get(&CredentialDataKey::ProgressTracker)
         .expect("not initialized");
     let tracker = ProgressTrackerClient::new(env, &progress_tracker);
+
+    // Course gate: reject unknown course_ids explicitly instead of relying on
+    // it transitively failing eligibility, so a bad course_id fails with a
+    // clear reason (#108).
+    if !tracker.course_exists(course_id) {
+        panic!("course does not exist");
+    }
+
     if !tracker.is_eligible_for_credential(to, course_id) {
         panic!("learner has not completed the course requirements");
     }

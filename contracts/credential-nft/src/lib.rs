@@ -4,6 +4,7 @@ mod metadata;
 mod mint;
 mod verify;
 
+use chainlearn_shared::ContractMetadata;
 use metadata::{CredentialDataKey, CredentialInfo};
 use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 
@@ -11,6 +12,7 @@ use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, V
 /// and the score a credential claims.
 #[soroban_sdk::contractclient(name = "ProgressTrackerClient")]
 pub trait ProgressTrackerInterface {
+    fn course_exists(env: Env, course_id: Symbol) -> bool;
     fn is_eligible_for_credential(env: Env, learner: Address, course_id: Symbol) -> bool;
     fn get_course_score(env: Env, learner: Address, course_id: Symbol) -> u32;
 }
@@ -54,7 +56,23 @@ impl CredentialNft {
         env.storage()
             .persistent()
             .set(&CredentialDataKey::CredentialCounter, &0u64);
+        env.storage().persistent().set(
+            &CredentialDataKey::Metadata,
+            &ContractMetadata::new(&env, "credential-nft"),
+        );
         Ok(())
+    }
+
+    /// Get the contract's on-chain name and version (#107).
+    ///
+    /// Lets external tools (indexers, block explorers, upgrade tooling)
+    /// identify which contract and release is deployed without inferring it
+    /// from behavior.
+    pub fn contract_metadata(env: Env) -> ContractMetadata {
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::Metadata)
+            .expect("not initialized")
     }
 
     /// Mint a new credential NFT.
@@ -358,6 +376,25 @@ mod tests {
     ) {
         create_course(env, tracker_id, course_id);
         complete_course(env, tracker_id, learner, course_id);
+    }
+
+    // ── Issue #107: initialize() stores contract name/version metadata ──────
+
+    #[test]
+    fn test_initialize_stores_contract_metadata() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(
+            metadata.name,
+            soroban_sdk::String::from_str(&env, "credential-nft")
+        );
+        assert_eq!(
+            metadata.version,
+            soroban_sdk::String::from_str(&env, chainlearn_shared::CONTRACT_VERSION)
+        );
     }
 
     #[test]
@@ -782,6 +819,23 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "course does not exist")]
+    fn test_mint_rejects_unknown_course() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        // No course was ever created via `create_course` on the tracker.
+        let course_id = Symbol::new(&env, "ghost_course");
+        let uri = Symbol::new(&env, "ipfs_meta");
+
+        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
+    }
+
+    #[test]
     #[should_panic(expected = "learner has not completed the course requirements")]
     fn test_mint_rejects_ineligible_learner() {
         let env = Env::default();
@@ -869,6 +923,43 @@ mod tests {
 
         let info = client.verify_credential(&cred_id);
         assert!(info.revoked);
+    }
+
+    // ── Issue #109: is_credential_valid does not deserialize CredentialInfo ──
+
+    #[test]
+    fn test_is_credential_valid_false_for_unminted_id() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert!(!client.is_credential_valid(&999));
+    }
+
+    #[test]
+    fn test_revoke_sets_dedicated_revoked_flag() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
+
+        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        client.revoke_credential(&cred_id);
+
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                env.storage()
+                    .persistent()
+                    .get::<_, bool>(&crate::metadata::CredentialDataKey::Revoked(cred_id)),
+                Some(true)
+            );
+        });
     }
 
     // ── Issue #103: public total credentials count ──────────────────────────
