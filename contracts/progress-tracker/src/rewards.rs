@@ -38,6 +38,9 @@ pub fn calculate_progress(course: &Course, progress: &ProgressInfo) -> u32 {
 }
 
 /// Calculate the average quiz score for a learner in a course from `ProgressInfo`.
+///
+/// Uses the running sum (`total_quiz_score`) and count (`quizzes_submitted`)
+/// maintained in [`ProgressInfo`], so this is O(1) — no Vec iteration.
 pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
     if progress.quizzes_submitted == 0 {
         return 0;
