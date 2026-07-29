@@ -264,10 +264,9 @@ impl ProgressTracker {
 
         let was_eligible = progress.eligible_for_credential;
 
-        progress.overall_progress =
-            rewards::calculate_progress(&env, &learner, &course_id, &course, &progress);
+        progress.overall_progress = rewards::calculate_progress(&course, &progress);
         progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&env, &learner, &course_id, &course, &progress);
+            rewards::is_eligible_for_credential(&course, &progress);
 
         env.storage().persistent().set(
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
@@ -369,10 +368,9 @@ impl ProgressTracker {
 
         // Recalculate from the updated in-memory aggregates, so everything is
         // known before the single storage write below.
-        progress.overall_progress =
-            rewards::calculate_progress(&env, &learner, &course_id, &course, &progress);
+        progress.overall_progress = rewards::calculate_progress(&course, &progress);
         progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&env, &learner, &course_id, &course, &progress);
+            rewards::is_eligible_for_credential(&course, &progress);
 
         // Single write with all updated fields
         env.storage().persistent().set(

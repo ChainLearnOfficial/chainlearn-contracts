@@ -1,27 +1,13 @@
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
-use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::types::{Course, ProgressInfo, ProgressTrackerDataKey};
+use crate::types::{Course, ProgressInfo};
 
 /// Count how many modules a learner has completed in a course.
-pub fn count_completed_modules(
-    env: &Env,
-    learner: &Address,
-    course_id: &Symbol,
-    modules: &Vec<Symbol>,
-) -> u32 {
-    let mut count = 0u32;
-    for module_id in modules.iter() {
-        let key = ProgressTrackerDataKey::ModuleCompleted(
-            learner.clone(),
-            course_id.clone(),
-            module_id.clone(),
-        );
-        if env.storage().persistent().has(&key) {
-            count += 1;
-        }
-    }
-    count
+///
+/// Uses the `modules_completed_bitmap` on [`ProgressInfo`] so the call is O(1)
+/// instead of iterating every module's storage key.
+pub fn count_completed_modules(progress: &ProgressInfo) -> u32 {
+    progress.modules_completed_bitmap.count_ones()
 }
 
 /// Calculate the overall progress percentage for a learner in a course.
@@ -29,15 +15,9 @@ pub fn count_completed_modules(
 /// Progress is weighted:
 /// - 70% from module completion (proportion of modules completed)
 /// - 30% from quiz performance (average quiz score / 100)
-pub fn calculate_progress(
-    env: &Env,
-    learner: &Address,
-    course_id: &Symbol,
-    course: &Course,
-    progress: &ProgressInfo,
-) -> u32 {
+pub fn calculate_progress(course: &Course, progress: &ProgressInfo) -> u32 {
     let module_progress = if course.total_modules > 0 {
-        let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
+        let completed = count_completed_modules(progress);
         (completed * 70) / course.total_modules
     } else {
         0
@@ -58,6 +38,9 @@ pub fn calculate_progress(
 }
 
 /// Calculate the average quiz score for a learner in a course from `ProgressInfo`.
+///
+/// Uses the running sum (`total_quiz_score`) and count (`quizzes_submitted`)
+/// maintained in [`ProgressInfo`], so this is O(1) — no Vec iteration.
 pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
     if progress.quizzes_submitted == 0 {
         return 0;
@@ -68,14 +51,11 @@ pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
 
 /// Determine if a learner is eligible for a credential.
 pub fn is_eligible_for_credential(
-    env: &Env,
-    learner: &Address,
-    course_id: &Symbol,
     course: &Course,
     progress: &ProgressInfo,
 ) -> bool {
     // Check all modules completed
-    let completed = count_completed_modules(env, learner, course_id, &course.module_ids);
+    let completed = count_completed_modules(progress);
     if completed < course.total_modules {
         return false;
     }
