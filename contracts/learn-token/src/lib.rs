@@ -5,7 +5,7 @@ mod storage;
 
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, Address, Env, String as SorobanString, Symbol,
+    contract, contracterror, contractimpl, Address, Env, IntoVal, String as SorobanString, Symbol,
 };
 use soroban_token_sdk::metadata::TokenMetadata;
 
@@ -365,10 +365,15 @@ impl LearnToken {
             panic!("reward already claimed");
         }
 
-        // Verify score by querying the progress-tracker contract
+        // Verify score by querying the progress-tracker contract.
+        // Use env.invoke_contract directly to avoid the gas cost of
+        // ProgressTrackerClient::new() on every invocation (#133).
         let progress_tracker = storage::get_progress_tracker(&env);
-        let client = ProgressTrackerClient::new(&env, &progress_tracker);
-        let score = client.get_quiz_score(&learner, &course_id, &quiz_id);
+        let score: u32 = env.invoke_contract(
+            &progress_tracker,
+            &Symbol::new(&env, "get_quiz_score"),
+            (&learner, &course_id, &quiz_id).into_val(&env),
+        );
 
         if score == 0 {
             panic!("score must be greater than 0");
