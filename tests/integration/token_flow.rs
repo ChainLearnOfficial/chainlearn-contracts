@@ -53,10 +53,9 @@ fn test_end_to_end_reward_flow() {
 
     // Claim reward -- claim_reward(learner, course_id, quiz_id) fetches the
     // score from progress-tracker itself rather than taking it as an arg.
-    let reward = token_client.claim_reward(learner, &course_id, &quiz_id);
+    token_client.claim_reward(learner, &course_id, &quiz_id);
 
     // Verify: 85 * 100 (BASE_REWARD_PER_POINT) = 8500
-    assert_eq!(reward, 8500);
     assert_eq!(token_client.balance(learner), 8500);
 }
 

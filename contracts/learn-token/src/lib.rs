@@ -46,6 +46,7 @@ impl LearnToken {
     /// * `symbol` - Token symbol (e.g., "CLRN")
     /// * `decimal` - Number of decimal places
     /// * `progress_tracker` - Address of the progress-tracker contract
+    /// * `max_supply` - On-chain maximum token supply cap
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -53,13 +54,18 @@ impl LearnToken {
         symbol: SorobanString,
         decimal: u32,
         progress_tracker: Address,
+        max_supply: i128,
     ) -> Result<(), ContractError> {
         if storage::is_initialized(&env) {
             return Err(ContractError::AlreadyInitialized);
         }
+        if max_supply < 0 {
+            panic!("max supply cannot be negative");
+        }
         storage::set_admin(&env, &admin);
         storage::set_total_supply(&env, 0);
         storage::set_progress_tracker(&env, &progress_tracker);
+        storage::set_max_supply(&env, max_supply);
 
         let metadata = TokenMetadata {
             name,
@@ -229,13 +235,13 @@ impl LearnToken {
     /// Emits an allowance_expired event if the allowance has expired.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
         let (exists, is_expired, expiration_ledger) =
-            storage::check_allowance_expired(&env, &owner, &spender);
+            storage::check_allowance_expired_readonly(&env, &owner, &spender);
 
         if exists && is_expired {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
         }
 
-        storage::get_allowance(&env, &owner, &spender)
+        storage::get_allowance_readonly(&env, &owner, &spender)
     }
 
     // ── SEP-41 Burning ────────────────────────────────────────────────────
@@ -337,10 +343,15 @@ impl LearnToken {
             panic!("negative amount");
         }
 
+        let current_supply = storage::get_total_supply(&env);
+        let max_supply = storage::get_max_supply(&env);
+        if current_supply + amount > max_supply {
+            panic!("maximum supply cap exceeded");
+        }
+
         let current_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, current_balance + amount);
 
-        let current_supply = storage::get_total_supply(&env);
         storage::set_total_supply(&env, current_supply + amount);
 
         events::mint(&env, &to, amount);
@@ -358,7 +369,7 @@ impl LearnToken {
     /// * `learner` - The learner claiming the reward (must authorize)
     /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - Unique identifier for the quiz
-    pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> i128 {
+    pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
         learner.require_auth();
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
@@ -402,8 +413,6 @@ impl LearnToken {
         storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
-
-        reward_amount
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────
@@ -420,6 +429,25 @@ impl LearnToken {
     /// `claim_reward` panics (#31).
     pub fn progress_tracker(env: Env) -> Address {
         storage::get_progress_tracker(&env)
+    }
+
+    /// Returns the maximum supply cap.
+    pub fn max_supply(env: Env) -> i128 {
+        storage::get_max_supply(&env)
+    }
+
+    /// Update the maximum supply cap. Admin only.
+    pub fn set_max_supply(env: Env, new_max_supply: i128) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        if new_max_supply < 0 {
+            panic!("max supply cannot be negative");
+        }
+        let current_supply = storage::get_total_supply(&env);
+        if new_max_supply < current_supply {
+            panic!("new cap cannot be less than current total supply");
+        }
+        storage::set_max_supply(&env, new_max_supply);
     }
 
     /// Transfer admin rights to a new address.
@@ -543,6 +571,12 @@ impl LearnToken {
     }
 }
 
+fn get_progress_client(env: &Env) -> ProgressTrackerClient<'_> {
+    let address = storage::get_progress_tracker(env);
+    ProgressTrackerClient::new(env, &address)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,6 +602,7 @@ mod tests {
             &SorobanString::from_str(env, "CLRN"),
             &7,
             &pt_contract_id,
+            &1_000_000_000_000_000,
         );
 
         (admin, lt_contract_id, pt_contract_id)
@@ -649,10 +684,9 @@ mod tests {
         let quiz_id = Symbol::new(&env, "quiz_math_101");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
 
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id);
 
         // 85 * 100 (BASE_REWARD_PER_POINT) = 8500
-        assert_eq!(reward, 8500);
         assert_eq!(client.balance(&learner), 8500);
     }
 
@@ -749,8 +783,8 @@ mod tests {
         new_pt_client.submit_quiz_score(&learner, &course_id, &quiz_id, &90);
 
         // Claim reward — should succeed using the new progress-tracker
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
-        assert_eq!(reward, 9000); // 90 * 100
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        assert_eq!(client.balance(&learner), 9000); // 90 * 100
     }
 
     #[test]
@@ -760,7 +794,6 @@ mod tests {
         let (_, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
-        let stranger = Address::generate(&env);
         let fake_pt = Address::generate(&env);
 
         // Only authorize a stranger — admin auth is missing, must panic
@@ -1097,9 +1130,9 @@ mod tests {
         let quiz_id = Symbol::new(&env, "quiz_math_101");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 100);
 
-        let reward = client.claim_reward(&learner, &course_id, &quiz_id);
+        client.claim_reward(&learner, &course_id, &quiz_id);
         // 100 * 100 = 10_000 (equals MAX_REWARD_AMOUNT)
-        assert_eq!(reward, 10_000);
+        assert_eq!(client.balance(&learner), 10_000);
     }
 
     // ── #111: expired allowances can be explicitly pruned ────────────────────
@@ -1130,6 +1163,35 @@ mod tests {
         });
         env.as_contract(&lt_contract_id, || {
             assert!(!env.storage().persistent().has(&key));
+        });
+    }
+
+    #[test]
+    fn test_allowance_getter_does_not_remove_stale_entry() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        let expiration_ledger = env.ledger().sequence() + 10;
+        client.approve(&owner, &spender, &100, &expiration_ledger);
+
+        env.ledger()
+            .with_mut(|l| l.sequence_number = expiration_ledger + 1);
+
+        // Call the getter allowance()
+        assert_eq!(client.allowance(&owner, &spender), 0);
+
+        // Confirm the key STILL exists in storage because the getter did not mutate it
+        let key = storage::TokenDataKey::Allowance(storage::AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        });
+        env.as_contract(&lt_contract_id, || {
+            assert!(env.storage().persistent().has(&key));
         });
     }
 

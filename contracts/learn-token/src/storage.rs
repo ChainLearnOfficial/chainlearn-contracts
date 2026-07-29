@@ -13,6 +13,7 @@ pub enum TokenDataKey {
     TotalSupply,
     RewardClaimed(RewardKey),
     ProgressTracker,
+    MaxSupply,
 }
 
 #[contracttype]
@@ -112,6 +113,29 @@ pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
     }
 }
 
+/// Read-only version of get_allowance that does not perform storage side-effects.
+pub fn get_allowance_readonly(env: &Env, owner: &Address, spender: &Address) -> i128 {
+    let key = AllowanceKey {
+        owner: owner.clone(),
+        spender: spender.clone(),
+    };
+    let data_key = TokenDataKey::Allowance(key);
+    match env
+        .storage()
+        .persistent()
+        .get::<TokenDataKey, AllowanceData>(&data_key)
+    {
+        Some(data) => {
+            if env.ledger().sequence() > data.expiration_ledger {
+                0
+            } else {
+                data.amount
+            }
+        }
+        None => 0,
+    }
+}
+
 /// Check if an allowance exists and is expired.
 /// Returns (exists, expired, expiration_ledger).
 pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
@@ -130,6 +154,26 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
             if is_expired {
                 env.storage().persistent().remove(&data_key);
             }
+            (true, is_expired, data.expiration_ledger)
+        }
+        None => (false, false, 0),
+    }
+}
+
+/// Read-only version of check_allowance_expired that does not perform storage side-effects.
+pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
+    let key = AllowanceKey {
+        owner: owner.clone(),
+        spender: spender.clone(),
+    };
+    let data_key = TokenDataKey::Allowance(key);
+    match env
+        .storage()
+        .persistent()
+        .get::<TokenDataKey, AllowanceData>(&data_key)
+    {
+        Some(data) => {
+            let is_expired = env.ledger().sequence() > data.expiration_ledger;
             (true, is_expired, data.expiration_ledger)
         }
         None => (false, false, 0),
@@ -230,4 +274,19 @@ pub fn get_progress_tracker(env: &Env) -> Address {
         .persistent()
         .get(&TokenDataKey::ProgressTracker)
         .expect("progress tracker not set")
+}
+
+/// Store the maximum supply cap.
+pub fn set_max_supply(env: &Env, cap: i128) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::MaxSupply, &cap);
+}
+
+/// Retrieve the maximum supply cap.
+pub fn get_max_supply(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::MaxSupply)
+        .expect("max supply not set")
 }

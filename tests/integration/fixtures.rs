@@ -39,6 +39,7 @@ pub fn setup_chainlearn_env() -> ChainLearnEnv {
         &SorobanString::from_str(&env, "CLRN"),
         &7,
         &progress_contract_id,
+        &1_000_000_000_000_000,
     );
 
     // Register and initialize CredentialNft

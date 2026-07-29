@@ -77,7 +77,7 @@ impl CredentialNft {
     /// env.mock_all_auths();
     /// let learner = Address::generate(&env);
     /// let course_id = Symbol::new(&env, "rust_101");
-    /// let metadata_uri = Symbol::new(&env, "ipfs://Qm...");
+    /// let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     ///
     /// // Set up and complete a course in progress-tracker
     /// let mut modules = Vec::new(&env);
@@ -121,7 +121,7 @@ impl CredentialNft {
     /// ```ignore
     /// let learner = Address::generate(&env);
     /// let course_id = Symbol::new(&env, "rust_101");
-    /// let uri = Symbol::new(&env, "ipfs://meta");
+    /// let uri = Symbol::new(&env, "ipfs_meta");
     /// env.mock_all_auths();
     ///
     /// // After completing course and minting credential...
@@ -153,7 +153,7 @@ impl CredentialNft {
     /// ```ignore
     /// let learner = Address::generate(&env);
     /// let course_id = Symbol::new(&env, "rust_101");
-    /// let uri = Symbol::new(&env, "ipfs://meta");
+    /// let uri = Symbol::new(&env, "ipfs_meta");
     /// env.mock_all_auths();
     ///
     /// // Complete course and mint credential...
@@ -274,7 +274,7 @@ impl CredentialNft {
     ///
     /// # Panics
     /// Always panics with a message explaining credentials are non-transferable.
-    pub fn transfer(env: Env, from: Address, to: Address, credential_id: u64) {
+    pub fn transfer(_env: Env, from: Address, _to: Address, _credential_id: u64) {
         from.require_auth();
         panic!("credentials are soulbound and non-transferable");
     }
@@ -616,8 +616,8 @@ mod tests {
 
         let course_creds = client.get_credentials_by_course(&course);
         assert_eq!(course_creds.len(), 2);
-        assert!(course_creds.contains(&id1));
-        assert!(course_creds.contains(&id2));
+        assert!(course_creds.contains(id1));
+        assert!(course_creds.contains(id2));
     }
 
     #[test]
