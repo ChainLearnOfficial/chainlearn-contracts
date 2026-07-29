@@ -702,4 +702,29 @@ mod progress_unit_tests {
         // Skip enrollment
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     }
+
+    #[test]
+    #[should_panic(expected = "course_id not found in course")]
+    fn test_get_quiz_score_mismatched_course_id_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+
+        let other_course_id = Symbol::new(&env, "other_course");
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_other"));
+        client.create_course(&other_course_id, &1, &1, &module_ids, &quiz_ids);
+
+        // quiz_1 is in course_id, not in other_course_id
+        client.get_quiz_score(&learner, &other_course_id, &Symbol::new(&env, "quiz_1"));
+    }
 }

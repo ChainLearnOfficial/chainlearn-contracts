@@ -348,4 +348,44 @@ mod token_unit_tests {
         client.mint(&recipient, &6000);
         assert_eq!(client.balance(&recipient), 6000);
     }
+
+    #[test]
+    #[should_panic(expected = "cannot mint to zero address")]
+    fn test_mint_zero_address_panics() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let zero_address = Address::from_string(&SorobanString::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        ));
+        client.mint(&zero_address, &1000);
+    }
+
+    #[test]
+    fn test_transfer_from_emits_transfer_from_event() {
+        use soroban_sdk::testutils::Events;
+
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &500, &999999);
+        client.transfer_from(&spender, &owner, &recipient, &300);
+
+        let events = env.events().all();
+        let transfer_from_events: soroban_sdk::Vec<_> = events
+            .iter()
+            .filter(|e| e.1 == soroban_sdk::vec![&env, Symbol::new(&env, "transfer_from").into_val(&env)])
+            .collect();
+        assert_eq!(transfer_from_events.len(), 1);
+    }
 }
