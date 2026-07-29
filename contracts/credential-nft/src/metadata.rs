@@ -29,4 +29,10 @@ pub enum CredentialDataKey {
     LearnerCredentials(Address),
     CourseCredential(Address, Symbol),
     CourseCredentials(Symbol),
+    /// Mirrors `CredentialInfo.revoked` in its own single-bool entry so
+    /// `is_credential_valid` can check it without deserializing the full
+    /// `CredentialInfo` struct (#109).
+    Revoked(u64),
+    /// On-chain contract name/version, set on `initialize()` (#107).
+    Metadata,
 }

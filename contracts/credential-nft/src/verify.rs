@@ -84,6 +84,10 @@ pub fn get_credential_count(env: &Env, learner: &Address) -> u32 {
 
 /// Check whether a credential is valid (exists and not revoked).
 ///
+/// Existence is checked with `has()`, and the revoked flag is read from its
+/// own single-bool entry -- neither deserializes the full `CredentialInfo`
+/// struct, which this call has no other use for (#109).
+///
 /// # Arguments
 /// * `env` - Soroban environment
 /// * `credential_id` - The unique credential identifier
@@ -91,14 +95,17 @@ pub fn get_credential_count(env: &Env, learner: &Address) -> u32 {
 /// # Returns
 /// `true` if the credential exists and is not revoked.
 pub fn is_credential_valid(env: &Env, credential_id: u64) -> bool {
-    match env
+    if !env
         .storage()
         .persistent()
-        .get::<CredentialDataKey, CredentialInfo>(&CredentialDataKey::Credential(credential_id))
+        .has(&CredentialDataKey::Credential(credential_id))
     {
-        Some(info) => !info.revoked,
-        None => false,
+        return false;
     }
+    !env.storage()
+        .persistent()
+        .get::<CredentialDataKey, bool>(&CredentialDataKey::Revoked(credential_id))
+        .unwrap_or(false)
 }
 
 /// Revoke a credential. Admin only.
@@ -132,6 +139,11 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     env.storage()
         .persistent()
         .set(&CredentialDataKey::Credential(credential_id), &info);
+    // Kept in sync with `info.revoked` so `is_credential_valid` can check
+    // revocation without deserializing the full `CredentialInfo` (#109).
+    env.storage()
+        .persistent()
+        .set(&CredentialDataKey::Revoked(credential_id), &true);
 
     // #104 — prune from learner's credential list
     let mut learner_list: Vec<u64> = env

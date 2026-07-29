@@ -12,8 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CHANGELOG.md for tracking version history and breaking changes
 - `transfer()` method on credential-nft contract that explicitly rejects transfers, enforcing soulbound credentials
 - Documentation improvements for soulbound credential enforcement
+- `contract_metadata()` on all three contracts, returning the contract's name and version, stored on `initialize()` (#107)
+- `course_exists()` on progress-tracker, letting other contracts validate a `course_id` cheaply (#108)
 
 ### Fixed
+- `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)
+- `is_credential_valid()` no longer deserializes the full `CredentialInfo` struct; it checks existence and a dedicated `revoked` flag instead (#109)
+- learn-token allowances now live in temporary storage instead of persistent storage, matching their short-lived, self-expiring nature (#110)
 - README progress formula documentation now accurately reflects integer division implementation (#130)
 - Credential transfer mechanism now enforces non-transferability (soulbound) (#127)
 - `module_completed` event now includes `overall_progress` so indexers don't have to follow up with a `get_progress` call (#123)

@@ -3,6 +3,7 @@
 mod rewards;
 mod types;
 
+use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 use types::{Course, ProgressInfo, ProgressTrackerDataKey, QuizResult};
 
@@ -34,7 +35,23 @@ impl ProgressTracker {
         env.storage()
             .persistent()
             .set(&ProgressTrackerDataKey::Admin, &admin);
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Metadata,
+            &ContractMetadata::new(&env, "progress-tracker"),
+        );
         Ok(())
+    }
+
+    /// Get the contract's on-chain name and version (#107).
+    ///
+    /// Lets external tools (indexers, block explorers, upgrade tooling)
+    /// identify which contract and release is deployed without inferring it
+    /// from behavior.
+    pub fn contract_metadata(env: Env) -> ContractMetadata {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Metadata)
+            .expect("not initialized")
     }
 
     /// Register a new course with its modules and quizzes.
@@ -557,6 +574,20 @@ impl ProgressTracker {
             .expect("course not found")
     }
 
+    /// Check whether a course has been registered via `create_course` (#108).
+    ///
+    /// A cheap existence check -- unlike `get_course`, it never deserializes
+    /// the `Course` struct -- so other contracts (e.g. credential-nft) can
+    /// validate a `course_id` before acting on it.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    pub fn course_exists(env: Env, course_id: Symbol) -> bool {
+        env.storage()
+            .persistent()
+            .has(&ProgressTrackerDataKey::Course(course_id))
+    }
+
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         env.storage()
@@ -609,6 +640,40 @@ mod tests {
         quiz_ids.push_back(Symbol::new(env, "quiz_2"));
         client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
         course_id
+    }
+
+    // ── Issue #107: initialize() stores contract name/version metadata ──────
+
+    #[test]
+    fn test_initialize_stores_contract_metadata() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(
+            metadata.name,
+            soroban_sdk::String::from_str(&env, "progress-tracker")
+        );
+        assert_eq!(
+            metadata.version,
+            soroban_sdk::String::from_str(&env, chainlearn_shared::CONTRACT_VERSION)
+        );
+    }
+
+    // ── Issue #108: course_exists lets other contracts validate course_id ───
+
+    #[test]
+    fn test_course_exists() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        assert!(!client.course_exists(&Symbol::new(&env, "ghost_course")));
+
+        let course_id = create_test_course(&env, &client);
+        assert!(client.course_exists(&course_id));
     }
 
     // ── Issue #34: verified course score ─────────────────────────────────

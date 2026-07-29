@@ -76,7 +76,17 @@ impl LearnToken {
         env.storage()
             .persistent()
             .set(&storage::TokenDataKey::Decimal, &decimal);
+        storage::set_contract_metadata(&env);
         Ok(())
+    }
+
+    /// Get the contract's on-chain name and version (#107).
+    ///
+    /// Lets external tools (indexers, block explorers, upgrade tooling)
+    /// identify which contract and release is deployed without inferring it
+    /// from behavior.
+    pub fn contract_metadata(env: Env) -> chainlearn_shared::ContractMetadata {
+        storage::get_contract_metadata(&env)
     }
 
     // ── SEP-41 Standard Interface ─────────────────────────────────────────
@@ -566,7 +576,7 @@ impl LearnToken {
         };
         let data: storage::AllowanceData = env
             .storage()
-            .persistent()
+            .temporary()
             .get(&storage::TokenDataKey::Allowance(key.clone()))
             .expect("allowance not set");
         storage::set_allowance(&env, &owner, &spender, new_amount, data.expiration_ledger);
@@ -639,6 +649,22 @@ mod tests {
         assert_eq!(client.decimals(), 7);
         assert_eq!(client.total_supply(), 0);
         assert_eq!(client.admin(), admin);
+    }
+
+    // ── Issue #107: initialize() stores contract name/version metadata ──────
+
+    #[test]
+    fn test_initialize_stores_contract_metadata() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(metadata.name, SorobanString::from_str(&env, "learn-token"));
+        assert_eq!(
+            metadata.version,
+            SorobanString::from_str(&env, chainlearn_shared::CONTRACT_VERSION)
+        );
     }
 
     #[test]
@@ -1165,7 +1191,7 @@ mod tests {
             spender: spender.clone(),
         });
         env.as_contract(&lt_contract_id, || {
-            assert!(!env.storage().persistent().has(&key));
+            assert!(!env.storage().temporary().has(&key));
         });
     }
 
@@ -1194,7 +1220,7 @@ mod tests {
             spender: spender.clone(),
         });
         env.as_contract(&lt_contract_id, || {
-            assert!(env.storage().persistent().has(&key));
+            assert!(env.storage().temporary().has(&key));
         });
     }
 
