@@ -755,7 +755,6 @@ mod tests {
         let (_, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
-        let stranger = Address::generate(&env);
         let fake_pt = Address::generate(&env);
 
         // Only authorize a stranger — admin auth is missing, must panic
