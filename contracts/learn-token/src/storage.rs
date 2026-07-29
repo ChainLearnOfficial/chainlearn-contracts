@@ -7,7 +7,9 @@ use soroban_sdk::{contracttype, Address, Env};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenDataKey {
     Admin,
-    TokenMetadata,
+    Name,
+    Symbol,
+    Decimal,
     Balance(Address),
     Allowance(AllowanceKey),
     TotalSupply,

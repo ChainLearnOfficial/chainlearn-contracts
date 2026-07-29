@@ -67,14 +67,15 @@ impl LearnToken {
         storage::set_progress_tracker(&env, &progress_tracker);
         storage::set_max_supply(&env, max_supply);
 
-        let metadata = TokenMetadata {
-            name,
-            symbol,
-            decimal,
-        };
         env.storage()
             .persistent()
-            .set(&storage::TokenDataKey::TokenMetadata, &metadata);
+            .set(&storage::TokenDataKey::Name, &name);
+        env.storage()
+            .persistent()
+            .set(&storage::TokenDataKey::Symbol, &symbol);
+        env.storage()
+            .persistent()
+            .set(&storage::TokenDataKey::Decimal, &decimal);
         Ok(())
     }
 
@@ -82,32 +83,26 @@ impl LearnToken {
 
     /// Returns the token name.
     pub fn name(env: Env) -> SorobanString {
-        let metadata: TokenMetadata = env
-            .storage()
+        env.storage()
             .persistent()
-            .get(&storage::TokenDataKey::TokenMetadata)
-            .expect("not initialized");
-        metadata.name
+            .get(&storage::TokenDataKey::Name)
+            .expect("not initialized")
     }
 
     /// Returns the token symbol.
     pub fn symbol(env: Env) -> SorobanString {
-        let metadata: TokenMetadata = env
-            .storage()
+        env.storage()
             .persistent()
-            .get(&storage::TokenDataKey::TokenMetadata)
-            .expect("not initialized");
-        metadata.symbol
+            .get(&storage::TokenDataKey::Symbol)
+            .expect("not initialized")
     }
 
     /// Returns the number of decimals.
     pub fn decimals(env: Env) -> u32 {
-        let metadata: TokenMetadata = env
-            .storage()
+        env.storage()
             .persistent()
-            .get(&storage::TokenDataKey::TokenMetadata)
-            .expect("not initialized");
-        metadata.decimal
+            .get(&storage::TokenDataKey::Decimal)
+            .expect("not initialized")
     }
 
     /// Returns the total supply of tokens.
@@ -338,6 +333,14 @@ impl LearnToken {
     pub fn mint(env: Env, to: Address, amount: i128) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+
+        let zero_address = Address::from_string(&SorobanString::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        ));
+        if to == zero_address {
+            panic!("cannot mint to zero address");
+        }
 
         if amount < 0 {
             panic!("negative amount");

@@ -441,14 +441,30 @@ impl ProgressTracker {
     /// # Returns
     /// The verified quiz score (0-100).
     pub fn get_quiz_score(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) -> u32 {
-        // Read-only: move the arguments into the key instead of cloning them.
         let result: QuizResult = env
             .storage()
             .persistent()
             .get(&ProgressTrackerDataKey::QuizResult(
-                learner, course_id, quiz_id,
+                learner,
+                course_id.clone(),
+                quiz_id.clone(),
             ))
             .expect("quiz not submitted");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        if !course.quiz_ids.contains(&quiz_id) {
+            panic!("quiz_id not found in course");
+        }
+
+        if result.course_id != course_id {
+            panic!("course_id does not match quiz");
+        }
+
         result.score
     }
 
