@@ -5,7 +5,8 @@ mod storage;
 
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, Address, Env, IntoVal, String as SorobanString, Symbol,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
+    String as SorobanString, Symbol,
 };
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
@@ -24,6 +25,26 @@ pub enum ContractError {
     AlreadyInitialized = 0,
     ZeroAddress = 1,
     RewardCapped = 2,
+}
+
+/// Result of previewing a `claim_reward` call without executing it (#199).
+///
+/// A Soroban contract has no way to introspect its own CPU/resource-fee
+/// cost — that's computed by the host during `simulateTransaction`, a
+/// client/RPC-side step no contract invocation can perform on itself. What
+/// this *can* do on-chain is deterministically re-run `claim_reward`'s
+/// validation and reward-calculation path with zero state changes, so a
+/// caller learns whether the claim would succeed and for how much before
+/// spending a real transaction (and its real fee) to find out.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimEstimate {
+    /// Whether calling `claim_reward` with these arguments right now would succeed.
+    pub would_succeed: bool,
+    /// The reward amount `claim_reward` would mint, if `would_succeed` is true. `0` otherwise.
+    pub estimated_reward: i128,
+    /// Human-readable reason `would_succeed` is false. Empty string if `would_succeed` is true.
+    pub failure_reason: SorobanString,
 }
 
 /// SEP-41 compliant fungible token contract for ChainLearn rewards.
@@ -365,6 +386,7 @@ impl LearnToken {
         }
 
         storage::set_allowance(&env, &owner, &spender, amount, expiration_ledger);
+        storage::track_allowance_spender(&env, &owner, &spender);
         events::approve(&env, &owner, &spender, amount, expiration_ledger);
     }
 
@@ -562,11 +584,115 @@ impl LearnToken {
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
     }
 
+    /// Preview a `claim_reward` call without executing it or changing any
+    /// state (#199).
+    ///
+    /// See [`ClaimEstimate`] for why this reports the reward amount rather
+    /// than a raw gas/CPU figure — that number isn't something a Soroban
+    /// contract can compute about its own execution. Re-runs exactly the
+    /// same checks `claim_reward` does (already-claimed, quiz score via the
+    /// progress-tracker, score bounds, reward cap, supply cap) so a caller
+    /// can tell whether the real call would succeed, and for what amount,
+    /// before spending a transaction to find out. Read-only: it never
+    /// calls `require_auth`, never touches storage other than reads, and
+    /// never invokes anything beyond the progress-tracker's read-only
+    /// `get_quiz_score`.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner who would claim the reward
+    /// * `course_id` - The course the quiz belongs to
+    /// * `quiz_id` - Unique identifier for the quiz
+    pub fn estimate_claim_gas(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        quiz_id: Symbol,
+    ) -> ClaimEstimate {
+        let fail = |reason: &str| ClaimEstimate {
+            would_succeed: false,
+            estimated_reward: 0,
+            failure_reason: SorobanString::from_str(&env, reason),
+        };
+
+        if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
+            return fail("reward already claimed");
+        }
+
+        let progress_tracker = storage::get_progress_tracker(&env);
+        let score: u32 = env.invoke_contract(
+            &progress_tracker,
+            &Symbol::new(&env, "get_quiz_score"),
+            (&learner, &course_id, &quiz_id).into_val(&env),
+        );
+
+        if score == 0 {
+            return fail("score must be greater than 0");
+        }
+        if score > MAX_QUIZ_SCORE {
+            return fail("score exceeds maximum");
+        }
+
+        let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
+        if reward_amount > MAX_REWARD_AMOUNT {
+            return fail("reward exceeds cap");
+        }
+
+        let current_supply = storage::get_total_supply(&env);
+        let max_supply = storage::get_max_supply(&env);
+        if current_supply + reward_amount > max_supply {
+            return fail("maximum supply cap exceeded");
+        }
+
+        ClaimEstimate {
+            would_succeed: true,
+            estimated_reward: reward_amount,
+            failure_reason: SorobanString::from_str(&env, ""),
+        }
+    }
+
     // ── Admin ─────────────────────────────────────────────────────────────
 
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
+    }
+
+    /// Upgrade the contract's wasm code. Admin only (#198).
+    ///
+    /// State is preserved across the upgrade by construction: Soroban
+    /// upgrades replace only the executable code at this contract's
+    /// address, not its storage, so every balance, allowance, and other
+    /// persistent/temporary entry survives untouched. The new wasm is
+    /// expected to have already been uploaded to the network (e.g. via
+    /// `soroban contract install`) before this is called with its hash.
+    ///
+    /// # Arguments
+    /// * `new_wasm_hash` - Hash of the already-uploaded wasm to install
+    ///
+    /// # Panics
+    /// * If the caller is not the admin
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        storage::set_wasm_hash(&env, &new_wasm_hash);
+        let version = storage::increment_upgrade_version(&env);
+
+        events::upgraded(&env, &new_wasm_hash, version);
+    }
+
+    /// Wasm hash the contract was most recently upgraded to, or `None` if
+    /// it has never been upgraded (#198).
+    pub fn wasm_hash(env: Env) -> Option<BytesN<32>> {
+        storage::get_wasm_hash(&env)
+    }
+
+    /// Number of times the contract has been upgraded via `upgrade()` (#198).
+    /// Starts at `0` for a never-upgraded contract.
+    pub fn upgrade_version(env: Env) -> u32 {
+        storage::get_upgrade_version(&env)
     }
 
     /// Returns the progress-tracker address rewards are verified against.
@@ -662,6 +788,7 @@ impl LearnToken {
         let current = storage::get_allowance(&env, &owner, &spender);
         let new_amount = current + additional_amount;
         storage::set_allowance(&env, &owner, &spender, new_amount, expiration_ledger);
+        storage::track_allowance_spender(&env, &owner, &spender);
         events::approve(&env, &owner, &spender, new_amount, expiration_ledger);
     }
 
@@ -690,6 +817,55 @@ impl LearnToken {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
         }
         exists && is_expired
+    }
+
+    /// Remove every expired allowance for `owner` in one call (#201).
+    ///
+    /// Permissionless (like `prune_expired_allowance`, no auth is required
+    /// since this only removes data that is already expired and therefore
+    /// already worthless), and walks the registry of spenders `owner` has
+    /// ever approved (tracked by `approve`/`increase_allowance`) rather than
+    /// requiring the caller to name each spender — Soroban storage has no
+    /// key-enumeration API, so that registry is the only way this can be
+    /// "all of them" instead of one at a time.
+    ///
+    /// # Arguments
+    /// * `owner` - Token owner whose expired allowances should be swept
+    ///
+    /// # Returns
+    /// The number of expired allowances that were removed.
+    pub fn cleanup_expired_allowances(env: Env, owner: Address) -> u32 {
+        let spenders = storage::get_allowance_spenders(&env, &owner);
+        let mut remaining = soroban_sdk::Vec::new(&env);
+        let mut removed_count: u32 = 0;
+
+        for spender in spenders.iter() {
+            let (exists, is_expired, expiration_ledger) =
+                storage::check_allowance_expired(&env, &owner, &spender);
+            if exists && is_expired {
+                events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+                removed_count += 1;
+            } else if exists {
+                // Still active — stays in the registry for a future sweep.
+                remaining.push_back(spender.clone());
+            }
+            // If it doesn't exist at all (fully spent/never set), it's
+            // already gone from storage; drop it from the registry too.
+        }
+
+        storage::set_allowance_spenders(&env, &owner, &remaining);
+        removed_count
+    }
+
+    /// Number of spenders currently tracked in `owner`'s allowance registry
+    /// (#201) — an upper bound on how many *active* allowance entries `owner`
+    /// has in persistent/temporary storage (some tracked entries may already
+    /// be expired but not yet swept by `cleanup_expired_allowances`).
+    ///
+    /// Intended as a lightweight signal for whether it's worth calling
+    /// `cleanup_expired_allowances` for a given owner.
+    pub fn allowance_spender_count(env: Env, owner: Address) -> u32 {
+        storage::get_allowance_spenders(&env, &owner).len()
     }
 
     /// Decrease the allowance for a spender (#77).
@@ -1423,5 +1599,142 @@ mod tests {
                 ttl
             );
         });
+    }
+
+    // ── estimate_claim_gas (#199) ────────────────────────────────────────
+
+    #[test]
+    fn test_estimate_claim_gas_matches_actual_claim_reward() {
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+
+        let estimate = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert!(estimate.would_succeed);
+        assert_eq!(estimate.estimated_reward, 8500);
+
+        // The estimate must not have mutated anything: the real claim still
+        // succeeds afterwards and mints exactly the estimated amount.
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        assert_eq!(client.balance(&learner), 8500);
+    }
+
+    #[test]
+    fn test_estimate_claim_gas_reports_already_claimed_without_panicking() {
+        let env = Env::default();
+        let (_, lt_contract_id, pt_contract_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "math_101");
+        let quiz_id = Symbol::new(&env, "quiz_math_101");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let estimate = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert!(!estimate.would_succeed);
+        assert_eq!(estimate.estimated_reward, 0);
+        assert_eq!(
+            estimate.failure_reason,
+            SorobanString::from_str(&env, "reward already claimed")
+        );
+    }
+
+    // ── cleanup_expired_allowances (#201) ────────────────────────────────
+
+    #[test]
+    fn test_cleanup_expired_allowances_removes_only_expired_entries() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let expired_spender = Address::generate(&env);
+        let active_spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        let expiring_ledger = env.ledger().sequence() + 10;
+        let far_future_ledger = env.ledger().sequence() + 10_000;
+        client.approve(&owner, &expired_spender, &100, &expiring_ledger);
+        client.approve(&owner, &active_spender, &200, &far_future_ledger);
+
+        assert_eq!(client.allowance_spender_count(&owner), 2);
+
+        env.ledger()
+            .with_mut(|l| l.sequence_number = expiring_ledger + 1);
+
+        let removed = client.cleanup_expired_allowances(&owner);
+        assert_eq!(removed, 1);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+        assert_eq!(client.allowance(&owner, &active_spender), 200);
+        assert_eq!(client.allowance(&owner, &expired_spender), 0);
+    }
+
+    #[test]
+    fn test_cleanup_expired_allowances_is_permissionless() {
+        // No auth is required to call it — it only removes data that is
+        // already expired and therefore already worthless. Deliberately
+        // does NOT call env.mock_all_auths() for the cleanup call itself.
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+
+        env.mock_all_auths();
+        let expiring_ledger = env.ledger().sequence() + 10;
+        client.approve(&owner, &spender, &100, &expiring_ledger);
+        env.ledger()
+            .with_mut(|l| l.sequence_number = expiring_ledger + 1);
+
+        env.set_auths(&[]);
+        assert_eq!(client.cleanup_expired_allowances(&owner), 1);
+    }
+
+    #[test]
+    fn test_cleanup_expired_allowances_noop_for_owner_with_no_allowances() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        assert_eq!(client.cleanup_expired_allowances(&owner), 0);
+        assert_eq!(client.allowance_spender_count(&owner), 0);
+    }
+
+    // ── upgrade (#198) ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_upgrade_version_and_wasm_hash_default_before_any_upgrade() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        assert_eq!(client.upgrade_version(), 0);
+        assert_eq!(client.wasm_hash(), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_upgrade_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        // No mock_all_auths() and no explicit admin auth: require_auth must panic.
+        let fake_hash = BytesN::from_array(&env, &[7u8; 32]);
+        client.upgrade(&fake_hash);
     }
 }
