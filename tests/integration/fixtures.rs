@@ -5,8 +5,8 @@
 
 #![allow(dead_code)]
 
-use credential_nft::{CredentialNft, CredentialNftClient};
 use learn_token::{LearnToken, LearnTokenClient};
+use credential_nft::{CredentialNft, CredentialNftClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 

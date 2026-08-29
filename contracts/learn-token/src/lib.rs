@@ -54,6 +54,15 @@ pub struct ClaimEstimate {
 #[contract]
 pub struct LearnToken;
 
+impl LearnToken {
+    /// Panic if the contract is paused (#238).
+    fn require_not_paused(env: &Env) {
+        if storage::is_paused(env) {
+            panic!("contract is paused");
+        }
+    }
+}
+
 #[contractimpl]
 impl LearnToken {
     // ── Initialization ────────────────────────────────────────────────────
@@ -285,6 +294,7 @@ impl LearnToken {
     /// * `to` - Destination address
     /// * `amount` - Amount to transfer
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        Self::require_not_paused(&env);
         from.require_auth();
 
         if from == to {
@@ -327,6 +337,7 @@ impl LearnToken {
     /// * `to` - Destination address
     /// * `amount` - Amount to transfer
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        Self::require_not_paused(&env);
         spender.require_auth();
 
         if from == to {
@@ -426,6 +437,7 @@ impl LearnToken {
     /// * If `amount` is negative
     /// * If `from` holds less than `amount`
     pub fn burn(env: Env, from: Address, amount: i128) {
+        Self::require_not_paused(&env);
         from.require_auth();
 
         if amount < 0 {
@@ -462,6 +474,7 @@ impl LearnToken {
     /// * If the spender's allowance is below `amount`
     /// * If `from` holds less than `amount`
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
+        Self::require_not_paused(&env);
         spender.require_auth();
 
         if amount < 0 {
@@ -503,6 +516,7 @@ impl LearnToken {
     /// * `to` - Recipient address
     /// * `amount` - Amount to mint
     pub fn mint(env: Env, to: Address, amount: i128) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
@@ -548,6 +562,7 @@ impl LearnToken {
     /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - Unique identifier for the quiz
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
@@ -696,6 +711,44 @@ impl LearnToken {
     /// * `learner` - The learner to query
     pub fn get_claim_history(env: Env, learner: Address) -> Vec<storage::ClaimRecord> {
         storage::get_claim_history(&env, &learner)
+    }
+
+    // ── Pause Controls (Admin Only) ───────────────────────────────────────
+
+    /// Pause the contract. Admin only (#238).
+    ///
+    /// Emits a `paused` event carrying the acting admin and the ledger
+    /// timestamp, so pause activity can be audited and monitored.
+    pub fn pause(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        if storage::is_paused(&env) {
+            panic!("already paused");
+        }
+
+        storage::set_paused(&env, true);
+        events::paused(&env, &admin, env.ledger().timestamp());
+    }
+
+    /// Unpause the contract. Admin only (#238).
+    ///
+    /// Emits an `unpaused` event in the same shape as `paused`.
+    pub fn unpause(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        if !storage::is_paused(&env) {
+            panic!("not paused");
+        }
+
+        storage::set_paused(&env, false);
+        events::unpaused(&env, &admin, env.ledger().timestamp());
+    }
+
+    /// Returns whether the contract is currently paused (#238).
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
     }
 
     /// Returns the admin address.
@@ -953,7 +1006,7 @@ impl LearnToken {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{storage::Persistent as _, Address as _, Ledger as _},
+        testutils::{storage::Persistent as _, Address as _, Events as _, Ledger as _},
         Address, Env, IntoVal, String as SorobanString, Vec,
     };
 
@@ -1213,6 +1266,105 @@ mod tests {
             .is_err());
 
         assert_eq!(client.get_claim_history(&learner).len(), 1);
+    }
+
+    // ── Issue #238: pause/unpause events ─────────────────────────────────
+
+    #[test]
+    fn test_contract_starts_unpaused() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn test_pause_emits_event_with_admin_and_timestamp() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 5_000);
+
+        client.pause();
+
+        assert!(client.is_paused());
+        let events = env.events().all();
+        let (contract_id, topics, data) = events.last().unwrap();
+        assert_eq!(contract_id, lt_id);
+        assert_eq!(topics, (Symbol::new(&env, "paused"),).into_val(&env));
+        let (event_admin, event_ts): (Address, u64) =
+            soroban_sdk::TryFromVal::try_from_val(&env, &data).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_ts, 5_000);
+    }
+
+    #[test]
+    fn test_unpause_emits_event_with_admin_and_timestamp() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        client.pause();
+        env.ledger().with_mut(|li| li.timestamp = 9_000);
+
+        client.unpause();
+
+        assert!(!client.is_paused());
+        let events = env.events().all();
+        let (contract_id, topics, data) = events.last().unwrap();
+        assert_eq!(contract_id, lt_id);
+        assert_eq!(topics, (Symbol::new(&env, "unpaused"),).into_val(&env));
+        let (event_admin, event_ts): (Address, u64) =
+            soroban_sdk::TryFromVal::try_from_val(&env, &data).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_ts, 9_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "already paused")]
+    fn test_pause_twice_panics() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        client.pause();
+        client.pause();
+    }
+
+    #[test]
+    #[should_panic(expected = "not paused")]
+    fn test_unpause_when_not_paused_panics() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        client.unpause();
+    }
+
+    #[test]
+    fn test_pause_blocks_transfers_and_unpause_restores_them() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        client.mint(&alice, &1_000);
+
+        client.pause();
+        assert!(client.try_transfer(&alice, &bob, &100).is_err());
+        assert!(client.try_mint(&alice, &100).is_err());
+
+        client.unpause();
+        client.transfer(&alice, &bob, &100);
+        assert_eq!(client.balance(&bob), 100);
     }
 
     #[test]

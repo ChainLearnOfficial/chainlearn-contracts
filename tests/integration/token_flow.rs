@@ -25,13 +25,7 @@ fn setup_course_and_enroll(
     for q in quiz_ids {
         quiz_ids_vec.push_back(q.clone());
     }
-    progress_client.create_course(
-        course_id,
-        &1,
-        &(quiz_ids.len() as u32),
-        &module_ids,
-        &quiz_ids_vec,
-    );
+    progress_client.create_course(course_id, &1, &(quiz_ids.len() as u32), &module_ids, &quiz_ids_vec);
     progress_client.enroll(learner, course_id);
 }
 
@@ -78,13 +72,7 @@ fn test_double_claim_prevented() {
 
     let course_id = Symbol::new(env, "course_1");
     let quiz_id = Symbol::new(env, "quiz_1");
-    setup_course_and_enroll(
-        env,
-        &progress_client,
-        learner,
-        &course_id,
-        &[quiz_id.clone()],
-    );
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
     progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
 
     token_client.claim_reward(learner, &course_id, &quiz_id);
@@ -104,13 +92,7 @@ fn test_multiple_quiz_rewards() {
     let course_id = Symbol::new(env, "course_1");
     let quiz1 = Symbol::new(env, "quiz_1");
     let quiz2 = Symbol::new(env, "quiz_2");
-    setup_course_and_enroll(
-        env,
-        &progress_client,
-        learner,
-        &course_id,
-        &[quiz1.clone(), quiz2.clone()],
-    );
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz1.clone(), quiz2.clone()]);
     progress_client.submit_quiz_score(learner, &course_id, &quiz1, &80);
     progress_client.submit_quiz_score(learner, &course_id, &quiz2, &60);
 
@@ -134,13 +116,7 @@ fn test_learner_to_learner_transfer() {
 
     let course_id = Symbol::new(env, "course_1");
     let quiz_id = Symbol::new(env, "quiz_1");
-    setup_course_and_enroll(
-        env,
-        &progress_client,
-        learner,
-        &course_id,
-        &[quiz_id.clone()],
-    );
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
     progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &100);
 
     token_client.claim_reward(learner, &course_id, &quiz_id); // 10000 tokens
@@ -165,13 +141,7 @@ fn test_total_supply_consistency() {
     let course_id = Symbol::new(env, "course_1");
     let q1 = Symbol::new(env, "q1");
     let q2 = Symbol::new(env, "q2");
-    setup_course_and_enroll(
-        env,
-        &progress_client,
-        learner1,
-        &course_id,
-        &[q1.clone(), q2.clone()],
-    );
+    setup_course_and_enroll(env, &progress_client, learner1, &course_id, &[q1.clone(), q2.clone()]);
     progress_client.enroll(&learner2, &course_id);
     progress_client.submit_quiz_score(learner1, &course_id, &q1, &80);
     progress_client.submit_quiz_score(&learner2, &course_id, &q2, &50);

@@ -322,7 +322,8 @@ impl ProgressTracker {
         let was_eligible = progress.eligible_for_credential;
 
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
+        progress.eligible_for_credential =
+            rewards::is_eligible_for_credential(&course, &progress);
 
         env.storage().persistent().set(
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
@@ -416,7 +417,7 @@ impl ProgressTracker {
         };
 
         env.storage().persistent().set(&quiz_key, &result);
-
+        
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
 
@@ -425,7 +426,8 @@ impl ProgressTracker {
         // Recalculate from the updated in-memory aggregates, so everything is
         // known before the single storage write below.
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
+        progress.eligible_for_credential =
+            rewards::is_eligible_for_credential(&course, &progress);
 
         // Single write with all updated fields
         env.storage().persistent().set(
@@ -698,8 +700,10 @@ impl ProgressTracker {
             .persistent()
             .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
 
-        env.events()
-            .publish((Symbol::new(&env, "course_archived"),), (&course_id,));
+        env.events().publish(
+            (Symbol::new(&env, "course_archived"),),
+            (&course_id,),
+        );
     }
 
     /// Set or update the content hash for a course. Admin only (#235).

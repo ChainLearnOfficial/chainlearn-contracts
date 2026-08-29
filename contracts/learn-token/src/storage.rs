@@ -43,6 +43,8 @@ pub enum TokenDataKey {
     TotalMintedTo(Address),
     /// Append-only list of a learner's reward claims (#237).
     ClaimHistory(Address),
+    /// Whether the contract is currently paused (#238).
+    Paused,
 }
 
 #[contracttype]
@@ -220,11 +222,7 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
 }
 
 /// Read-only version of check_allowance_expired that does not perform storage side-effects.
-pub fn check_allowance_expired_readonly(
-    env: &Env,
-    owner: &Address,
-    spender: &Address,
-) -> (bool, bool, u32) {
+pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
     let key = AllowanceKey {
         owner: owner.clone(),
         spender: spender.clone(),
@@ -593,4 +591,19 @@ pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
         PERSISTENT_TTL_THRESHOLD,
         PERSISTENT_TTL_EXTEND_TO,
     );
+}
+
+/// Whether the contract is currently paused (#238).
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::Paused)
+        .unwrap_or(false)
+}
+
+/// Set the paused flag (#238).
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::Paused, &paused);
 }
