@@ -14,6 +14,8 @@ pub struct Course {
     pub module_ids: Vec<Symbol>,
     /// List of valid quiz IDs for the course.
     pub quiz_ids: Vec<Symbol>,
+    /// Whether the course is archived and cannot accept new enrollments (#210).
+    pub archived: bool,
 }
 
 /// Represents a quiz submission.
@@ -42,6 +44,32 @@ pub struct ProgressInfo {
     pub enrolled_at: u64,
     /// Bitmap tracking completed module indices.
     pub modules_completed_bitmap: u64,
+    /// Number of quizzes submitted for this course.
+    pub quizzes_submitted: u32,
+    /// Sum of every submitted quiz score, used to derive the average.
+    pub total_quiz_score: u64,
+    /// Overall progress percentage (0-100).
+    pub overall_progress: u32,
+    /// Whether the learner qualifies for a credential.
+    pub eligible_for_credential: bool,
+}
+
+/// Complete progress snapshot for a learner in a course, aggregated from
+/// several storage keys into a single value (#196).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgressExport {
+    /// Whether the learner is enrolled in the course.
+    pub enrolled: bool,
+    /// When the learner enrolled.
+    pub enrolled_at: u64,
+    /// Bitmap tracking completed module indices.
+    pub modules_completed_bitmap: u64,
+    /// Total number of modules in the course.
+    pub total_modules: u32,
+    /// Every quiz the learner has submitted for this course, in course-defined
+    /// quiz order. Quizzes not yet submitted are omitted.
+    pub quiz_scores: Vec<QuizResult>,
     /// Number of quizzes submitted for this course.
     pub quizzes_submitted: u32,
     /// Sum of every submitted quiz score, used to derive the average.
