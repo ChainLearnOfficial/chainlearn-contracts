@@ -14,6 +14,8 @@ pub struct Course {
     pub module_ids: Vec<Symbol>,
     /// List of valid quiz IDs for the course.
     pub quiz_ids: Vec<Symbol>,
+    /// Whether the course is archived and cannot accept new enrollments (#210).
+    pub archived: bool,
 }
 
 /// Represents a quiz submission.

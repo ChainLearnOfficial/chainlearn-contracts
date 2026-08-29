@@ -136,6 +136,7 @@ impl ProgressTracker {
             total_quizzes,
             module_ids: module_ids.clone(),
             quiz_ids: quiz_ids.clone(),
+            archived: false,
         };
 
         env.storage()
@@ -173,6 +174,11 @@ impl ProgressTracker {
             .persistent()
             .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
+
+        // Reject archived courses (#210)
+        if course.archived {
+            panic!("course is archived");
+        }
 
         // Verify course has at least one module (#80)
         if course.total_modules == 0 {
@@ -572,6 +578,41 @@ impl ProgressTracker {
             .persistent()
             .get(&ProgressTrackerDataKey::Course(course_id))
             .expect("course not found")
+    }
+
+    /// Archive a course, preventing new enrollments (#210). Admin only.
+    ///
+    /// Archived courses preserve all existing progress but reject new enrollments.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to archive
+    pub fn archive_course(env: Env, course_id: Symbol) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        if course.archived {
+            panic!("course already archived");
+        }
+
+        course.archived = true;
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+
+        env.events().publish(
+            (Symbol::new(&env, "course_archived"),),
+            (&course_id,),
+        );
     }
 
     /// Check whether a course has been registered via `create_course` (#108).
