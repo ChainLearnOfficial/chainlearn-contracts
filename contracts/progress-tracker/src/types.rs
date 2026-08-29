@@ -21,6 +21,10 @@ pub struct Course {
     /// Verification is optional: an empty symbol means no hash is set and
     /// enrollment skips the check.
     pub content_hash: Symbol,
+    /// Courses that must be completed before a learner can enroll (#231).
+    ///
+    /// Empty means the course has no prerequisites and enrolls freely.
+    pub prerequisites: Vec<Symbol>,
 }
 
 /// Represents a quiz submission.

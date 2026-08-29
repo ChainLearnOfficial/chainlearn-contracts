@@ -142,6 +142,7 @@ impl ProgressTracker {
             archived: false,
             // No content hash by default; set later via `set_course_content_hash` (#235).
             content_hash: Symbol::new(&env, EMPTY_CONTENT_HASH),
+            prerequisites: Vec::new(&env),
         };
 
         env.storage()
@@ -208,6 +209,23 @@ impl ProgressTracker {
         // Verify course has at least one module (#80)
         if course.total_modules == 0 {
             panic!("course has no modules");
+        }
+
+        // Enforce prerequisites: every prerequisite course must be completed
+        // by this learner before enrollment is allowed (#231).
+        for prerequisite in course.prerequisites.iter() {
+            let prerequisite_progress: Option<ProgressInfo> =
+                env.storage()
+                    .persistent()
+                    .get(&ProgressTrackerDataKey::Progress(
+                        learner.clone(),
+                        prerequisite.clone(),
+                    ));
+
+            match prerequisite_progress {
+                Some(progress) if progress.eligible_for_credential => {}
+                _ => panic!("prerequisite not completed"),
+            }
         }
 
         // Content hash verification is optional (#235): it only runs when the
@@ -753,6 +771,98 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Course(course_id))
             .expect("course not found");
         course.content_hash
+    }
+
+    /// Set the courses that must be completed before enrolling in `course_id` (#231).
+    /// Admin only.
+    ///
+    /// Replaces any previously configured prerequisites. Passing an empty list
+    /// clears them. Existing enrollments are unaffected -- prerequisites are
+    /// only checked at [`Self::enroll`] time.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to configure
+    /// * `prerequisites` - Course IDs that must be completed first
+    ///
+    /// # Panics
+    /// * If the course does not exist
+    /// * If any prerequisite course does not exist
+    /// * If a course is listed as its own prerequisite
+    /// * If the list contains duplicates
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let mut prereqs = Vec::new(&env);
+    /// prereqs.push_back(Symbol::new(&env, "rust_101"));
+    /// client.set_prerequisites(&Symbol::new(&env, "rust_201"), &prereqs);
+    /// assert_eq!(client.get_prerequisites(&Symbol::new(&env, "rust_201")), prereqs);
+    /// ```
+    pub fn set_prerequisites(env: Env, course_id: Symbol, prerequisites: Vec<Symbol>) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        for i in 0..prerequisites.len() {
+            let prerequisite = prerequisites.get(i).unwrap();
+
+            if prerequisite == course_id {
+                panic!("course cannot be its own prerequisite");
+            }
+
+            if !env
+                .storage()
+                .persistent()
+                .has(&ProgressTrackerDataKey::Course(prerequisite.clone()))
+            {
+                panic!("prerequisite course not found");
+            }
+
+            for j in (i + 1)..prerequisites.len() {
+                if prerequisites.get(j) == Some(prerequisite.clone()) {
+                    panic!("duplicate prerequisite found");
+                }
+            }
+        }
+
+        course.prerequisites = prerequisites.clone();
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+
+        env.events().publish(
+            (Symbol::new(&env, "prerequisites_set"),),
+            (&course_id, prerequisites),
+        );
+    }
+
+    /// Get the prerequisite courses for a course (#231).
+    ///
+    /// Returns an empty list when the course has no prerequisites.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    ///
+    /// # Panics
+    /// * If the course does not exist
+    pub fn get_prerequisites(env: Env, course_id: Symbol) -> Vec<Symbol> {
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id))
+            .expect("course not found");
+
+        course.prerequisites
     }
 
     /// Check whether a course has been registered via `create_course` (#108).
@@ -1568,5 +1678,284 @@ mod tests {
         });
 
         assert!(client.is_eligible_for_credential(&learner, &course_id));
+    }
+
+    // ── Issue #231: course prerequisites ──────────────────────────────────
+
+    /// Register a second, single-module/single-quiz course, used as a
+    /// prerequisite in the tests below.
+    fn create_prereq_course(env: &Env, client: &ProgressTrackerClient, name: &str) -> Symbol {
+        let course_id = Symbol::new(env, name);
+        let mut module_ids = Vec::new(env);
+        module_ids.push_back(Symbol::new(env, "p_mod_1"));
+        let mut quiz_ids = Vec::new(env);
+        quiz_ids.push_back(Symbol::new(env, "p_quiz_1"));
+        client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+        course_id
+    }
+
+    /// Take `learner` all the way to credential eligibility in a course built
+    /// by [`create_prereq_course`].
+    fn complete_prereq_course(
+        client: &ProgressTrackerClient,
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+    ) {
+        client.enroll(learner, course_id);
+        client.complete_module(learner, course_id, &Symbol::new(env, "p_mod_1"));
+        client.submit_quiz_score(learner, course_id, &Symbol::new(env, "p_quiz_1"), &90);
+        assert!(client.is_eligible_for_credential(learner, course_id));
+    }
+
+    #[test]
+    fn test_courses_have_no_prerequisites_by_default() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        assert_eq!(client.get_prerequisites(&course_id).len(), 0);
+        assert_eq!(client.get_course(&course_id).prerequisites.len(), 0);
+    }
+
+    #[test]
+    fn test_set_and_get_prerequisites() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics.clone());
+        client.set_prerequisites(&advanced, &prereqs);
+
+        assert_eq!(client.get_prerequisites(&advanced), prereqs);
+        // Prerequisites are queryable from the Course struct too.
+        assert_eq!(client.get_course(&advanced).prerequisites, prereqs);
+    }
+
+    #[test]
+    fn test_set_prerequisites_emits_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics);
+        client.set_prerequisites(&advanced, &prereqs);
+
+        let events = env.events().all();
+        let (_, topics, _) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (Symbol::new(&env, "prerequisites_set"),).into_val(&env)
+        );
+    }
+
+    #[test]
+    fn test_set_prerequisites_replaces_previous_list() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics);
+        client.set_prerequisites(&advanced, &prereqs);
+        assert_eq!(client.get_prerequisites(&advanced).len(), 1);
+
+        // An empty list clears the requirement.
+        client.set_prerequisites(&advanced, &Vec::new(&env));
+        assert_eq!(client.get_prerequisites(&advanced).len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "prerequisite not completed")]
+    fn test_enroll_rejects_learner_without_prerequisite() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics);
+        client.set_prerequisites(&advanced, &prereqs);
+
+        // Never enrolled in the prerequisite at all.
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &advanced);
+    }
+
+    #[test]
+    #[should_panic(expected = "prerequisite not completed")]
+    fn test_enroll_rejects_learner_with_incomplete_prerequisite() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics.clone());
+        client.set_prerequisites(&advanced, &prereqs);
+
+        // Enrolled in the prerequisite but not finished: the module is done
+        // and the quiz is not, so eligibility is still false.
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &basics);
+        client.complete_module(&learner, &basics, &Symbol::new(&env, "p_mod_1"));
+
+        client.enroll(&learner, &advanced);
+    }
+
+    #[test]
+    fn test_enroll_allows_learner_who_completed_prerequisite() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics.clone());
+        client.set_prerequisites(&advanced, &prereqs);
+
+        let learner = Address::generate(&env);
+        complete_prereq_course(&client, &env, &learner, &basics);
+
+        client.enroll(&learner, &advanced);
+        assert_eq!(client.get_progress(&learner, &advanced).overall_progress, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "prerequisite not completed")]
+    fn test_enroll_requires_every_prerequisite() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        // A second prerequisite the learner never touches.
+        let extra = Symbol::new(&env, "rust_extra");
+        let mut extra_modules = Vec::new(&env);
+        extra_modules.push_back(Symbol::new(&env, "e_mod_1"));
+        let mut extra_quizzes = Vec::new(&env);
+        extra_quizzes.push_back(Symbol::new(&env, "e_quiz_1"));
+        client.create_course(&extra, &1, &1, &extra_modules, &extra_quizzes);
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics.clone());
+        prereqs.push_back(extra);
+        client.set_prerequisites(&advanced, &prereqs);
+
+        let learner = Address::generate(&env);
+        complete_prereq_course(&client, &env, &learner, &basics);
+
+        client.enroll(&learner, &advanced);
+    }
+
+    #[test]
+    fn test_enroll_unaffected_when_course_has_no_prerequisites() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        assert_eq!(client.get_progress(&learner, &course_id).overall_progress, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "prerequisite course not found")]
+    fn test_set_prerequisites_rejects_unknown_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(Symbol::new(&env, "ghost_course"));
+        client.set_prerequisites(&advanced, &prereqs);
+    }
+
+    #[test]
+    #[should_panic(expected = "course cannot be its own prerequisite")]
+    fn test_set_prerequisites_rejects_self_reference() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(course_id.clone());
+        client.set_prerequisites(&course_id, &prereqs);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate prerequisite found")]
+    fn test_set_prerequisites_rejects_duplicates() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let advanced = create_test_course(&env, &client);
+        let basics = create_prereq_course(&env, &client, "rust_basics");
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(basics.clone());
+        prereqs.push_back(basics);
+        client.set_prerequisites(&advanced, &prereqs);
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_set_prerequisites_on_unknown_course_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_prerequisites(&Symbol::new(&env, "ghost_course"), &Vec::new(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_get_prerequisites_on_unknown_course_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        client.get_prerequisites(&Symbol::new(&env, "ghost_course"));
     }
 }
