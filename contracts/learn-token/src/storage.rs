@@ -39,7 +39,27 @@ pub enum TokenDataKey {
     /// Ledger sequence of the most recent transfer made by an address, used
     /// to enforce per-sender cooldown periods (#191).
     LastTransfer(Address),
+    /// Role assignments per address (#190).
+    Role(RoleKey),
+    /// Emergency pause state (#189).
+    Paused,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdminRole {
+    Admin,
+    Minter,
+    Pauser,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoleKey {
+    pub address: Address,
+    pub role: AdminRole,
+}
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,6 +118,69 @@ pub fn get_admin(env: &Env) -> Address {
         .get(&TokenDataKey::Admin)
         .expect("contract not initialized")
 }
+
+// ── Role Management (#190) ───────────────────────────────────────────────────
+
+/// Check if an address has a specific role.
+pub fn has_role(env: &Env, address: &Address, role: &AdminRole) -> bool {
+    // Backward compatibility: the main admin has all roles
+    let admin = get_admin(env);
+    if address == &admin {
+        return true;
+    }
+    
+    // Also, anyone with AdminRole::Admin has all roles
+    if role != &AdminRole::Admin {
+        let admin_key = TokenDataKey::Role(RoleKey {
+            address: address.clone(),
+            role: AdminRole::Admin,
+        });
+        if env.storage().persistent().get(&admin_key).unwrap_or(false) {
+            return true;
+        }
+    }
+
+    let key = TokenDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Grant a role to an address.
+pub fn grant_role(env: &Env, address: &Address, role: &AdminRole) {
+    let key = TokenDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    env.storage().persistent().set(&key, &true);
+}
+
+/// Revoke a role from an address.
+pub fn revoke_role(env: &Env, address: &Address, role: &AdminRole) {
+    let key = TokenDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    env.storage().persistent().remove(&key);
+}
+
+
+// ── Emergency Pause (#189) ──────────────────────────────────────────────────
+
+/// Check if the contract is currently paused.
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::Paused)
+        .unwrap_or(false)
+}
+
+/// Set the paused state.
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().persistent().set(&TokenDataKey::Paused, &paused);
+}
+
 
 /// Get the balance for a given address.
 pub fn get_balance(env: &Env, address: &Address) -> i128 {
