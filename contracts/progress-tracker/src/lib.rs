@@ -515,6 +515,41 @@ impl ProgressTracker {
             .expect("not enrolled")
     }
 
+    /// Get just a learner's progress percentage in a course (#233).
+    ///
+    /// Frontends that only render a progress bar do not need the whole
+    /// [`ProgressInfo`], so this returns the stored `overall_progress` on its
+    /// own. The value is maintained on every write that can change it
+    /// (`complete_module`, `submit_quiz_score`, `retake_quiz`), so this is a
+    /// single storage read with no recomputation and no state change.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// The progress percentage (0-100).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// client.enroll(&learner, &course_id);
+    /// assert_eq!(client.get_completion_percentage(&learner, &course_id), 0);
+    /// ```
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    pub fn get_completion_percentage(env: Env, learner: Address, course_id: Symbol) -> u32 {
+        let progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(learner, course_id))
+            .expect("not enrolled");
+
+        progress.overall_progress
+    }
+
     /// Export a learner's complete progress for a course in a single call (#196).
     ///
     /// Aggregates data that otherwise lives under several storage keys —
@@ -2245,5 +2280,119 @@ mod tests {
         assert_eq!(courses.len(), 2);
         assert_eq!(courses.get(0).unwrap(), first);
         assert_eq!(courses.get(1).unwrap(), second);
+    }
+
+    // ── Issue #233: lightweight completion percentage query ───────────────
+
+    #[test]
+    fn test_completion_percentage_starts_at_zero() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        assert_eq!(client.get_completion_percentage(&learner, &course_id), 0);
+    }
+
+    #[test]
+    fn test_completion_percentage_matches_stored_progress() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+
+        let full = client.get_progress(&learner, &course_id);
+        assert_eq!(
+            client.get_completion_percentage(&learner, &course_id),
+            full.overall_progress
+        );
+    }
+
+    #[test]
+    fn test_completion_percentage_reaches_one_hundred() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &100);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &100);
+
+        assert_eq!(client.get_completion_percentage(&learner, &course_id), 100);
+    }
+
+    #[test]
+    fn test_completion_percentage_does_not_change_state() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        let before = client.get_progress(&learner, &course_id);
+        client.get_completion_percentage(&learner, &course_id);
+        client.get_completion_percentage(&learner, &course_id);
+        let after = client.get_progress(&learner, &course_id);
+
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn test_completion_percentage_is_per_learner_and_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let first = create_test_course(&env, &client);
+        let second = create_second_course(&env, &client);
+        let ahead = Address::generate(&env);
+        let behind = Address::generate(&env);
+
+        client.enroll(&ahead, &first);
+        client.enroll(&ahead, &second);
+        client.enroll(&behind, &first);
+        client.complete_module(&ahead, &first, &Symbol::new(&env, "mod_1"));
+
+        assert!(client.get_completion_percentage(&ahead, &first) > 0);
+        assert_eq!(client.get_completion_percentage(&ahead, &second), 0);
+        assert_eq!(client.get_completion_percentage(&behind, &first), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_completion_percentage_for_unenrolled_learner_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let stranger = Address::generate(&env);
+
+        client.get_completion_percentage(&stranger, &course_id);
     }
 }
