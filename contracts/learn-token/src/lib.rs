@@ -262,6 +262,18 @@ impl LearnToken {
     }
 
     /// Returns the balance of the given address.
+    /// Returns the cumulative amount ever minted to an address (#236).
+    ///
+    /// Unlike `balance`, this only ever grows: transfers and burns do not
+    /// reduce it, so it reflects total minting rather than current holdings.
+    /// Returns 0 for an address that has never been minted to.
+    ///
+    /// # Arguments
+    /// * `address` - The address to query
+    pub fn total_minted_to(env: Env, address: Address) -> i128 {
+        storage::get_total_minted_to(&env, &address)
+    }
+
     pub fn balance(env: Env, address: Address) -> i128 {
         storage::get_balance(&env, &address)
     }
@@ -517,6 +529,9 @@ impl LearnToken {
 
         storage::set_total_supply(&env, current_supply + amount);
 
+        // Track cumulative minting per address for analytics (#236).
+        storage::add_total_minted_to(&env, &to, amount);
+
         events::mint(&env, &to, amount);
     }
 
@@ -577,6 +592,10 @@ impl LearnToken {
         storage::set_balance(&env, &learner, current_balance + reward_amount);
 
         storage::set_total_supply(&env, current_supply + reward_amount);
+
+        // Reward claims mint too, so they count toward the per-address
+        // minted total (#236).
+        storage::add_total_minted_to(&env, &learner, reward_amount);
 
         // Mark reward as claimed to prevent double-claiming
         storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
@@ -949,6 +968,106 @@ mod tests {
         pt_client.create_course(course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(learner, course_id);
         pt_client.submit_quiz_score(learner, course_id, quiz_id, &score);
+    }
+
+    // ── Issue #236: per-address minted supply tracking ───────────────────
+
+    #[test]
+    fn test_total_minted_to_defaults_to_zero() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        let never_minted = Address::generate(&env);
+        assert_eq!(client.total_minted_to(&never_minted), 0);
+    }
+
+    #[test]
+    fn test_total_minted_to_updates_on_mint() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&user, &1_000);
+
+        assert_eq!(client.total_minted_to(&user), 1_000);
+    }
+
+    #[test]
+    fn test_total_minted_to_accumulates_across_mints() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&user, &1_000);
+        client.mint(&user, &500);
+        client.mint(&user, &250);
+
+        assert_eq!(client.total_minted_to(&user), 1_750);
+    }
+
+    #[test]
+    fn test_total_minted_to_is_tracked_per_address() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        client.mint(&alice, &900);
+        client.mint(&bob, &100);
+
+        assert_eq!(client.total_minted_to(&alice), 900);
+        assert_eq!(client.total_minted_to(&bob), 100);
+        assert_eq!(client.total_supply(), 1_000);
+    }
+
+    #[test]
+    fn test_total_minted_to_unchanged_by_transfer_and_burn() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        client.mint(&alice, &1_000);
+
+        client.transfer(&alice, &bob, &400);
+        client.burn(&alice, &100);
+
+        // Minted total reflects minting only, not current holdings.
+        assert_eq!(client.total_minted_to(&alice), 1_000);
+        assert_eq!(client.balance(&alice), 500);
+        // Receiving a transfer is not minting.
+        assert_eq!(client.total_minted_to(&bob), 0);
+        assert_eq!(client.balance(&bob), 400);
+    }
+
+    #[test]
+    fn test_total_minted_to_includes_reward_claims() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        // claim_reward mints, so it counts toward the per-address total.
+        let balance = client.balance(&learner);
+        assert!(balance > 0);
+        assert_eq!(client.total_minted_to(&learner), balance);
     }
 
     #[test]

@@ -39,6 +39,8 @@ pub enum TokenDataKey {
     /// Ledger sequence of the most recent transfer made by an address, used
     /// to enforce per-sender cooldown periods (#191).
     LastTransfer(Address),
+    /// Cumulative amount ever minted to an address (#236).
+    TotalMintedTo(Address),
 }
 
 #[contracttype]
@@ -519,4 +521,30 @@ pub fn get_upgrade_version(env: &Env) -> u32 {
         .persistent()
         .get(&TokenDataKey::UpgradeVersion)
         .unwrap_or(0)
+}
+/// Get the cumulative amount ever minted to an address (#236).
+///
+/// Returns 0 for an address that has never been minted to.
+pub fn get_total_minted_to(env: &Env, address: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::TotalMintedTo(address.clone()))
+        .unwrap_or(0)
+}
+
+/// Add `amount` to the cumulative minted total for `address` (#236).
+///
+/// Called on every mint path so the running total stays in step with the
+/// balance changes that produced it.
+pub fn add_total_minted_to(env: &Env, address: &Address, amount: i128) {
+    let data_key = TokenDataKey::TotalMintedTo(address.clone());
+    let current: i128 = env.storage().persistent().get(&data_key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&data_key, &(current + amount));
+    env.storage().persistent().extend_ttl(
+        &data_key,
+        PERSISTENT_TTL_THRESHOLD,
+        PERSISTENT_TTL_EXTEND_TO,
+    );
 }
