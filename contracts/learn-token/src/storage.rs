@@ -1,5 +1,5 @@
 use chainlearn_shared::{ContractMetadata, PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD};
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contracttype, Address, Env, Vec};
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
@@ -26,6 +26,16 @@ pub enum TokenDataKey {
     Snapshot(u32),
     /// Maps (address, ledger_height) to the balance at that snapshot (#192).
     SnapshotBalance(SnapshotBalanceKey),
+    /// Registry of every spender an owner has ever approved, so expired
+    /// allowances can be swept in bulk without an on-chain way to enumerate
+    /// storage keys (#201).
+    AllowanceSpenders(Address),
+    /// Wasm hash of the code currently installed via `upgrade()` (#198).
+    /// Unset until the first upgrade — the hash the contract was originally
+    /// deployed with is not recorded on-chain by Soroban itself.
+    WasmHash,
+    /// Number of times `upgrade()` has been called (#198). Starts at 0.
+    UpgradeVersion,
 }
 
 #[contracttype]
@@ -409,4 +419,72 @@ pub fn get_snapshot_balance(env: &Env, address: &Address, ledger_height: u32) ->
         ledger_height,
     });
     env.storage().persistent().get(&key)
+}
+
+// ── Allowance Spender Registry (#201) ────────────────────────────────────────
+//
+// Soroban contract storage has no key-enumeration API, so a permissionless
+// "clean up every expired allowance for this owner" function has no way to
+// discover which spenders an owner has ever approved unless the contract
+// keeps its own index. This registry is that index: every `approve()` /
+// `increase_allowance()` records the spender here (deduplicated), and
+// `cleanup_expired_allowances` reads it back to know which (owner, spender)
+// pairs to check.
+
+/// Record that `owner` has an allowance entry for `spender`, if not already
+/// tracked. Idempotent — safe to call on every approval.
+pub fn track_allowance_spender(env: &Env, owner: &Address, spender: &Address) {
+    let key = TokenDataKey::AllowanceSpenders(owner.clone());
+    let mut spenders: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    if !spenders.contains(spender) {
+        spenders.push_back(spender.clone());
+        env.storage().persistent().set(&key, &spenders);
+    }
+}
+
+/// Every spender `owner` has ever been tracked as approving (may include
+/// spenders whose allowance has since expired or been fully spent).
+pub fn get_allowance_spenders(env: &Env, owner: &Address) -> Vec<Address> {
+    let key = TokenDataKey::AllowanceSpenders(owner.clone());
+    env.storage().persistent().get(&key).unwrap_or(Vec::new(env))
+}
+
+/// Replace `owner`'s tracked-spender list wholesale (used after a cleanup
+/// pass removes the entries that turned out to be expired).
+pub fn set_allowance_spenders(env: &Env, owner: &Address, spenders: &Vec<Address>) {
+    let key = TokenDataKey::AllowanceSpenders(owner.clone());
+    env.storage().persistent().set(&key, spenders);
+}
+
+// ── Upgradeability (#198) ─────────────────────────────────────────────────────
+
+/// Store the wasm hash the contract was most recently upgraded to.
+pub fn set_wasm_hash(env: &Env, wasm_hash: &soroban_sdk::BytesN<32>) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::WasmHash, wasm_hash);
+}
+
+/// The wasm hash the contract was most recently upgraded to, or `None` if
+/// `upgrade()` has never been called.
+pub fn get_wasm_hash(env: &Env) -> Option<soroban_sdk::BytesN<32>> {
+    env.storage().persistent().get(&TokenDataKey::WasmHash)
+}
+
+/// Increment and return the upgrade counter (starts at 0, so the first
+/// upgrade returns 1).
+pub fn increment_upgrade_version(env: &Env) -> u32 {
+    let next = get_upgrade_version(env) + 1;
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::UpgradeVersion, &next);
+    next
+}
+
+/// Number of times the contract has been upgraded via `upgrade()`.
+pub fn get_upgrade_version(env: &Env) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::UpgradeVersion)
+        .unwrap_or(0)
 }
