@@ -222,6 +222,7 @@ mod token_unit_tests {
             l.sequence_number = 20;
         });
 
+        assert_eq!(client.allowance(&owner, &spender), 0);
         client.transfer_from(&spender, &owner, &recipient, &100);
     }
 
