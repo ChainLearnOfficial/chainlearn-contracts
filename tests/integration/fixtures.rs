@@ -3,6 +3,8 @@
 //! Provides common setup functions to initialize the contract environment
 //! and deploy all three contracts for end-to-end testing.
 
+#![allow(dead_code)]
+
 use learn_token::{LearnToken, LearnTokenClient};
 use credential_nft::{CredentialNft, CredentialNftClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
@@ -26,12 +28,12 @@ pub fn setup_chainlearn_env() -> ChainLearnEnv {
 
     // Register and initialize ProgressTracker first -- LearnToken::initialize
     // requires its address.
-    let progress_contract_id = env.register(ProgressTracker, ());
+    let progress_contract_id = env.register_contract(None, ProgressTracker);
     let progress_client = ProgressTrackerClient::new(&env, &progress_contract_id);
     progress_client.initialize(&admin);
 
     // Register and initialize LearnToken
-    let token_contract_id = env.register(LearnToken, ());
+    let token_contract_id = env.register_contract(None, LearnToken);
     let token_client = LearnTokenClient::new(&env, &token_contract_id);
     token_client.initialize(
         &admin,
@@ -43,7 +45,7 @@ pub fn setup_chainlearn_env() -> ChainLearnEnv {
     );
 
     // Register and initialize CredentialNft
-    let credential_contract_id = env.register(CredentialNft, ());
+    let credential_contract_id = env.register_contract(None, CredentialNft);
     let credential_client = CredentialNftClient::new(&env, &credential_contract_id);
     credential_client.initialize(&admin, &progress_contract_id);
 

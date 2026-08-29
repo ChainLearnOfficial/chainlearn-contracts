@@ -147,6 +147,7 @@ echo "  verified: progress-tracker admin is $ADMIN_ADDRESS"
 
 # 2. Initialize learn-token (depends on progress-tracker)
 echo "[2/3] Initializing learn-token..."
+LEARN_TOKEN_MAX_SUPPLY="${LEARN_TOKEN_MAX_SUPPLY:-${MAX_SUPPLY:-10000000000000000}}"
 soroban contract invoke \
     --id "$LEARN_TOKEN_ID" \
     --source "$STELLAR_SECRET_KEY" \
@@ -158,8 +159,9 @@ soroban contract invoke \
     --name "ChainLearn Token" \
     --symbol "CLRN" \
     --decimal 7 \
-    --progress_tracker "$PROGRESS_TRACKER_ID"
-echo "  learn-token initialized with admin: $ADMIN_ADDRESS"
+    --progress_tracker "$PROGRESS_TRACKER_ID" \
+    --max_supply "$LEARN_TOKEN_MAX_SUPPLY"
+echo "  learn-token initialized with admin: $ADMIN_ADDRESS (max_supply: $LEARN_TOKEN_MAX_SUPPLY)"
 assert_progress_tracker_wired "learn-token" "$LEARN_TOKEN_ID"
 
 # 3. Initialize credential-nft (depends on progress-tracker)

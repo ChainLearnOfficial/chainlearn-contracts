@@ -1,11 +1,11 @@
 #![no_std]
 
 mod rewards;
-mod types;
+pub mod types;
 
 use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
-use types::{Course, ProgressInfo, ProgressTrackerDataKey, QuizResult};
+pub use types::{Course, ProgressInfo, ProgressTrackerDataKey, QuizResult};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

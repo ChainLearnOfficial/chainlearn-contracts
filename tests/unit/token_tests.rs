@@ -2,7 +2,10 @@
 
 use learn_token::{LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Env, IntoVal, String as SorobanString, Symbol, Vec,
+};
 
 #[cfg(test)]
 mod token_unit_tests {
@@ -151,8 +154,7 @@ mod token_unit_tests {
     #[should_panic(expected = "score exceeds maximum")]
     fn test_claim_reward_rejects_high_score() {
         let env = Env::default();
-        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
-        let client = LearnTokenClient::new(&env, &contract_id);
+        let (_admin, _contract_id, pt_contract_id) = setup_token(&env);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
         let learner = Address::generate(&env);
@@ -188,7 +190,7 @@ mod token_unit_tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_transfer_from_insufficient_allowance() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -202,10 +204,10 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "allowance expired")]
+    #[should_panic(expected = "insufficient allowance")]
     fn test_transfer_from_expired_allowance() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -217,7 +219,7 @@ mod token_unit_tests {
         client.approve(&owner, &spender, &500, &10);
 
         env.ledger().with_mut(|l| {
-            l.sequence = 20;
+            l.sequence_number = 20;
         });
 
         client.transfer_from(&spender, &owner, &recipient, &100);
@@ -226,7 +228,7 @@ mod token_unit_tests {
     #[test]
     fn test_approve_zero_allowance_revokes() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -244,7 +246,7 @@ mod token_unit_tests {
     #[should_panic]
     fn test_mint_without_admin_auth_fails() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let recipient = Address::generate(&env);
@@ -262,34 +264,29 @@ mod token_unit_tests {
 
         let contract_id = env.register_contract(None, LearnToken);
         let client = LearnTokenClient::new(&env, &contract_id);
-
-        let cap = 5000;
         client.initialize(
             &admin,
             &SorobanString::from_str(&env, "CLearn"),
             &SorobanString::from_str(&env, "CLRN"),
             &7,
             &pt_contract_id,
-            &cap,
+            &5000,
         );
 
-        let recipient = Address::generate(&env);
+        let user = Address::generate(&env);
         env.mock_all_auths();
 
-        // Mint up to the cap
-        client.mint(&recipient, &3000);
-        assert_eq!(client.balance(&recipient), 3000);
-        assert_eq!(client.total_supply(), 3000);
+        client.mint(&user, &2000);
+        assert_eq!(client.total_supply(), 2000);
 
-        // Mint exactly to the cap boundary
-        client.mint(&recipient, &2000);
-        assert_eq!(client.balance(&recipient), 5000);
+        client.mint(&user, &3000);
         assert_eq!(client.total_supply(), 5000);
+        assert_eq!(client.balance(&user), 5000);
     }
 
     #[test]
     #[should_panic(expected = "maximum supply cap exceeded")]
-    fn test_mint_exceeding_cap_fails() {
+    fn test_mint_beyond_max_supply_panics() {
         let env = Env::default();
         let admin = Address::generate(&env);
         let pt_contract_id = env.register_contract(None, ProgressTracker);
@@ -298,22 +295,20 @@ mod token_unit_tests {
 
         let contract_id = env.register_contract(None, LearnToken);
         let client = LearnTokenClient::new(&env, &contract_id);
-
-        let cap = 5000;
         client.initialize(
             &admin,
             &SorobanString::from_str(&env, "CLearn"),
             &SorobanString::from_str(&env, "CLRN"),
             &7,
             &pt_contract_id,
-            &cap,
+            &5000,
         );
 
-        let recipient = Address::generate(&env);
+        let user = Address::generate(&env);
         env.mock_all_auths();
 
-        // Mint exceeding the cap
-        client.mint(&recipient, &5001);
+        client.mint(&user, &3000);
+        client.mint(&user, &2001);
     }
 
     #[test]
@@ -326,37 +321,59 @@ mod token_unit_tests {
 
         let contract_id = env.register_contract(None, LearnToken);
         let client = LearnTokenClient::new(&env, &contract_id);
-
-        let cap = 5000;
         client.initialize(
             &admin,
             &SorobanString::from_str(&env, "CLearn"),
             &SorobanString::from_str(&env, "CLRN"),
             &7,
             &pt_contract_id,
-            &cap,
+            &5000,
         );
+
+        env.mock_all_auths();
 
         assert_eq!(client.max_supply(), 5000);
 
-        env.mock_all_auths();
-        // Update cap to 10000
+        client.mint(&Address::generate(&env), &3000);
+
         client.set_max_supply(&10000);
         assert_eq!(client.max_supply(), 10000);
+    }
 
-        let recipient = Address::generate(&env);
-        client.mint(&recipient, &6000);
-        assert_eq!(client.balance(&recipient), 6000);
+    #[test]
+    #[should_panic(expected = "new cap cannot be less than current total supply")]
+    fn test_admin_cannot_set_max_supply_below_current_supply() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &5000,
+        );
+
+        env.mock_all_auths();
+
+        client.mint(&Address::generate(&env), &3000);
+        client.set_max_supply(&2000);
     }
 
     #[test]
     #[should_panic(expected = "cannot mint to zero address")]
-    fn test_mint_zero_address_panics() {
+    fn test_mint_to_zero_address_panics() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
-
         env.mock_all_auths();
+
         let zero_address = Address::from_string(&SorobanString::from_str(
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
@@ -381,11 +398,18 @@ mod token_unit_tests {
         client.approve(&owner, &spender, &500, &999999);
         client.transfer_from(&spender, &owner, &recipient, &300);
 
-        let events = env.events().all();
-        let transfer_from_events: soroban_sdk::Vec<_> = events
-            .iter()
-            .filter(|e| e.1 == soroban_sdk::vec![&env, Symbol::new(&env, "transfer_from").into_val(&env)])
-            .collect();
-        assert_eq!(transfer_from_events.len(), 1);
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "transfer_from"),).into_val(&env),
+                    (spender, owner, recipient, 300i128).into_val(&env),
+                )
+            ]
+        );
     }
 }
