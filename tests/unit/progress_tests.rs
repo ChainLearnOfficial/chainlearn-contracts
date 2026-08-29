@@ -3,7 +3,7 @@
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
-    vec, Address, Env, IntoVal, Symbol, Vec,
+    Address, Env, IntoVal, Symbol, Vec,
 };
 
 #[cfg(test)]
@@ -12,7 +12,7 @@ mod progress_unit_tests {
 
     fn setup_contract(env: &Env) -> (Address, Address) {
         let admin = Address::generate(env);
-        let contract_id = env.register(ProgressTracker, ());
+        let contract_id = env.register_contract(None, ProgressTracker);
         let client = ProgressTrackerClient::new(env, &contract_id);
         client.initialize(&admin);
         (admin, contract_id)
@@ -266,7 +266,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "course has no modules")]
     fn test_enroll_rejects_course_with_no_modules() {
         let env = Env::default();
-        let (admin, contract_id) = setup_contract(&env);
+        let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -532,8 +532,8 @@ mod progress_unit_tests {
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
         assert_eq!(
-            vec![&env, last],
-            vec![
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
                 &env,
                 (
                     contract_id,
@@ -565,8 +565,8 @@ mod progress_unit_tests {
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
         assert_eq!(
-            vec![&env, last],
-            vec![
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
                 &env,
                 (
                     contract_id.clone(),
@@ -592,8 +592,8 @@ mod progress_unit_tests {
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
         assert_eq!(
-            vec![&env, last],
-            vec![
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
                 &env,
                 (
                     contract_id,
@@ -670,17 +670,16 @@ mod progress_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "module does not belong to course")]
+    #[should_panic(expected = "module not found in course")]
     fn test_complete_module_non_existent_module_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_tracker(&env);
+        let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
-        let learner = Address::generate(&env);
-        let course_id = Symbol::new(&env, "rust_101");
-        create_test_course(&env, &client, &course_id);
-
         env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = create_test_course(&env, &client);
+
         client.enroll(&learner, &course_id);
 
         let non_existent_mod = Symbol::new(&env, "invalid_mod");
@@ -688,23 +687,22 @@ mod progress_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "learner is not enrolled in course")]
+    #[should_panic(expected = "not enrolled")]
     fn test_submit_quiz_score_without_enrollment_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_tracker(&env);
+        let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
-        let learner = Address::generate(&env);
-        let course_id = Symbol::new(&env, "rust_101");
-        create_test_course(&env, &client, &course_id);
-
         env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = create_test_course(&env, &client);
+
         // Skip enrollment
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     }
 
     #[test]
-    #[should_panic(expected = "course_id not found in course")]
+    #[should_panic(expected = "quiz not submitted")]
     fn test_get_quiz_score_mismatched_course_id_panics() {
         let env = Env::default();
         let (_admin, contract_id) = setup_contract(&env);

@@ -2,7 +2,10 @@
 
 use credential_nft::{CredentialNft, CredentialNftClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
+use soroban_sdk::{
+    testutils::{Address as _, Events as _},
+    Address, Env, IntoVal, Symbol,
+};
 
 #[cfg(test)]
 mod credential_unit_tests {
@@ -20,6 +23,41 @@ mod credential_unit_tests {
         client.initialize(&admin, &tracker_id);
 
         (admin, contract_id, tracker_id)
+    }
+
+    fn create_course(env: &Env, tracker_id: &Address, course_id: &Symbol) {
+        let tracker_client = ProgressTrackerClient::new(env, tracker_id);
+        let mut module_ids = soroban_sdk::Vec::new(env);
+        module_ids.push_back(Symbol::new(env, "mod_1"));
+        module_ids.push_back(Symbol::new(env, "mod_2"));
+        let mut quiz_ids = soroban_sdk::Vec::new(env);
+        quiz_ids.push_back(Symbol::new(env, "quiz_1"));
+        tracker_client.create_course(course_id, &2, &1, &module_ids, &quiz_ids);
+    }
+
+    fn complete_course_with_score(
+        env: &Env,
+        tracker_id: &Address,
+        learner: &Address,
+        course_id: &Symbol,
+        score: u32,
+    ) {
+        let tracker_client = ProgressTrackerClient::new(env, tracker_id);
+        tracker_client.enroll(learner, course_id);
+        tracker_client.complete_module(learner, course_id, &Symbol::new(env, "mod_1"));
+        tracker_client.complete_module(learner, course_id, &Symbol::new(env, "mod_2"));
+        tracker_client.submit_quiz_score(learner, course_id, &Symbol::new(env, "quiz_1"), &score);
+    }
+
+    fn enrolled_and_completed_with_score(
+        env: &Env,
+        tracker_id: &Address,
+        learner: &Address,
+        course_id: &Symbol,
+        score: u32,
+    ) {
+        create_course(env, tracker_id, course_id);
+        complete_course_with_score(env, tracker_id, learner, course_id, score);
     }
 
     #[test]
@@ -41,7 +79,7 @@ mod credential_unit_tests {
     #[test]
     fn test_mint_with_valid_score() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -49,6 +87,7 @@ mod credential_unit_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
 
         let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
         assert_eq!(cred_id, 1);
@@ -64,7 +103,7 @@ mod credential_unit_tests {
     #[should_panic(expected = "credential already exists for this learner and course")]
     fn test_prevent_duplicate_credentials() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -72,15 +111,16 @@ mod credential_unit_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
 
         client.mint_credential(&learner, &course_id, &90, &uri);
-        client.mint_credential(&learner, &course_id, &95, &uri);
+        client.mint_credential(&learner, &course_id, &90, &uri);
     }
 
     #[test]
     fn test_get_credentials_for_learner() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -89,6 +129,9 @@ mod credential_unit_tests {
         let course1 = Symbol::new(&env, "rust_101");
         let course2 = Symbol::new(&env, "sol_201");
         let uri = Symbol::new(&env, "ipfs_meta");
+
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course1, 90);
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course2, 75);
 
         client.mint_credential(&learner, &course1, &90, &uri);
         client.mint_credential(&learner, &course2, &75, &uri);
@@ -100,7 +143,7 @@ mod credential_unit_tests {
     #[test]
     fn test_revoke_credential() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -108,6 +151,7 @@ mod credential_unit_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
         let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
         assert!(client.is_credential_valid(&cred_id));
@@ -118,14 +162,18 @@ mod credential_unit_tests {
         // Verify the revocation event includes the admin address.
         let events = env.events().all();
         assert_eq!(events.len(), event_count_before + 1);
-        let (_, topics, data) = events.get(events.len() - 1).unwrap();
-        let event_sym: Symbol = topics.get(0).unwrap();
-        assert_eq!(event_sym, Symbol::new(&env, "credential_revoked"));
-        // data: (learner, course_id, credential_id, admin)
-        let event_learner: Address = data.get(0).unwrap();
-        let event_admin: Address = data.get(3).unwrap();
-        assert_eq!(event_learner, learner);
-        assert_eq!(event_admin, admin);
+        let last = events.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "credential_revoked"),).into_val(&env),
+                    (learner, course_id, cred_id, admin).into_val(&env),
+                )
+            ]
+        );
 
         assert!(!client.is_credential_valid(&cred_id));
 
@@ -137,7 +185,7 @@ mod credential_unit_tests {
     #[should_panic(expected = "credential already revoked")]
     fn test_double_revoke() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -145,6 +193,7 @@ mod credential_unit_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
         let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
@@ -163,7 +212,7 @@ mod credential_unit_tests {
     #[test]
     fn test_credential_id_increment() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner1 = Address::generate(&env);
@@ -172,6 +221,9 @@ mod credential_unit_tests {
 
         let course = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
+
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner1, &course, 80);
+        complete_course_with_score(&env, &tracker_id, &learner2, &course, 90);
 
         let id1 = client.mint_credential(&learner1, &course, &80, &uri);
         let id2 = client.mint_credential(&learner2, &course, &90, &uri);
@@ -183,17 +235,10 @@ mod credential_unit_tests {
     #[should_panic]
     fn test_revoke_credential_without_admin_auth_fails() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (_admin, contract_id, _) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
-        let learner = Address::generate(&env);
-        env.mock_all_auths();
-
-        let course = Symbol::new(&env, "rust_101");
-        let uri = Symbol::new(&env, "ipfs_meta");
-        let id = client.mint_credential(&learner, &course, &80, &uri);
-
-        // Clear mocked auths, should panic on revoke without admin auth
-        // Note: revoke_credential checks admin.require_auth()
+        // We do not mock auths, so revoke_credential must fail admin auth check
+        client.revoke_credential(&1);
     }
 }

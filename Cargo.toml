@@ -1,6 +1,13 @@
+[package]
+name = "chainlearn-contracts"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
 [workspace]
 resolver = "2"
 members = [
+    ".",
     "contracts/learn-token",
     "contracts/credential-nft",
     "contracts/progress-tracker",
@@ -16,6 +23,33 @@ soroban-token-sdk = "21.0.0"
 
 [workspace.package]
 rust-version = "1.70"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+learn-token = { path = "contracts/learn-token" }
+credential-nft = { path = "contracts/credential-nft" }
+progress-tracker = { path = "contracts/progress-tracker" }
+chainlearn-shared = { path = "packages/shared" }
+
+[[test]]
+name = "token_tests"
+path = "tests/unit/token_tests.rs"
+
+[[test]]
+name = "progress_tests"
+path = "tests/unit/progress_tests.rs"
+
+[[test]]
+name = "credential_tests"
+path = "tests/unit/credential_tests.rs"
+
+[[test]]
+name = "token_flow"
+path = "tests/integration/token_flow.rs"
+
+[[test]]
+name = "credential_flow"
+path = "tests/integration/credential_flow.rs"
 
 [profile.release]
 opt-level = "z"
