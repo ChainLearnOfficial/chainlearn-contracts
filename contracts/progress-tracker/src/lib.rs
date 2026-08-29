@@ -5,7 +5,7 @@ pub mod types;
 
 use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
-pub use types::{Course, ProgressInfo, ProgressTrackerDataKey, QuizResult};
+pub use types::{Course, ProgressExport, ProgressInfo, ProgressTrackerDataKey, QuizResult};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -450,6 +450,63 @@ impl ProgressTracker {
             .expect("not enrolled")
     }
 
+    /// Export a learner's complete progress for a course in a single call (#196).
+    ///
+    /// Aggregates data that otherwise lives under several storage keys —
+    /// enrollment, every submitted quiz result, and the [`ProgressInfo`]
+    /// aggregates — into one [`ProgressExport`], for external tools that need
+    /// the full picture without walking each quiz individually via
+    /// [`Self::get_quiz_score`].
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    /// * `course_id` - The course to export progress for
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    /// * If the course does not exist
+    pub fn export_progress(env: Env, learner: Address, course_id: Symbol) -> ProgressExport {
+        let progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        let mut quiz_scores = Vec::new(&env);
+        for quiz_id in course.quiz_ids.iter() {
+            let key = ProgressTrackerDataKey::QuizResult(
+                learner.clone(),
+                course_id.clone(),
+                quiz_id.clone(),
+            );
+            let existing: Option<QuizResult> = env.storage().persistent().get(&key);
+            if let Some(result) = existing {
+                quiz_scores.push_back(result);
+            }
+        }
+
+        ProgressExport {
+            enrolled: true,
+            enrolled_at: progress.enrolled_at,
+            modules_completed_bitmap: progress.modules_completed_bitmap,
+            total_modules: course.total_modules,
+            quiz_scores,
+            quizzes_submitted: progress.quizzes_submitted,
+            total_quiz_score: progress.total_quiz_score,
+            overall_progress: progress.overall_progress,
+            eligible_for_credential: progress.eligible_for_credential,
+        }
+    }
+
     /// Get a verified quiz score for a learner.
     ///
     /// Returns the score if the quiz was submitted, or panics if not found.
@@ -880,6 +937,71 @@ mod tests {
             client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
             85
         );
+    }
+
+    #[test]
+    fn test_export_progress() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+
+        let export = client.export_progress(&learner, &course_id);
+
+        assert!(export.enrolled);
+        assert_eq!(export.total_modules, 3);
+        assert_eq!(export.modules_completed_bitmap, 1);
+        assert_eq!(export.quizzes_submitted, 1);
+        assert_eq!(export.total_quiz_score, 85);
+        assert_eq!(export.quiz_scores.len(), 1);
+        assert_eq!(export.quiz_scores.get(0).unwrap().quiz_id, Symbol::new(&env, "quiz_1"));
+        assert_eq!(export.quiz_scores.get(0).unwrap().score, 85);
+        assert!(!export.eligible_for_credential);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(export.overall_progress, progress.overall_progress);
+        assert_eq!(export.enrolled_at, progress.enrolled_at);
+    }
+
+    #[test]
+    fn test_export_progress_omits_unsubmitted_quizzes() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &70);
+        // quiz_2 is never submitted.
+
+        let export = client.export_progress(&learner, &course_id);
+
+        assert_eq!(export.quiz_scores.len(), 1);
+        assert_eq!(export.quiz_scores.get(0).unwrap().quiz_id, Symbol::new(&env, "quiz_1"));
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_export_progress_not_enrolled() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.export_progress(&learner, &course_id);
     }
 
     #[test]
