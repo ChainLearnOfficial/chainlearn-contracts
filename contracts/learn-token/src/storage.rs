@@ -202,7 +202,11 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
 }
 
 /// Read-only version of check_allowance_expired that does not perform storage side-effects.
-pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
+pub fn check_allowance_expired_readonly(
+    env: &Env,
+    owner: &Address,
+    spender: &Address,
+) -> (bool, bool, u32) {
     let key = AllowanceKey {
         owner: owner.clone(),
         spender: spender.clone(),

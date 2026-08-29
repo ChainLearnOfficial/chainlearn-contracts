@@ -284,11 +284,14 @@ mod progress_unit_tests {
                 q.push_back(Symbol::new(&env, "quiz_1"));
                 q
             },
+            archived: false,
+            content_hash: Symbol::new(&env, "none"),
         };
         env.as_contract(&contract_id, || {
-            env.storage()
-                .persistent()
-                .set(&progress_tracker::ProgressTrackerDataKey::Course(course_id.clone()), &course);
+            env.storage().persistent().set(
+                &progress_tracker::ProgressTrackerDataKey::Course(course_id.clone()),
+                &course,
+            );
         });
 
         let learner = Address::generate(&env);
@@ -453,7 +456,10 @@ mod progress_unit_tests {
             client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
             70
         );
-        assert_eq!(client.get_progress(&learner, &course_id).quizzes_submitted, 1);
+        assert_eq!(
+            client.get_progress(&learner, &course_id).quizzes_submitted,
+            1
+        );
     }
 
     #[test]
@@ -622,9 +628,18 @@ mod progress_unit_tests {
         // up the module list.
         let course = client.get_course(&course_id);
         assert_eq!(course.module_ids.len(), 3);
-        assert_eq!(course.module_ids.get(0).unwrap(), Symbol::new(&env, "mod_1"));
-        assert_eq!(course.module_ids.get(1).unwrap(), Symbol::new(&env, "mod_2"));
-        assert_eq!(course.module_ids.get(2).unwrap(), Symbol::new(&env, "mod_3"));
+        assert_eq!(
+            course.module_ids.get(0).unwrap(),
+            Symbol::new(&env, "mod_1")
+        );
+        assert_eq!(
+            course.module_ids.get(1).unwrap(),
+            Symbol::new(&env, "mod_2")
+        );
+        assert_eq!(
+            course.module_ids.get(2).unwrap(),
+            Symbol::new(&env, "mod_3")
+        );
 
         // Ordering/ existence checks driven by Course::module_ids still work.
         let learner = Address::generate(&env);
@@ -658,7 +673,10 @@ mod progress_unit_tests {
         progress.eligible_for_credential = true;
         env.as_contract(&contract_id, || {
             env.storage().persistent().set(
-                &progress_tracker::ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+                &progress_tracker::ProgressTrackerDataKey::Progress(
+                    learner.clone(),
+                    course_id.clone(),
+                ),
                 &progress,
             );
         });
