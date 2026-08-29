@@ -7,7 +7,6 @@ use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{
     contract, contracterror, contractimpl, Address, Env, IntoVal, String as SorobanString, Symbol,
 };
-use soroban_token_sdk::metadata::TokenMetadata;
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
 /// Caps at MAX_QUIZ_SCORE * BASE_REWARD_PER_POINT (100 * 100 = 10_000).
@@ -89,6 +88,110 @@ impl LearnToken {
         storage::get_contract_metadata(&env)
     }
 
+    // ── Transfer Restrictions (#191) ───────────────────────────────────────
+
+    /// Check if a transfer is allowed under current restrictions.
+    fn check_transfer_restriction(env: &Env, _from: &Address, to: &Address, amount: i128) {
+        let restriction = storage::get_transfer_restriction(env);
+        match restriction {
+            storage::TransferRestriction::None => {}
+            storage::TransferRestriction::WhitelistOnly => {
+                if !storage::is_whitelisted(env, to) {
+                    panic!("recipient not whitelisted");
+                }
+            }
+            storage::TransferRestriction::Cooldown(cooldown_ledgers) => {
+                let last_transfer_key = soroban_sdk::symbol_short!("last_xfer");
+                if let Some(last_ledger) = env.storage().temporary().get::<_, u32>(&last_transfer_key) {
+                    let current = env.ledger().sequence();
+                    if current < last_ledger + cooldown_ledgers {
+                        panic!("cooldown period active");
+                    }
+                }
+            }
+            storage::TransferRestriction::MaxAmount(max) => {
+                if amount > max {
+                    panic!("transfer amount exceeds maximum");
+                }
+            }
+        }
+    }
+
+    /// Set the transfer restriction. Admin only.
+    ///
+    /// # Arguments
+    /// * `restriction` - The new restriction to apply
+    pub fn set_transfer_restriction(env: Env, restriction: storage::TransferRestriction) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        storage::set_transfer_restriction(&env, &restriction);
+        events::restriction_updated(&env, &restriction);
+    }
+
+    /// Get the current transfer restriction.
+    pub fn get_transfer_restriction(env: Env) -> storage::TransferRestriction {
+        storage::get_transfer_restriction(&env)
+    }
+
+    /// Add an address to the transfer whitelist. Admin only.
+    ///
+    /// # Arguments
+    /// * `address` - The address to whitelist
+    pub fn add_to_whitelist(env: Env, address: Address) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        storage::add_to_whitelist(&env, &address);
+        events::whitelist_updated(&env, &address, true);
+    }
+
+    /// Remove an address from the transfer whitelist. Admin only.
+    ///
+    /// # Arguments
+    /// * `address` - The address to remove from the whitelist
+    pub fn remove_from_whitelist(env: Env, address: Address) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        storage::remove_from_whitelist(&env, &address);
+        events::whitelist_updated(&env, &address, false);
+    }
+
+    /// Check if an address is on the transfer whitelist.
+    pub fn is_whitelisted(env: Env, address: Address) -> bool {
+        storage::is_whitelisted(&env, &address)
+    }
+
+    // ── Token Snapshots (#192) ────────────────────────────────────────────
+
+    /// Create a snapshot of all token balances at the current ledger height.
+    /// Admin only. Stores the current balance for every address that has a
+    /// non-zero balance.
+    pub fn snapshot(env: Env, ledger_height: u32) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        events::snapshot_created(&env, ledger_height);
+    }
+
+    /// Get the balance of an address at a specific snapshot ledger height.
+    ///
+    /// # Arguments
+    /// * `address` - The address to query
+    /// * `ledger_height` - The ledger height of the snapshot
+    ///
+    /// # Returns
+    /// The balance at that snapshot, or 0 if no snapshot exists.
+    pub fn balance_at(env: Env, address: Address, ledger_height: u32) -> i128 {
+        storage::get_snapshot_balance(&env, &address, ledger_height).unwrap_or(0)
+    }
+
+    /// Record a balance snapshot for an address at the current ledger.
+    /// This is called internally when a snapshot is created.
+    pub fn record_balance_snapshot(env: Env, address: Address, ledger_height: u32) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        let balance = storage::get_balance(&env, &address);
+        storage::set_snapshot_balance(&env, &address, ledger_height, balance);
+    }
+
     // ── SEP-41 Standard Interface ─────────────────────────────────────────
 
     /// Returns the token name.
@@ -153,6 +256,9 @@ impl LearnToken {
             panic!("insufficient balance");
         }
 
+        // Check transfer restrictions (#191)
+        Self::check_transfer_restriction(&env, &from, &to, amount);
+
         storage::set_balance(&env, &from, from_balance - amount);
         let to_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, to_balance + amount);
@@ -199,6 +305,9 @@ impl LearnToken {
         if from_balance < amount {
             panic!("insufficient balance");
         }
+
+        // Check transfer restrictions (#191)
+        Self::check_transfer_restriction(&env, &from, &to, amount);
 
         storage::reduce_allowance(&env, &from, &spender, amount);
         storage::set_balance(&env, &from, from_balance - amount);

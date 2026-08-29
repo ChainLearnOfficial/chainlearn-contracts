@@ -247,6 +247,35 @@ impl CredentialNft {
         verify::revoke_credential(&env, credential_id);
     }
 
+    /// Revoke a credential with a reason. Admin only (#194).
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to revoke
+    /// * `reason` - The reason for revocation
+    pub fn revoke_credential_with_reason(env: Env, credential_id: u64, reason: Symbol) {
+        verify::revoke_credential_with_reason(&env, credential_id, reason);
+    }
+
+    /// Get the reason a credential was revoked (#194).
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to query
+    ///
+    /// # Returns
+    /// The revocation reason, or None if the credential has not been revoked.
+    pub fn get_revocation_reason(env: Env, credential_id: u64) -> Option<Symbol> {
+        verify::get_revocation_reason(&env, credential_id)
+    }
+
+    /// Renew a credential's expiration (#193). Admin only.
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to renew
+    /// * `new_expiry` - The new expiration ledger height (0 = no expiration)
+    pub fn renew_credential(env: Env, credential_id: u64, new_expiry: u32) {
+        verify::renew_credential(&env, credential_id, new_expiry);
+    }
+
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         env.storage()

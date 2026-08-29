@@ -82,18 +82,18 @@ pub fn get_credential_count(env: &Env, learner: &Address) -> u32 {
     learner_credentials(env, learner).len()
 }
 
-/// Check whether a credential is valid (exists and not revoked).
+/// Check whether a credential is valid (exists, not revoked, and not expired).
 ///
-/// Existence is checked with `has()`, and the revoked flag is read from its
-/// own single-bool entry -- neither deserializes the full `CredentialInfo`
-/// struct, which this call has no other use for (#109).
+/// Existence is checked with `has()`, the revoked flag is read from its
+/// own single-bool entry, and expiration is checked against the current
+/// ledger height (#193).
 ///
 /// # Arguments
 /// * `env` - Soroban environment
 /// * `credential_id` - The unique credential identifier
 ///
 /// # Returns
-/// `true` if the credential exists and is not revoked.
+/// `true` if the credential exists, is not revoked, and has not expired.
 pub fn is_credential_valid(env: &Env, credential_id: u64) -> bool {
     if !env
         .storage()
@@ -102,10 +102,24 @@ pub fn is_credential_valid(env: &Env, credential_id: u64) -> bool {
     {
         return false;
     }
-    !env.storage()
+    if env
+        .storage()
         .persistent()
         .get::<CredentialDataKey, bool>(&CredentialDataKey::Revoked(credential_id))
         .unwrap_or(false)
+    {
+        return false;
+    }
+    // Check expiration (#193)
+    let info: CredentialInfo = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Credential(credential_id))
+        .expect("credential not found");
+    if info.expires_at > 0 && env.ledger().sequence() > info.expires_at {
+        return false;
+    }
+    true
 }
 
 /// Revoke a credential. Admin only.
@@ -184,5 +198,130 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     env.events().publish(
         (Symbol::new(env, "credential_revoked"),),
         (info.learner, info.course_id, credential_id, admin),
+    );
+}
+
+/// Revoke a credential with a reason. Admin only (#194).
+///
+/// # Arguments
+/// * `env` - Soroban environment
+/// * `credential_id` - The credential to revoke
+/// * `reason` - The reason for revocation
+pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symbol) {
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Admin)
+        .expect("not initialized");
+    admin.require_auth();
+
+    let mut info: CredentialInfo = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Credential(credential_id))
+        .expect("credential not found");
+
+    if info.revoked {
+        panic!("credential already revoked");
+    }
+
+    info.revoked = true;
+    env.storage()
+        .persistent()
+        .set(&CredentialDataKey::Credential(credential_id), &info);
+    env.storage()
+        .persistent()
+        .set(&CredentialDataKey::Revoked(credential_id), &true);
+    // Store the revocation reason (#194)
+    env.storage()
+        .persistent()
+        .set(&CredentialDataKey::RevocationReason(credential_id), &reason);
+
+    // #104 — prune from learner's credential list
+    let mut learner_list: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::LearnerCredentials(info.learner.clone()))
+        .unwrap_or(Vec::new(env));
+    if let Some(pos) =
+        (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
+    {
+        learner_list.remove(pos);
+        env.storage().persistent().set(
+            &CredentialDataKey::LearnerCredentials(info.learner.clone()),
+            &learner_list,
+        );
+    }
+
+    // #104 — prune from course credential index
+    let mut course_list: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::CourseCredentials(
+            info.course_id.clone(),
+        ))
+        .unwrap_or(Vec::new(env));
+    if let Some(pos) =
+        (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
+    {
+        course_list.remove(pos);
+        env.storage().persistent().set(
+            &CredentialDataKey::CourseCredentials(info.course_id.clone()),
+            &course_list,
+        );
+    }
+
+    env.events().publish(
+        (Symbol::new(env, "credential_revoked"),),
+        (info.learner, info.course_id, credential_id, admin, reason),
+    );
+}
+
+/// Get the reason a credential was revoked (#194).
+///
+/// # Arguments
+/// * `env` - Soroban environment
+/// * `credential_id` - The credential to query
+///
+/// # Returns
+/// The revocation reason, or None if the credential has not been revoked.
+pub fn get_revocation_reason(env: &Env, credential_id: u64) -> Option<Symbol> {
+    env.storage()
+        .persistent()
+        .get(&CredentialDataKey::RevocationReason(credential_id))
+}
+
+/// Renew a credential's expiration (#193). Admin only.
+///
+/// # Arguments
+/// * `env` - Soroban environment
+/// * `credential_id` - The credential to renew
+/// * `new_expiry` - The new expiration ledger height (0 = no expiration)
+pub fn renew_credential(env: &Env, credential_id: u64, new_expiry: u32) {
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Admin)
+        .expect("not initialized");
+    admin.require_auth();
+
+    let mut info: CredentialInfo = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Credential(credential_id))
+        .expect("credential not found");
+
+    if info.revoked {
+        panic!("cannot renew revoked credential");
+    }
+
+    info.expires_at = new_expiry;
+    env.storage()
+        .persistent()
+        .set(&CredentialDataKey::Credential(credential_id), &info);
+
+    env.events().publish(
+        (Symbol::new(env, "credential_renewed"),),
+        (credential_id, new_expiry),
     );
 }

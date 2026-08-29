@@ -18,6 +18,30 @@ pub enum TokenDataKey {
     MaxSupply,
     /// On-chain contract name/version, set on `initialize()` (#107).
     Metadata,
+    /// Current transfer restriction configuration (#191).
+    TransferRestriction,
+    /// Whitelist of addresses allowed to receive tokens when WhitelistOnly (#191).
+    Whitelist(Address),
+    /// Snapshot of all balances at a given ledger height (#192).
+    Snapshot(u32),
+    /// Maps (address, ledger_height) to the balance at that snapshot (#192).
+    SnapshotBalance(SnapshotBalanceKey),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TransferRestriction {
+    None,
+    WhitelistOnly,
+    Cooldown(u32),
+    MaxAmount(i128),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotBalanceKey {
+    pub address: Address,
+    pub ledger_height: u32,
 }
 
 #[contracttype]
@@ -325,4 +349,64 @@ pub fn get_contract_metadata(env: &Env) -> ContractMetadata {
         .persistent()
         .get(&TokenDataKey::Metadata)
         .expect("not initialized")
+}
+
+// ── Transfer Restriction (#191) ─────────────────────────────────────────────
+
+/// Get the current transfer restriction.
+pub fn get_transfer_restriction(env: &Env) -> TransferRestriction {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::TransferRestriction)
+        .unwrap_or(TransferRestriction::None)
+}
+
+/// Set the transfer restriction.
+pub fn set_transfer_restriction(env: &Env, restriction: &TransferRestriction) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::TransferRestriction, restriction);
+}
+
+/// Check if an address is on the whitelist.
+pub fn is_whitelisted(env: &Env, address: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get::<TokenDataKey, bool>(&TokenDataKey::Whitelist(address.clone()))
+        .unwrap_or(false)
+}
+
+/// Add an address to the whitelist.
+pub fn add_to_whitelist(env: &Env, address: &Address) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::Whitelist(address.clone()), &true);
+}
+
+/// Remove an address from the whitelist.
+pub fn remove_from_whitelist(env: &Env, address: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&TokenDataKey::Whitelist(address.clone()));
+}
+
+// ── Snapshots (#192) ────────────────────────────────────────────────────────
+
+/// Store a snapshot of an address's balance at a given ledger height.
+pub fn set_snapshot_balance(env: &Env, address: &Address, ledger_height: u32, balance: i128) {
+    let key = TokenDataKey::SnapshotBalance(SnapshotBalanceKey {
+        address: address.clone(),
+        ledger_height,
+    });
+    env.storage().persistent().set(&key, &balance);
+}
+
+/// Get a snapshot of an address's balance at a given ledger height.
+/// Returns None if no snapshot exists for that ledger height.
+pub fn get_snapshot_balance(env: &Env, address: &Address, ledger_height: u32) -> Option<i128> {
+    let key = TokenDataKey::SnapshotBalance(SnapshotBalanceKey {
+        address: address.clone(),
+        ledger_height,
+    });
+    env.storage().persistent().get(&key)
 }
