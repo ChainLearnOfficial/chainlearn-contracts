@@ -1,5 +1,5 @@
 use chainlearn_shared::{ContractMetadata, PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD};
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
@@ -41,6 +41,8 @@ pub enum TokenDataKey {
     LastTransfer(Address),
     /// Cumulative amount ever minted to an address (#236).
     TotalMintedTo(Address),
+    /// Append-only list of a learner's reward claims (#237).
+    ClaimHistory(Address),
 }
 
 #[contracttype]
@@ -71,6 +73,20 @@ pub struct AllowanceKey {
 pub struct AllowanceData {
     pub amount: i128,
     pub expiration_ledger: u32,
+}
+
+/// A single reward claim, recorded for a learner's history (#237).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimRecord {
+    /// The course the quiz belonged to.
+    pub course_id: Symbol,
+    /// The quiz that was claimed.
+    pub quiz_id: Symbol,
+    /// Reward amount minted for the claim.
+    pub amount: i128,
+    /// Ledger timestamp when the claim was made.
+    pub timestamp: u64,
 }
 
 #[contracttype]
@@ -542,6 +558,36 @@ pub fn add_total_minted_to(env: &Env, address: &Address, amount: i128) {
     env.storage()
         .persistent()
         .set(&data_key, &(current + amount));
+    env.storage().persistent().extend_ttl(
+        &data_key,
+        PERSISTENT_TTL_THRESHOLD,
+        PERSISTENT_TTL_EXTEND_TO,
+    );
+}
+
+/// Get a learner's full reward claim history (#237).
+///
+/// Returns an empty vector for a learner who has never claimed.
+pub fn get_claim_history(env: &Env, learner: &Address) -> Vec<ClaimRecord> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::ClaimHistory(learner.clone()))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+/// Append a claim to a learner's history (#237).
+///
+/// History is append-only: entries are never modified or removed, which is
+/// safe because `claim_reward` rejects double-claims before reaching here.
+pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
+    let data_key = TokenDataKey::ClaimHistory(learner.clone());
+    let mut history: Vec<ClaimRecord> = env
+        .storage()
+        .persistent()
+        .get(&data_key)
+        .unwrap_or_else(|| Vec::new(env));
+    history.push_back(record.clone());
+    env.storage().persistent().set(&data_key, &history);
     env.storage().persistent().extend_ttl(
         &data_key,
         PERSISTENT_TTL_THRESHOLD,

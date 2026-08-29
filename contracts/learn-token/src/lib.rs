@@ -6,7 +6,7 @@ mod storage;
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
-    String as SorobanString, Symbol,
+    String as SorobanString, Symbol, Vec,
 };
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
@@ -600,6 +600,18 @@ impl LearnToken {
         // Mark reward as claimed to prevent double-claiming
         storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
 
+        // Record the claim so learners can query their history (#237).
+        storage::append_claim_record(
+            &env,
+            &learner,
+            &storage::ClaimRecord {
+                course_id: course_id.clone(),
+                quiz_id: quiz_id.clone(),
+                amount: reward_amount,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
     }
 
@@ -670,6 +682,21 @@ impl LearnToken {
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────
+
+    /// Returns a learner's full reward claim history (#237).
+    ///
+    /// Each entry records the course, quiz, amount minted, and the ledger
+    /// timestamp of the claim, in the order the claims were made. Returns an
+    /// empty vector for a learner who has never claimed.
+    ///
+    /// History is immutable: `claim_reward` rejects double-claims, so entries
+    /// are only ever appended, never changed or removed.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner to query
+    pub fn get_claim_history(env: Env, learner: Address) -> Vec<storage::ClaimRecord> {
+        storage::get_claim_history(&env, &learner)
+    }
 
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
@@ -1068,6 +1095,124 @@ mod tests {
         let balance = client.balance(&learner);
         assert!(balance > 0);
         assert_eq!(client.total_minted_to(&learner), balance);
+    }
+
+    // ── Issue #237: reward claim history ─────────────────────────────────
+
+    #[test]
+    fn test_claim_history_empty_for_new_learner() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        let learner = Address::generate(&env);
+        assert_eq!(client.get_claim_history(&learner).len(), 0);
+    }
+
+    #[test]
+    fn test_claim_history_records_quiz_amount_and_timestamp() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 12_345);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 1);
+        let record = history.get(0).unwrap();
+        assert_eq!(record.course_id, course_id);
+        assert_eq!(record.quiz_id, quiz_id);
+        assert_eq!(record.amount, client.balance(&learner));
+        assert_eq!(record.timestamp, 12_345);
+    }
+
+    #[test]
+    fn test_claim_history_accumulates_in_claim_order() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut quiz_ids = Vec::new(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+        let quiz_2 = Symbol::new(&env, "quiz_2");
+        quiz_ids.push_back(quiz_1.clone());
+        quiz_ids.push_back(quiz_2.clone());
+        pt_client.create_course(&course_id, &1, &2, &module_ids, &quiz_ids);
+        pt_client.enroll(&learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_1, &60);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_2, &90);
+
+        env.ledger().with_mut(|li| li.timestamp = 100);
+        client.claim_reward(&learner, &course_id, &quiz_1);
+        env.ledger().with_mut(|li| li.timestamp = 200);
+        client.claim_reward(&learner, &course_id, &quiz_2);
+
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.get(0).unwrap().quiz_id, quiz_1);
+        assert_eq!(history.get(0).unwrap().timestamp, 100);
+        assert_eq!(history.get(1).unwrap().quiz_id, quiz_2);
+        assert_eq!(history.get(1).unwrap().timestamp, 200);
+        // Higher score earns the larger reward.
+        assert!(history.get(1).unwrap().amount > history.get(0).unwrap().amount);
+    }
+
+    #[test]
+    fn test_claim_history_is_per_learner() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &alice, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&alice, &course_id, &quiz_id);
+
+        assert_eq!(client.get_claim_history(&alice).len(), 1);
+        assert_eq!(client.get_claim_history(&bob).len(), 0);
+    }
+
+    #[test]
+    fn test_claim_history_not_duplicated_by_rejected_double_claim() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        // Second claim panics, so history stays immutable at one entry.
+        assert!(client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .is_err());
+
+        assert_eq!(client.get_claim_history(&learner).len(), 1);
     }
 
     #[test]
