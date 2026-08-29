@@ -275,6 +275,8 @@ impl LearnToken {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
 
+        Self::require_not_paused(&env);
+
         if from == to {
             return;
         }
@@ -316,6 +318,8 @@ impl LearnToken {
     /// * `amount` - Amount to transfer
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         spender.require_auth();
+
+        Self::require_not_paused(&env);
 
         if from == to {
             return;
@@ -416,6 +420,8 @@ impl LearnToken {
     pub fn burn(env: Env, from: Address, amount: i128) {
         from.require_auth();
 
+        Self::require_not_paused(&env);
+
         if amount < 0 {
             panic!("negative amount");
         }
@@ -451,6 +457,8 @@ impl LearnToken {
     /// * If `from` holds less than `amount`
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
         spender.require_auth();
+
+        Self::require_not_paused(&env);
 
         if amount < 0 {
             panic!("negative amount");
@@ -490,9 +498,15 @@ impl LearnToken {
     /// # Arguments
     /// * `to` - Recipient address
     /// * `amount` - Amount to mint
-    pub fn mint(env: Env, to: Address, amount: i128) {
-        let admin = storage::get_admin(&env);
-        admin.require_auth();
+    pub fn mint(env: Env, caller: Address, to: Address, amount: i128) {
+        caller.require_auth();
+
+        Self::require_not_paused(&env);
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Minter) {
+            panic!("not authorized");
+        }
+
+
 
         let zero_address = Address::from_string(&SorobanString::from_str(
             &env,
@@ -534,6 +548,8 @@ impl LearnToken {
     /// * `quiz_id` - Unique identifier for the quiz
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
         learner.require_auth();
+
+        Self::require_not_paused(&env);
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
             panic!("reward already claimed");
@@ -582,6 +598,74 @@ impl LearnToken {
         storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
+    }
+
+    /// Claim token rewards for completing multiple quizzes in a batch.
+    ///
+    /// Iterates through `quiz_ids`, claiming rewards for each. Each quiz is processed
+    /// independently. Partial failures (e.g. already claimed, score 0) do not block
+    /// successful claims in the batch.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner claiming the rewards (must authorize)
+    /// * `course_id` - The course the quizzes belong to
+    /// * `quiz_ids` - Unique identifiers for the quizzes
+    ///
+    /// # Returns
+    /// * `Vec<Symbol>` containing the IDs of successfully claimed quizzes.
+    pub fn batch_claim_reward(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        quiz_ids: soroban_sdk::Vec<Symbol>,
+    ) -> soroban_sdk::Vec<Symbol> {
+        learner.require_auth();
+
+        let mut successful = soroban_sdk::Vec::new(&env);
+        let progress_tracker = storage::get_progress_tracker(&env);
+        let max_supply = storage::get_max_supply(&env);
+
+        let mut current_supply = storage::get_total_supply(&env);
+        let mut current_balance = storage::get_balance(&env, &learner);
+
+        for quiz_id in quiz_ids.iter() {
+            if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
+                continue;
+            }
+
+            let score: u32 = env.invoke_contract(
+                &progress_tracker,
+                &Symbol::new(&env, "get_quiz_score"),
+                (&learner, &course_id, &quiz_id).into_val(&env),
+            );
+
+            if score == 0 || score > MAX_QUIZ_SCORE {
+                continue;
+            }
+
+            let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
+            if reward_amount > MAX_REWARD_AMOUNT {
+                continue;
+            }
+
+            if current_supply + reward_amount > max_supply {
+                continue;
+            }
+
+            current_supply += reward_amount;
+            current_balance += reward_amount;
+
+            storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
+            events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
+            successful.push_back(quiz_id);
+        }
+
+        if successful.len() > 0 {
+            storage::set_balance(&env, &learner, current_balance);
+            storage::set_total_supply(&env, current_supply);
+        }
+
+        successful
     }
 
     /// Preview a `claim_reward` call without executing it or changing any
@@ -650,9 +734,64 @@ impl LearnToken {
         }
     }
 
+
+    // ── Emergency Pause (#189) ────────────────────────────────────────────
+
+    fn require_not_paused(env: &Env) {
+        if storage::is_paused(env) {
+            panic!("contract is paused");
+        }
+    }
+
+    /// Pause all state-changing operations. Admin or Pauser only.
+    pub fn emergency_pause(env: Env, caller: Address) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
+            panic!("not authorized");
+        }
+        storage::set_paused(&env, true);
+        events::paused(&env, &caller);
+    }
+
+    /// Unpause state-changing operations. Admin or Pauser only.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
+            panic!("not authorized");
+        }
+        storage::set_paused(&env, false);
+        events::unpaused(&env, &caller);
+    }
+
     // ── Admin ─────────────────────────────────────────────────────────────
 
-    /// Returns the admin address.
+
+    /// Grant an admin role to an address. Admin only.
+    pub fn grant_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
+            panic!("not authorized");
+        }
+        storage::grant_role(&env, &address, &role);
+        events::role_granted(&env, &address, &role);
+    }
+
+    /// Revoke an admin role from an address. Admin only.
+    pub fn revoke_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
+            panic!("not authorized");
+        }
+        storage::revoke_role(&env, &address, &role);
+        events::role_revoked(&env, &address, &role);
+    }
+
+    /// Check if an address has a specific role.
+    pub fn has_role(env: Env, address: Address, role: storage::AdminRole) -> bool {
+        storage::has_role(&env, &address, &role)
+    }
+
+    /// Returns the main admin address.
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
     }
@@ -989,7 +1128,7 @@ mod tests {
         let learner = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&learner, &1000);
+        client.mint(&admin, &learner, &1000);
 
         assert_eq!(client.balance(&learner), 1000);
         assert_eq!(client.total_supply(), 1000);
@@ -1005,7 +1144,7 @@ mod tests {
         let bob = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &500);
+        client.mint(&admin, &alice, &500);
         client.transfer(&alice, &bob, &200);
 
         assert_eq!(client.balance(&alice), 300);
@@ -1155,7 +1294,7 @@ mod tests {
         let alice = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &500);
+        client.mint(&admin, &alice, &500);
         // Attempt to transfer to the contract itself — must panic
         client.transfer(&alice, &lt_contract_id, &200);
     }
@@ -1171,7 +1310,7 @@ mod tests {
         let spender = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &500, &999999);
 
         // Attempt transfer_from to the contract itself — must panic
@@ -1256,7 +1395,7 @@ mod tests {
         let alice = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &1000);
+        client.mint(&admin, &alice, &1000);
         client.burn(&alice, &400);
 
         assert_eq!(client.balance(&alice), 600);
@@ -1272,7 +1411,7 @@ mod tests {
         let alice = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &500);
+        client.mint(&admin, &alice, &500);
         client.burn(&alice, &500);
 
         assert_eq!(client.balance(&alice), 0);
@@ -1288,7 +1427,7 @@ mod tests {
         let alice = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &100);
+        client.mint(&admin, &alice, &100);
         client.burn(&alice, &0);
 
         assert_eq!(client.balance(&alice), 100);
@@ -1305,7 +1444,7 @@ mod tests {
         let alice = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &100);
+        client.mint(&admin, &alice, &100);
         client.burn(&alice, &101);
     }
 
@@ -1319,7 +1458,7 @@ mod tests {
         let alice = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &100);
+        client.mint(&admin, &alice, &100);
         client.burn(&alice, &-1);
     }
 
@@ -1332,7 +1471,7 @@ mod tests {
 
         let alice = Address::generate(&env);
         env.mock_all_auths();
-        client.mint(&alice, &100);
+        client.mint(&admin, &alice, &100);
 
         // Nobody authorizes the burn — the owner's auth is required.
         env.mock_auths(&[]);
@@ -1349,7 +1488,7 @@ mod tests {
         let spender = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &300, &999999);
 
         client.burn_from(&spender, &owner, &200);
@@ -1370,7 +1509,7 @@ mod tests {
         let spender = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &100, &999999);
 
         client.burn_from(&spender, &owner, &101);
@@ -1387,7 +1526,7 @@ mod tests {
         let spender = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &50);
+        client.mint(&admin, &owner, &50);
         // Allowance exceeds what the owner actually holds.
         client.approve(&owner, &spender, &500, &999999);
 
@@ -1405,7 +1544,7 @@ mod tests {
         let spender = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.burn_from(&spender, &owner, &1);
     }
 
@@ -1420,7 +1559,7 @@ mod tests {
         let spender_b = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender_a, &300, &999999);
         client.approve(&owner, &spender_b, &400, &999999);
 
@@ -1730,7 +1869,7 @@ mod tests {
     #[should_panic]
     fn test_upgrade_requires_admin_auth() {
         let env = Env::default();
-        let (_admin, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         // No mock_all_auths() and no explicit admin auth: require_auth must panic.
