@@ -111,8 +111,12 @@ impl LearnToken {
 
     // ── Transfer Restrictions (#191) ───────────────────────────────────────
 
-    /// Check if a transfer is allowed under current restrictions.
-    fn check_transfer_restriction(env: &Env, _from: &Address, to: &Address, amount: i128) {
+    /// Validate that the transfer is permitted under the current restriction.
+    ///
+    /// Must be called *before* balances are updated.  For `Cooldown`, call
+    /// [`Self::record_transfer_timestamp`] *after* the transfer succeeds to
+    /// latch the per-sender timestamp.
+    fn check_transfer_restriction(env: &Env, from: &Address, to: &Address, amount: i128) {
         let restriction = storage::get_transfer_restriction(env);
         match restriction {
             storage::TransferRestriction::None => {}
@@ -122,8 +126,9 @@ impl LearnToken {
                 }
             }
             storage::TransferRestriction::Cooldown(cooldown_ledgers) => {
-                let last_transfer_key = soroban_sdk::symbol_short!("last_xfer");
-                if let Some(last_ledger) = env.storage().temporary().get::<_, u32>(&last_transfer_key) {
+                // Per-sender cooldown: each address has its own last-transfer
+                // ledger so one user's transfer doesn't block all others.
+                if let Some(last_ledger) = storage::get_last_transfer_ledger(env, from) {
                     let current = env.ledger().sequence();
                     if current < last_ledger + cooldown_ledgers {
                         panic!("cooldown period active");
@@ -135,6 +140,18 @@ impl LearnToken {
                     panic!("transfer amount exceeds maximum");
                 }
             }
+        }
+    }
+
+    /// Record the current ledger as the sender's most recent transfer ledger.
+    ///
+    /// Only has an effect when `Cooldown` is active; a no-op otherwise so it
+    /// is safe to call unconditionally after every successful transfer.
+    fn record_transfer_timestamp(env: &Env, from: &Address) {
+        if let storage::TransferRestriction::Cooldown(_) =
+            storage::get_transfer_restriction(env)
+        {
+            storage::set_last_transfer_ledger(env, from, env.ledger().sequence());
         }
     }
 
@@ -284,6 +301,9 @@ impl LearnToken {
         let to_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, to_balance + amount);
 
+        // Latch the per-sender cooldown timestamp after a successful transfer.
+        Self::record_transfer_timestamp(&env, &from);
+
         events::transfer(&env, &from, &to, amount);
     }
 
@@ -334,6 +354,9 @@ impl LearnToken {
         storage::set_balance(&env, &from, from_balance - amount);
         let to_balance = storage::get_balance(&env, &to);
         storage::set_balance(&env, &to, to_balance + amount);
+
+        // Latch the per-sender cooldown timestamp after a successful transfer.
+        Self::record_transfer_timestamp(&env, &from);
 
         events::transfer_from(&env, &spender, &from, &to, amount);
     }

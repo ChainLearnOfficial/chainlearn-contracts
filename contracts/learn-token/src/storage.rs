@@ -36,6 +36,9 @@ pub enum TokenDataKey {
     WasmHash,
     /// Number of times `upgrade()` has been called (#198). Starts at 0.
     UpgradeVersion,
+    /// Ledger sequence of the most recent transfer made by an address, used
+    /// to enforce per-sender cooldown periods (#191).
+    LastTransfer(Address),
 }
 
 #[contracttype]
@@ -398,6 +401,31 @@ pub fn remove_from_whitelist(env: &Env, address: &Address) {
     env.storage()
         .persistent()
         .remove(&TokenDataKey::Whitelist(address.clone()));
+}
+
+/// Record the ledger sequence of the most recent transfer made by `sender`.
+/// Used by the `Cooldown` restriction to enforce a per-sender delay between
+/// consecutive transfers.
+///
+/// The entry lives in temporary storage because it only needs to survive until
+/// the cooldown window passes; after that it is inert and can be garbage
+/// collected by the network.
+pub fn set_last_transfer_ledger(env: &Env, sender: &Address, ledger: u32) {
+    let key = TokenDataKey::LastTransfer(sender.clone());
+    // Keep the entry alive for at least as long as the cooldown could be
+    // checked.  We use a generous TTL (7 days ≈ 100_800 ledgers at 6s/ledger)
+    // so a sender cannot bypass the cooldown simply by waiting for the entry
+    // to expire.
+    let ttl: u32 = 100_800;
+    env.storage().temporary().set(&key, &ledger);
+    env.storage().temporary().extend_ttl(&key, ttl, ttl);
+}
+
+/// Retrieve the ledger sequence of the sender's most recent transfer, if any.
+pub fn get_last_transfer_ledger(env: &Env, sender: &Address) -> Option<u32> {
+    env.storage()
+        .temporary()
+        .get(&TokenDataKey::LastTransfer(sender.clone()))
 }
 
 // ── Snapshots (#192) ────────────────────────────────────────────────────────
