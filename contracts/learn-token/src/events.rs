@@ -1,11 +1,31 @@
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, BytesN, Env, Symbol};
+
+// ── Event Indexing Convention (#200) ─────────────────────────────────────────
+//
+// Every event below puts its event-name `Symbol` in `topics[0]` (unchanged
+// from before this change — any indexer already filtering on that symbol
+// keeps working), then indexes the field(s) an indexer is most likely to
+// filter by (an owner/learner/course address or id) as additional topic
+// slots. Soroban's `getEvents` RPC filters match topics positionally with
+// server-side indexing, but never inspects the `data` payload, so any field
+// only present in `data` requires a full scan-and-decode of every event of
+// that type to query by it. Before this change every event here used a
+// single-symbol topic and pushed all addresses/ids into `data`, so "every
+// transfer touching address X" or "every reward claimed for course Y"
+// required exactly that full scan.
+//
+// Ordering is kept consistent across related events so a client doesn't
+// need per-event-type logic to find "the counterparty address topic": the
+// primary actor (`from`/`owner`/`learner`) is always topics[1], and the
+// secondary party (`to`/`spender`/`course_id`) is always topics[2] where one
+// exists.
 
 /// Emitted when a learner claims a reward for completing a quiz.
 ///
-/// Topics: ["reward_claimed"]
-/// Data: (learner, quiz_id, score, reward_amount, course_id)
-/// Topics: ["reward"]
-/// Data: (learner, quiz_id, score, reward_amount)
+/// Topics: ["reward", learner, course_id] — indexed so "every reward claimed
+/// by learner X" or "every reward claimed for course Y" can be queried
+/// server-side instead of scanning every reward_claimed event's payload.
+/// Data: (quiz_id, score, reward_amount)
 pub fn reward_claimed(
     env: &Env,
     learner: &Address,
@@ -14,62 +34,71 @@ pub fn reward_claimed(
     reward_amount: i128,
     course_id: &Symbol,
 ) {
-    // Symbol::new (not symbol_short!) so topic construction matches
-    // progress-tracker and credential-nft, which indexers rely on (#118).
-    let topics = (Symbol::new(env, "reward"),);
-    env.events()
-        .publish(topics, (learner, quiz_id, score, reward_amount, course_id));
+    let topics = (Symbol::new(env, "reward"), learner.clone(), course_id.clone());
+    env.events().publish(topics, (quiz_id, score, reward_amount));
 }
 
 /// Emitted when tokens are transferred directly.
 ///
-/// Topics: ["transfer"]
-/// Data: (from, to, amount)
+/// Topics: ["transfer", from, to] — matches the SEP-41 reference token
+/// convention, so "every transfer touching address X" is a server-side
+/// topic filter rather than a full scan.
+/// Data: (amount,)
 pub fn transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
-    let topics = (Symbol::new(env, "transfer"),);
-    env.events().publish(topics, (from, to, amount));
+    let topics = (Symbol::new(env, "transfer"), from.clone(), to.clone());
+    env.events().publish(topics, (amount,));
 }
 
 /// Emitted when tokens are transferred on behalf of another address (delegated).
 ///
-/// Topics: ["transfer_from"]
-/// Data: (spender, from, to, amount)
+/// Topics: ["transfer_from", from, to] — `from`/`to` occupy the same topic
+/// positions as the plain `transfer` event, so a query for "everything that
+/// moved address X's tokens" can filter on one topic shape across both event
+/// kinds. `spender` (who was delegated, rather than whose funds moved) stays
+/// in `data`.
+/// Data: (spender, amount)
 pub fn transfer_from(env: &Env, spender: &Address, from: &Address, to: &Address, amount: i128) {
-    let topics = (Symbol::new(env, "transfer_from"),);
-    env.events().publish(topics, (spender, from, to, amount));
+    let topics = (Symbol::new(env, "transfer_from"), from.clone(), to.clone());
+    env.events().publish(topics, (spender, amount));
 }
 
 /// Emitted when tokens are burned by their owner.
 ///
-/// Topics: ["burn"]
-/// Data: (from, amount)
+/// Topics: ["burn", from] — `from` in the same topic slot `transfer`/
+/// `transfer_from` use for the balance-reducing party.
+/// Data: (amount,)
 pub fn burn(env: &Env, from: &Address, amount: i128) {
-    let topics = (Symbol::new(env, "burn"),);
-    env.events().publish(topics, (from, amount));
+    let topics = (Symbol::new(env, "burn"), from.clone());
+    env.events().publish(topics, (amount,));
 }
 
 /// Emitted when tokens are burned by an approved spender (delegated).
 ///
-/// Topics: ["burn_from"]
-/// Data: (spender, from, amount)
+/// Topics: ["burn_from", from] — same topic position as `burn`, so "every
+/// burn affecting address X" is one filter shape regardless of who
+/// triggered it. `spender` stays in `data`.
+/// Data: (spender, amount)
 pub fn burn_from(env: &Env, spender: &Address, from: &Address, amount: i128) {
-    let topics = (Symbol::new(env, "burn_from"),);
-    env.events().publish(topics, (spender, from, amount));
+    let topics = (Symbol::new(env, "burn_from"), from.clone());
+    env.events().publish(topics, (spender, amount));
 }
 
 /// Emitted when tokens are minted.
 ///
-/// Topics: ["mint"]
-/// Data: (to, amount)
+/// Topics: ["mint", to] — indexed so "every mint to address X" doesn't
+/// require scanning every mint event.
+/// Data: (amount,)
 pub fn mint(env: &Env, to: &Address, amount: i128) {
-    let topics = (Symbol::new(env, "mint"),);
-    env.events().publish(topics, (to, amount));
+    let topics = (Symbol::new(env, "mint"), to.clone());
+    env.events().publish(topics, (amount,));
 }
 
 /// Emitted when an allowance is set.
 ///
-/// Topics: ["approve"]
-/// Data: (owner, spender, amount, expiration_ledger)
+/// Topics: ["approve", owner, spender] — both parties of an approval are
+/// frequently queried together ("what did X approve", "what can Y spend"),
+/// so both are indexed.
+/// Data: (amount, expiration_ledger)
 pub fn approve(
     env: &Env,
     owner: &Address,
@@ -77,14 +106,14 @@ pub fn approve(
     amount: i128,
     expiration_ledger: u32,
 ) {
-    let topics = (Symbol::new(env, "approve"),);
-    env.events()
-        .publish(topics, (owner, spender, amount, expiration_ledger));
+    let topics = (Symbol::new(env, "approve"), owner.clone(), spender.clone());
+    env.events().publish(topics, (amount, expiration_ledger));
 }
 
 /// Emitted when the progress-tracker address is updated (#75).
 ///
-/// Topics: ["progress"]
+/// Topics: ["progress"] — a rare, admin-only, singleton-config event; there
+/// is no per-address query pattern to index.
 /// Data: (new_address,)
 pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
     let topics = (Symbol::new(env, "progress"),);
@@ -93,18 +122,24 @@ pub fn progress_tracker_updated(env: &Env, new_address: &Address) {
 
 /// Emitted when an allowance expires or is accessed after expiration.
 ///
-/// Topics: ["allowance_expired"]
-/// Data: (owner, spender, expiration_ledger)
+/// Topics: ["allowance_expired", owner, spender] — same indexed pair as
+/// `approve`, so an indexer can correlate an allowance's creation and its
+/// expiry with one topic shape.
+/// Data: (expiration_ledger,)
 pub fn allowance_expired(env: &Env, owner: &Address, spender: &Address, expiration_ledger: u32) {
-    let topics = (Symbol::new(env, "allowance_expired"),);
-    env.events()
-        .publish(topics, (owner, spender, expiration_ledger));
+    let topics = (
+        Symbol::new(env, "allowance_expired"),
+        owner.clone(),
+        spender.clone(),
+    );
+    env.events().publish(topics, (expiration_ledger,));
 }
 
 /// Emitted when the transfer restriction is updated (#191).
 ///
-/// Topics: ["restriction_updated"]
-/// Data: (restriction)
+/// Topics: ["restriction_updated"] — a rare, admin-only, contract-wide
+/// config event; there is no per-address query pattern to index.
+/// Data: (restriction,)
 pub fn restriction_updated(env: &Env, restriction: &super::storage::TransferRestriction) {
     let topics = (Symbol::new(env, "restriction_updated"),);
     let restriction_str = match restriction {
@@ -119,18 +154,31 @@ pub fn restriction_updated(env: &Env, restriction: &super::storage::TransferRest
 
 /// Emitted when an address is added to or removed from the whitelist (#191).
 ///
-/// Topics: ["whitelist_updated"]
-/// Data: (address, added)
+/// Topics: ["whitelist_updated", address] — indexed so "is/was address X
+/// whitelisted" is a topic filter instead of a scan.
+/// Data: (added,)
 pub fn whitelist_updated(env: &Env, address: &Address, added: bool) {
-    let topics = (Symbol::new(env, "whitelist_updated"),);
-    env.events().publish(topics, (address, added));
+    let topics = (Symbol::new(env, "whitelist_updated"), address.clone());
+    env.events().publish(topics, (added,));
 }
 
 /// Emitted when a token snapshot is created (#192).
 ///
-/// Topics: ["snapshot_created"]
-/// Data: (ledger_height)
+/// Topics: ["snapshot_created"] — a contract-wide event with no per-address
+/// dimension to index.
+/// Data: (ledger_height,)
 pub fn snapshot_created(env: &Env, ledger_height: u32) {
     let topics = (Symbol::new(env, "snapshot_created"),);
     env.events().publish(topics, (ledger_height,));
+}
+
+/// Emitted when the contract's wasm code is upgraded (#198).
+///
+/// Topics: ["upgraded"] — a rare, admin-only, contract-wide event; there is
+/// no per-address query pattern to index.
+/// Data: (new_wasm_hash, upgrade_version)
+pub fn upgraded(env: &Env, new_wasm_hash: &BytesN<32>, upgrade_version: u32) {
+    let topics = (Symbol::new(env, "upgraded"),);
+    env.events()
+        .publish(topics, (new_wasm_hash.clone(), upgrade_version));
 }

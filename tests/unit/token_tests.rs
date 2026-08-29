@@ -406,10 +406,71 @@ mod token_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "transfer_from"),).into_val(&env),
-                    (spender, owner, recipient, 300i128).into_val(&env),
+                    (Symbol::new(&env, "transfer_from"), owner.clone(), recipient.clone())
+                        .into_val(&env),
+                    (spender, 300i128).into_val(&env),
                 )
             ]
         );
+    }
+
+    #[test]
+    fn test_transfer_from_event_indexes_from_and_to_in_topics() {
+        use soroban_sdk::testutils::Events;
+
+        // #200: from/to must be queryable via topic filters, not just present
+        // somewhere in the data payload.
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&owner, &1000);
+        client.approve(&owner, &spender, &500, &999999);
+        client.transfer_from(&spender, &owner, &recipient, &300);
+
+        let all = env.events().all();
+        let (_, topics, _) = all.last().expect("no events emitted");
+        let topics: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
+        assert_eq!(topics.len(), 3);
+        let event_name: Symbol = topics.get(0).unwrap().into_val(&env);
+        let from_topic: Address = topics.get(1).unwrap().into_val(&env);
+        let to_topic: Address = topics.get(2).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "transfer_from"));
+        assert_eq!(from_topic, owner);
+        assert_eq!(to_topic, recipient);
+    }
+
+    #[test]
+    fn test_reward_claimed_event_indexes_learner_and_course() {
+        use soroban_sdk::testutils::Events;
+
+        let env = Env::default();
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        env.mock_all_auths();
+
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let all = env.events().all();
+        let (_, topics, _) = all.last().expect("no events emitted");
+        let topics: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
+        assert_eq!(topics.len(), 3);
+        let event_name: Symbol = topics.get(0).unwrap().into_val(&env);
+        let learner_topic: Address = topics.get(1).unwrap().into_val(&env);
+        let course_topic: Symbol = topics.get(2).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "reward"));
+        assert_eq!(learner_topic, learner);
+        assert_eq!(course_topic, course_id);
     }
 }
