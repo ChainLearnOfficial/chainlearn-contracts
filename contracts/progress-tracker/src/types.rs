@@ -16,6 +16,11 @@ pub struct Course {
     pub quiz_ids: Vec<Symbol>,
     /// Whether the course is archived and cannot accept new enrollments (#210).
     pub archived: bool,
+    /// Hash of the course's off-chain content, used to verify integrity (#235).
+    ///
+    /// Verification is optional: an empty symbol means no hash is set and
+    /// enrollment skips the check.
+    pub content_hash: Symbol,
 }
 
 /// Represents a quiz submission.

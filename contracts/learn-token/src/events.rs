@@ -182,3 +182,21 @@ pub fn upgraded(env: &Env, new_wasm_hash: &BytesN<32>, upgrade_version: u32) {
     env.events()
         .publish(topics, (new_wasm_hash.clone(), upgrade_version));
 }
+
+/// Emitted when the contract is paused by an admin (#238).
+///
+/// Topics: ["paused"]
+/// Data: (admin, timestamp)
+pub fn paused(env: &Env, admin: &Address, timestamp: u64) {
+    let topics = (Symbol::new(env, "paused"),);
+    env.events().publish(topics, (admin, timestamp));
+}
+
+/// Emitted when the contract is unpaused by an admin (#238).
+///
+/// Topics: ["unpaused"]
+/// Data: (admin, timestamp)
+pub fn unpaused(env: &Env, admin: &Address, timestamp: u64) {
+    let topics = (Symbol::new(env, "unpaused"),);
+    env.events().publish(topics, (admin, timestamp));
+}

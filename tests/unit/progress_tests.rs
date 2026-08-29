@@ -284,6 +284,8 @@ mod progress_unit_tests {
                 q.push_back(Symbol::new(&env, "quiz_1"));
                 q
             },
+            archived: false,
+            content_hash: Symbol::new(&env, "none"),
         };
         env.as_contract(&contract_id, || {
             env.storage()
