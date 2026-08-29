@@ -274,6 +274,15 @@ impl CredentialNft {
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+
+        let zero_address = Address::from_string(&soroban_sdk::String::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        ));
+        if new_admin == zero_address {
+            panic!("cannot transfer admin to zero address");
+        }
+
         env.storage()
             .persistent()
             .set(&CredentialDataKey::Admin, &new_admin);

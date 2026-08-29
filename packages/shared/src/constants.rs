@@ -51,13 +51,3 @@ impl ContractMetadata {
         }
     }
 }
-
-/// Status of a learner's enrollment in a course.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EnrollmentStatus {
-    NotEnrolled,
-    InProgress,
-    Completed,
-}
-
