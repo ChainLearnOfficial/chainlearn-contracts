@@ -237,15 +237,11 @@ impl LearnToken {
     }
 
     /// Returns the allowance for a spender on behalf of an owner.
-    /// Emits an allowance_expired event if the allowance has expired.
+    ///
+    /// View function: does not emit events (#179). allowance_expired events
+    /// are emitted only from state-mutating functions (transfer_from,
+    /// burn_from, prune_expired_allowance) where expiration is acted upon.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
-        let (exists, is_expired, expiration_ledger) =
-            storage::check_allowance_expired_readonly(&env, &owner, &spender);
-
-        if exists && is_expired {
-            events::allowance_expired(&env, &owner, &spender, expiration_ledger);
-        }
-
         storage::get_allowance_readonly(&env, &owner, &spender)
     }
 
@@ -415,11 +411,17 @@ impl LearnToken {
             panic!("reward exceeds cap");
         }
 
+        // Check max_supply cap before minting (#178)
+        let current_supply = storage::get_total_supply(&env);
+        let max_supply = storage::get_max_supply(&env);
+        if current_supply + reward_amount > max_supply {
+            panic!("maximum supply cap exceeded");
+        }
+
         // Mint tokens to the learner
         let current_balance = storage::get_balance(&env, &learner);
         storage::set_balance(&env, &learner, current_balance + reward_amount);
 
-        let current_supply = storage::get_total_supply(&env);
         storage::set_total_supply(&env, current_supply + reward_amount);
 
         // Mark reward as claimed to prevent double-claiming
@@ -470,6 +472,15 @@ impl LearnToken {
     pub fn transfer_admin(env: Env, new_admin: Address) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+
+        let zero_address = Address::from_string(&SorobanString::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        ));
+        if new_admin == zero_address {
+            panic!("cannot transfer admin to zero address");
+        }
+
         storage::set_admin(&env, &new_admin);
     }
 
@@ -583,12 +594,6 @@ impl LearnToken {
         events::approve(&env, &owner, &spender, new_amount, data.expiration_ledger);
     }
 }
-
-fn get_progress_client(env: &Env) -> ProgressTrackerClient<'_> {
-    let address = storage::get_progress_tracker(env);
-    ProgressTrackerClient::new(env, &address)
-}
-
 
 #[cfg(test)]
 mod tests {
