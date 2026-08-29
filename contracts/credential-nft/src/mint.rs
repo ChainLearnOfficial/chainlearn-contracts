@@ -105,6 +105,7 @@ pub fn mint_credential(
         issued_at: env.ledger().timestamp(),
         revoked: false,
         metadata_uri: metadata_uri.clone(),
+        expires_at: 0, // No expiration by default (#193)
     };
 
     // Store credential data. The owner is available as `info.learner`, so no

@@ -16,6 +16,8 @@ pub struct CredentialInfo {
     pub revoked: bool,
     /// URI pointing to off-chain metadata (e.g., IPFS).
     pub metadata_uri: Symbol,
+    /// Optional expiration ledger height (0 = no expiration) (#193).
+    pub expires_at: u32,
 }
 
 /// Counter key for generating unique credential IDs.
@@ -35,4 +37,6 @@ pub enum CredentialDataKey {
     Revoked(u64),
     /// On-chain contract name/version, set on `initialize()` (#107).
     Metadata,
+    /// Stores the reason for credential revocation (#194).
+    RevocationReason(u64),
 }

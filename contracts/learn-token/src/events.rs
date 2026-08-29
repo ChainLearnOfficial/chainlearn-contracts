@@ -100,3 +100,37 @@ pub fn allowance_expired(env: &Env, owner: &Address, spender: &Address, expirati
     env.events()
         .publish(topics, (owner, spender, expiration_ledger));
 }
+
+/// Emitted when the transfer restriction is updated (#191).
+///
+/// Topics: ["restriction_updated"]
+/// Data: (restriction)
+pub fn restriction_updated(env: &Env, restriction: &super::storage::TransferRestriction) {
+    let topics = (Symbol::new(env, "restriction_updated"),);
+    let restriction_str = match restriction {
+        super::storage::TransferRestriction::None => "None",
+        super::storage::TransferRestriction::WhitelistOnly => "WhitelistOnly",
+        super::storage::TransferRestriction::Cooldown(_) => "Cooldown",
+        super::storage::TransferRestriction::MaxAmount(_) => "MaxAmount",
+    };
+    env.events()
+        .publish(topics, (Symbol::new(env, restriction_str),));
+}
+
+/// Emitted when an address is added to or removed from the whitelist (#191).
+///
+/// Topics: ["whitelist_updated"]
+/// Data: (address, added)
+pub fn whitelist_updated(env: &Env, address: &Address, added: bool) {
+    let topics = (Symbol::new(env, "whitelist_updated"),);
+    env.events().publish(topics, (address, added));
+}
+
+/// Emitted when a token snapshot is created (#192).
+///
+/// Topics: ["snapshot_created"]
+/// Data: (ledger_height)
+pub fn snapshot_created(env: &Env, ledger_height: u32) {
+    let topics = (Symbol::new(env, "snapshot_created"),);
+    env.events().publish(topics, (ledger_height,));
+}
