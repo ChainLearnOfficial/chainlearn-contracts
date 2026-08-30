@@ -21,6 +21,10 @@ pub struct Course {
     /// Verification is optional: an empty symbol means no hash is set and
     /// enrollment skips the check.
     pub content_hash: Symbol,
+    /// Courses that must be completed before a learner can enroll (#231).
+    ///
+    /// Empty means the course has no prerequisites and enrolls freely.
+    pub prerequisites: Vec<Symbol>,
 }
 
 /// Represents a quiz submission.
@@ -85,6 +89,28 @@ pub struct ProgressExport {
     pub eligible_for_credential: bool,
 }
 
+/// Aggregate statistics for a learner across every course they enrolled in (#232).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LearnerStats {
+    /// Number of courses the learner has enrolled in.
+    pub courses_enrolled: u32,
+    /// Number of enrolled courses the learner has completed, i.e. courses
+    /// where they qualify for a credential.
+    pub courses_completed: u32,
+    /// Total quizzes submitted across every enrolled course.
+    pub total_quizzes_submitted: u32,
+    /// Sum of every submitted quiz score across every enrolled course.
+    pub total_quiz_score: u64,
+    /// Average quiz score across every enrolled course, floored to a whole
+    /// number. Zero when no quiz has been submitted.
+    pub average_score: u32,
+    /// Reward tokens the learner's submitted quiz scores are worth, at
+    /// `BASE_REWARD_PER_POINT` per score point -- the same rate the token
+    /// contract mints at in `claim_reward`.
+    pub total_rewards_earned: i128,
+}
+
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,5 +124,7 @@ pub enum ProgressTrackerDataKey {
     Metadata,
     /// Emergency pause state (#189).
     Paused,
+    /// Every course a learner has enrolled in, in enrollment order (#232).
+    LearnerCourses(Address),
 }
 
