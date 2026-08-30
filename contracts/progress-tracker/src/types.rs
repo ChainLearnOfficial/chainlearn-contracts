@@ -25,6 +25,11 @@ pub struct Course {
     ///
     /// Empty means the course has no prerequisites and enrolls freely.
     pub prerequisites: Vec<Symbol>,
+    /// Version of the course content (#245).
+    ///
+    /// Incremented when off-chain content changes; learners track which
+    /// version they completed.
+    pub version: u32,
 }
 
 /// Represents a quiz submission.
@@ -61,6 +66,12 @@ pub struct ProgressInfo {
     pub overall_progress: u32,
     /// Whether the learner qualifies for a credential.
     pub eligible_for_credential: bool,
+    /// The course version when the learner became eligible for a credential (#245).
+    ///
+    /// `None` until eligibility is reached, then set to the course's version
+    /// at that moment so later version bumps do not erase the learner's
+    /// record.
+    pub completed_version: Option<u32>,
 }
 
 /// Complete progress snapshot for a learner in a course, aggregated from
@@ -87,6 +98,8 @@ pub struct ProgressExport {
     pub overall_progress: u32,
     /// Whether the learner qualifies for a credential.
     pub eligible_for_credential: bool,
+    /// The course version when the learner became eligible (#245).
+    pub completed_version: Option<u32>,
 }
 
 /// Aggregate statistics for a learner across every course they enrolled in (#232).
