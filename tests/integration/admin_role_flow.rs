@@ -102,3 +102,67 @@ fn test_admin_role_separation() {
     assert!(token_client.try_mint(&minter, &recipient, &1000).is_err());
     assert!(token_client.try_pause(&pauser).is_err());
 }
+
+#[test]
+fn test_multi_admin_management_and_multisig_ops() {
+    let setup = setup_chainlearn_env();
+    let env = &setup.env;
+    let primary_admin = &setup.admin;
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+
+    // Initial admin list includes the primary admin
+    let admins = token_client.get_admins();
+    assert_eq!(admins.len(), 1);
+    assert_eq!(admins.get(0).unwrap().address, *primary_admin);
+    assert_eq!(admins.get(0).unwrap().role, AdminRole::Admin);
+
+    // Add secondary admin
+    let secondary_admin = Address::generate(env);
+    token_client.add_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: secondary_admin.clone(),
+            role: AdminRole::Admin,
+        },
+    );
+
+    let admins = token_client.get_admins();
+    assert_eq!(admins.len(), 2);
+    assert!(token_client.has_role(&secondary_admin, &AdminRole::Admin));
+
+    // Add a minter admin
+    let minter_admin = Address::generate(env);
+    token_client.add_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: minter_admin.clone(),
+            role: AdminRole::Minter,
+        },
+    );
+
+    let admins = token_client.get_admins();
+    assert_eq!(admins.len(), 3);
+    assert!(token_client.has_role(&minter_admin, &AdminRole::Minter));
+
+    // Execute multi-sig operation with primary and secondary admins
+    token_client.execute_multisig_op(
+        primary_admin,
+        &secondary_admin,
+        &Symbol::new(env, "critical_op"),
+    );
+
+    // Remove minter admin
+    token_client.remove_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: minter_admin.clone(),
+            role: AdminRole::Minter,
+        },
+    );
+
+    let admins = token_client.get_admins();
+    assert_eq!(admins.len(), 2);
+    assert!(!token_client.has_role(&minter_admin, &AdminRole::Minter));
+}

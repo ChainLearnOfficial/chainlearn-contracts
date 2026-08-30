@@ -70,6 +70,8 @@ path = "tests/integration/security_reentrancy_tests.rs"
 [[test]]
 name = "upgrade_tests"
 path = "tests/integration/upgrade_tests.rs"
+
+[[test]]
 name = "admin_role_flow"
 path = "tests/integration/admin_role_flow.rs"
 
