@@ -6,8 +6,8 @@ pub mod types;
 use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 pub use types::{
-    Course, LearnerStats, ProgressExport, ProgressInfo, ProgressTrackerDataKey, QuizResult,
-    VersionedContractMetadata,
+    Achievement, AchievementType, Course, LearnerStats, ProgressExport, ProgressInfo,
+    ProgressTrackerDataKey, QuizResult, VersionedContractMetadata,
 };
 
 /// Sentinel meaning "no content hash set"; enrollment skips verification (#235).
@@ -510,6 +510,25 @@ impl ProgressTracker {
                 (Symbol::new(env, "credential_eligible"),),
                 (learner, course_id),
             );
+            
+            // Award FirstCourse achievement when learner becomes eligible for credential
+            Self::earn_achievement(
+                env,
+                learner,
+                AchievementType::FirstCourse,
+                Some(course_id.clone()),
+            );
+            
+            // Check for CourseMaster achievement (5 courses completed)
+            let stats = Self::get_learner_stats_internal(env, learner);
+            if stats.courses_completed >= 5 {
+                Self::earn_achievement(
+                    env,
+                    learner,
+                    AchievementType::CourseMaster,
+                    None,
+                );
+            }
         }
     }
 
@@ -1448,6 +1467,93 @@ impl ProgressTracker {
             total_rewards_earned: total_quiz_score as i128
                 * chainlearn_shared::BASE_REWARD_PER_POINT,
         }
+    }
+
+    /// Earn an achievement for a learner.
+    ///
+    /// Internal function that checks if an achievement has already been earned
+    /// before awarding it. Achievements are stored per learner and can be
+    /// queried via `get_achievements`.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `learner` - The learner address
+    /// * `achievement_type` - Type of achievement to award
+    /// * `course_id` - Optional course ID associated with the achievement
+    fn earn_achievement(
+        env: &Env,
+        learner: &Address,
+        achievement_type: AchievementType,
+        course_id: Option<Symbol>,
+    ) {
+        // Check if achievement already earned
+        let achievement_key = ProgressTrackerDataKey::AchievementEarned(
+            learner.clone(),
+            achievement_type.clone(),
+        );
+        if env.storage().persistent().has(&achievement_key) {
+            return; // Already earned, skip
+        }
+
+        let timestamp = env.ledger().timestamp();
+        let achievement = Achievement {
+            achievement_type: achievement_type.clone(),
+            earned_at: timestamp,
+            course_id: course_id.clone(),
+        };
+
+        // Store that this achievement type has been earned
+        env.storage()
+            .persistent()
+            .set(&achievement_key, &true);
+
+        // Add to learner's achievements list
+        let achievements_key = ProgressTrackerDataKey::Achievements(learner.clone());
+        let mut achievements: Vec<Achievement> = env
+            .storage()
+            .persistent()
+            .get(&achievements_key)
+            .unwrap_or_else(|| Vec::new(env));
+        achievements.push_back(achievement);
+        env.storage()
+            .persistent()
+            .set(&achievements_key, &achievements);
+
+        // Emit achievement earned event
+        env.events().publish(
+            (Symbol::new(env, "achievement_earned"),),
+            (learner, &achievement_type, course_id, timestamp),
+        );
+    }
+
+    /// Get all achievements earned by a learner.
+    ///
+    /// Returns achievements in chronological order (oldest first).
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    ///
+    /// # Returns
+    /// List of achievements earned by the learner.
+    pub fn get_achievements(env: Env, learner: Address) -> Vec<Achievement> {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Achievements(learner))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Check whether a learner has earned a specific achievement type.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    /// * `achievement_type` - Type of achievement to check
+    ///
+    /// # Returns
+    /// `true` if the learner has earned the achievement.
+    pub fn has_achievement(env: Env, learner: Address, achievement_type: AchievementType) -> bool {
+        env.storage()
+            .persistent()
+            .has(&ProgressTrackerDataKey::AchievementEarned(learner, achievement_type))
     }
 
     /// Check whether a course has been registered via `create_course` (#108).
