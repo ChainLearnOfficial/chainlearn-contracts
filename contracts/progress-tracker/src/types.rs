@@ -1,3 +1,4 @@
+use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contracttype, Address, Symbol, Vec};
 
 /// Represents a course with its modules and total module count.
@@ -111,6 +112,21 @@ pub struct LearnerStats {
     pub total_rewards_earned: i128,
 }
 
+/// Contract metadata (#107) plus the on-chain upgrade counter (#219),
+/// returned together from `contract_metadata()` so callers get a single,
+/// complete identity snapshot for the deployed contract.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VersionedContractMetadata {
+    /// The contract's crate name and semantic version (#107).
+    pub metadata: ContractMetadata,
+    /// Number of times this contract has been upgraded in place (#219).
+    /// Starts at `0` for a freshly initialized contract and is bumped by
+    /// whatever upgrade mechanism the contract adopts; progress-tracker has
+    /// none yet, so this only ever reads back the initialized value today.
+    pub version: u32,
+}
+
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,5 +142,10 @@ pub enum ProgressTrackerDataKey {
     Paused,
     /// Every course a learner has enrolled in, in enrollment order (#232).
     LearnerCourses(Address),
+    /// On-chain upgrade counter, set to `0` on `initialize()` and bumped by
+    /// whatever upgrade mechanism the contract adopts (#219).
+    Version,
+    /// The address a learner has delegated progress-tracking to, if any
+    /// (#222). Absent when the learner has no active delegation.
+    DelegatedTo(Address),
 }
-

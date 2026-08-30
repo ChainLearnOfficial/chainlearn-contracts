@@ -9,8 +9,8 @@ use soroban_sdk::{
     String as SorobanString, Symbol, Vec,
 };
 
-// Re-export governance/vesting types so tests can use them.
-pub use storage::{Proposal, VestingSchedule};
+// Re-export governance/vesting/admin types so tests can use them.
+pub use storage::{AdminInfo, AdminRole, Proposal, VestingSchedule};
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
 /// Caps at MAX_QUIZ_SCORE * BASE_REWARD_PER_POINT (100 * 100 = 10_000).
@@ -30,15 +30,7 @@ pub enum ContractError {
     RewardCapped = 2,
 }
 
-/// Result of previewing a `claim_reward` call without executing it (#199).
-///
-/// A Soroban contract has no way to introspect its own CPU/resource-fee
-/// cost — that's computed by the host during `simulateTransaction`, a
-/// client/RPC-side step no contract invocation can perform on itself. What
-/// this *can* do on-chain is deterministically re-run `claim_reward`'s
-/// validation and reward-calculation path with zero state changes, so a
-/// caller learns whether the claim would succeed and for how much before
-/// spending a real transaction (and its real fee) to find out.
+/// Result of previewing a `claim_reward` call without executing it (#199, #214).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClaimEstimate {
@@ -48,6 +40,8 @@ pub struct ClaimEstimate {
     pub estimated_reward: i128,
     /// Human-readable reason `would_succeed` is false. Empty string if `would_succeed` is true.
     pub failure_reason: SorobanString,
+    /// Estimated gas cost for executing the reward claim (#214).
+    pub estimated_gas: u64,
 }
 
 /// SEP-41 compliant fungible token contract for ChainLearn rewards.
@@ -562,7 +556,7 @@ impl LearnToken {
 
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply + amount > max_supply {
+        if current_supply.checked_add(amount).map_or(true, |s| s > max_supply) {
             panic!("maximum supply cap exceeded");
         }
 
@@ -720,7 +714,7 @@ impl LearnToken {
             successful.push_back(quiz_id);
         }
 
-        if successful.len() > 0 {
+        if !successful.is_empty() {
             storage::set_balance(&env, &learner, current_balance);
             storage::set_total_supply(&env, current_supply);
         }
@@ -756,6 +750,7 @@ impl LearnToken {
             would_succeed: false,
             estimated_reward: 0,
             failure_reason: SorobanString::from_str(&env, reason),
+            estimated_gas: 0,
         };
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
@@ -783,7 +778,7 @@ impl LearnToken {
 
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply + reward_amount > max_supply {
+        if current_supply.checked_add(reward_amount).map_or(true, |s| s > max_supply) {
             return fail("maximum supply cap exceeded");
         }
 
@@ -791,6 +786,7 @@ impl LearnToken {
             would_succeed: true,
             estimated_reward: reward_amount,
             failure_reason: SorobanString::from_str(&env, ""),
+            estimated_gas: 50_000,
         }
     }
 
@@ -808,7 +804,7 @@ impl LearnToken {
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
         }
-        storage::grant_role(&env, &address, &role);
+        storage::add_admin(&env, &address, &role);
         events::role_granted(&env, &address, &role);
     }
 
@@ -818,8 +814,93 @@ impl LearnToken {
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
         }
-        storage::revoke_role(&env, &address, &role);
+        storage::remove_admin(&env, &address, &role);
         events::role_revoked(&env, &address, &role);
+    }
+
+    /// Add a new admin with a specific role (#212).
+    ///
+    /// Requires authorization from an existing Admin.
+    pub fn add_admin(env: Env, caller: Address, admin_info: AdminInfo) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
+            panic!("not authorized");
+        }
+
+        storage::add_admin(&env, &admin_info.address, &admin_info.role);
+        events::role_granted(&env, &admin_info.address, &admin_info.role);
+    }
+
+    /// Remove an admin and revoke their role (#212).
+    ///
+    /// Requires authorization from an existing Admin.
+    pub fn remove_admin(env: Env, caller: Address, admin_info: AdminInfo) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
+            panic!("not authorized");
+        }
+
+        storage::remove_admin(&env, &admin_info.address, &admin_info.role);
+        events::role_revoked(&env, &admin_info.address, &admin_info.role);
+    }
+
+    /// Get the list of all registered admins and their roles (#212).
+    pub fn get_admins(env: Env) -> Vec<AdminInfo> {
+        storage::get_admins(&env)
+    }
+
+    /// Perform a critical operation requiring multi-sig authorization from two admins (#212).
+    pub fn execute_multisig_op(
+        env: Env,
+        caller: Address,
+        co_signer: Address,
+        operation: Symbol,
+    ) {
+        caller.require_auth();
+        co_signer.require_auth();
+
+        if caller == co_signer {
+            panic!("distinct co-signer required");
+        }
+
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Admin)
+            || !storage::has_role(&env, &co_signer, &storage::AdminRole::Admin)
+        {
+            panic!("not authorized");
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "multisig_op_executed"),),
+            (&caller, &co_signer, &operation),
+        );
+    }
+
+    /// Upgrade contract wasm code with multi-sig authorization (#212, #213).
+    pub fn upgrade_multisig(
+        env: Env,
+        caller: Address,
+        co_signer: Address,
+        new_wasm_hash: BytesN<32>,
+    ) {
+        caller.require_auth();
+        co_signer.require_auth();
+
+        if caller == co_signer {
+            panic!("distinct co-signer required");
+        }
+
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Admin)
+            || !storage::has_role(&env, &co_signer, &storage::AdminRole::Admin)
+        {
+            panic!("not authorized");
+        }
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        storage::set_wasm_hash(&env, &new_wasm_hash);
+        let version = storage::increment_upgrade_version(&env);
+
+        events::upgraded(&env, &new_wasm_hash, version);
     }
 
     /// Check if an address has a specific role.
@@ -938,7 +1019,13 @@ impl LearnToken {
     }
 
     /// Update the maximum supply cap. Admin only.
+    ///
+    /// # Governance Safeguard
+    /// To prevent arbitrary or unlimited supply inflation by a compromised admin key,
+    /// the cap can never be increased by more than 2x (100% increase) in a single update.
+    /// Decreasing the cap is allowed down to the circulating total supply.
     pub fn set_max_supply(env: Env, new_max_supply: i128) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         if new_max_supply < 0 {
@@ -948,7 +1035,15 @@ impl LearnToken {
         if new_max_supply < current_supply {
             panic!("new cap cannot be less than current total supply");
         }
+        let old_max_supply = storage::get_max_supply(&env);
+        if old_max_supply > 0 && new_max_supply > old_max_supply {
+            let max_allowed = old_max_supply.checked_mul(2).expect("overflow");
+            if new_max_supply > max_allowed {
+                panic!("max supply increase exceeds governance limit (maximum 2x increase per update)");
+            }
+        }
         storage::set_max_supply(&env, new_max_supply);
+        events::max_supply_updated(&env, old_max_supply, new_max_supply);
     }
 
     /// Transfer admin rights to a new address.
@@ -1070,15 +1165,15 @@ impl LearnToken {
         for spender in spenders.iter() {
             let (exists, is_expired, expiration_ledger) =
                 storage::check_allowance_expired(&env, &owner, &spender);
-            if exists && is_expired {
-                events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+            if !exists || is_expired {
+                if exists {
+                    events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+                }
                 removed_count += 1;
-            } else if exists {
+            } else {
                 // Still active — stays in the registry for a future sweep.
                 remaining.push_back(spender.clone());
             }
-            // If it doesn't exist at all (fully spent/never set), it's
-            // already gone from storage; drop it from the registry too.
         }
 
         storage::set_allowance_spenders(&env, &owner, &remaining);

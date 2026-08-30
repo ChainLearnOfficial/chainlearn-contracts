@@ -50,10 +50,7 @@ pub fn average_quiz_score(progress: &ProgressInfo) -> u32 {
 }
 
 /// Determine if a learner is eligible for a credential.
-pub fn is_eligible_for_credential(
-    course: &Course,
-    progress: &ProgressInfo,
-) -> bool {
+pub fn is_eligible_for_credential(course: &Course, progress: &ProgressInfo) -> bool {
     // Check all modules completed
     let completed = count_completed_modules(progress);
     if completed < course.total_modules {

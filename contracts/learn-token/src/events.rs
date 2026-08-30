@@ -298,3 +298,12 @@ pub fn proposal_executed(
     let topics = (Symbol::new(env, "proposal_executed"),);
     env.events().publish(topics, (proposal_id, winning_choice, winning_votes));
 }
+
+/// Emitted when the maximum supply cap is updated.
+///
+/// Topics: ["max_supply_updated"] — admin config event.
+/// Data: (old_max_supply, new_max_supply)
+pub fn max_supply_updated(env: &Env, old_max_supply: i128, new_max_supply: i128) {
+    let topics = (Symbol::new(env, "max_supply_updated"),);
+    env.events().publish(topics, (old_max_supply, new_max_supply));
+}

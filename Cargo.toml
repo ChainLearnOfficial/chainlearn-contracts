@@ -55,6 +55,30 @@ path = "tests/integration/credential_flow.rs"
 name = "full_flow"
 path = "tests/integration/full_flow.rs"
 
+[[test]]
+name = "security_auth_tests"
+path = "tests/integration/security_auth_tests.rs"
+
+[[test]]
+name = "security_arithmetic_tests"
+path = "tests/unit/security_arithmetic_tests.rs"
+
+[[test]]
+name = "security_reentrancy_tests"
+path = "tests/integration/security_reentrancy_tests.rs"
+
+[[test]]
+name = "upgrade_tests"
+path = "tests/integration/upgrade_tests.rs"
+
+[[test]]
+name = "admin_role_flow"
+path = "tests/integration/admin_role_flow.rs"
+
+[[test]]
+name = "batch_operations"
+path = "tests/integration/batch_operations.rs"
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true
