@@ -122,6 +122,9 @@ pub enum ProgressTrackerDataKey {
     QuizResult(Address, Symbol, Symbol),
     /// On-chain contract name/version, set on `initialize()` (#107).
     Metadata,
+    /// Emergency pause state (#189).
+    Paused,
     /// Every course a learner has enrolled in, in enrollment order (#232).
     LearnerCourses(Address),
 }
+

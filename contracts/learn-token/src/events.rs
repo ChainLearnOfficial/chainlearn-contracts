@@ -183,6 +183,34 @@ pub fn upgraded(env: &Env, new_wasm_hash: &BytesN<32>, upgrade_version: u32) {
         .publish(topics, (new_wasm_hash.clone(), upgrade_version));
 }
 
+/// Emitted when an admin role is granted (#190).
+///
+/// Topics: ["role_granted", address]
+/// Data: (role,)
+pub fn role_granted(env: &Env, address: &Address, role: &super::storage::AdminRole) {
+    let topics = (Symbol::new(env, "role_granted"), address.clone());
+    let role_str = match role {
+        super::storage::AdminRole::Admin => "Admin",
+        super::storage::AdminRole::Minter => "Minter",
+        super::storage::AdminRole::Pauser => "Pauser",
+    };
+    env.events().publish(topics, (Symbol::new(env, role_str),));
+}
+
+/// Emitted when an admin role is revoked (#190).
+///
+/// Topics: ["role_revoked", address]
+/// Data: (role,)
+pub fn role_revoked(env: &Env, address: &Address, role: &super::storage::AdminRole) {
+    let topics = (Symbol::new(env, "role_revoked"), address.clone());
+    let role_str = match role {
+        super::storage::AdminRole::Admin => "Admin",
+        super::storage::AdminRole::Minter => "Minter",
+        super::storage::AdminRole::Pauser => "Pauser",
+    };
+    env.events().publish(topics, (Symbol::new(env, role_str),));
+}
+
 /// Emitted when the contract is paused by an admin (#238).
 ///
 /// Topics: ["paused"]

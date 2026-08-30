@@ -39,4 +39,6 @@ pub enum CredentialDataKey {
     Metadata,
     /// Stores the reason for credential revocation (#194).
     RevocationReason(u64),
+    /// Emergency pause state (#189).
+    Paused,
 }
