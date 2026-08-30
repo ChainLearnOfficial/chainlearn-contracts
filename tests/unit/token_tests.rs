@@ -474,4 +474,62 @@ mod token_unit_tests {
         assert_eq!(learner_topic, learner);
         assert_eq!(course_topic, course_id);
     }
+
+    #[test]
+    fn test_cleanup_expired_allowances_removes_only_expired() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender_expiring = Address::generate(&env);
+        let spender_valid = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender_expiring, &100, &10);
+        client.approve(&owner, &spender_valid, &200, &999999);
+
+        assert_eq!(client.allowance_spender_count(&owner), 2);
+
+        env.ledger().with_mut(|l| {
+            l.sequence_number = 20;
+        });
+
+        let removed = client.cleanup_expired_allowances(&owner);
+
+        // Only the expired allowance is removed; the valid one is preserved
+        // and storage (the spender registry) shrinks accordingly.
+        assert_eq!(removed, 1);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+        assert_eq!(client.allowance(&owner, &spender_valid), 200);
+        assert_eq!(client.allowance(&owner, &spender_expiring), 0);
+
+        // No side effects: cleaning up again finds nothing left to remove.
+        let removed_again = client.cleanup_expired_allowances(&owner);
+        assert_eq!(removed_again, 0);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+    }
+
+    #[test]
+    fn test_initialize_twice_returns_already_initialized_error() {
+        let env = Env::default();
+        let (admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let result = client.try_initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &1_000_000_000_000_000,
+        );
+
+        assert!(result.is_err(), "second initialize call should fail");
+        let contract_err = result
+            .err()
+            .expect("expected an error")
+            .expect("expected a typed contract error, not a host trap");
+        assert_eq!(contract_err, learn_token::ContractError::AlreadyInitialized);
+    }
 }

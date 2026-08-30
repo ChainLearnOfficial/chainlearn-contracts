@@ -10,7 +10,7 @@ use soroban_sdk::{
 };
 
 // Re-export governance/vesting types so tests can use them.
-pub use storage::{Proposal, VestingSchedule};
+pub use storage::{AdminRole, Proposal, VestingSchedule};
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
 /// Caps at MAX_QUIZ_SCORE * BASE_REWARD_PER_POINT (100 * 100 = 10_000).

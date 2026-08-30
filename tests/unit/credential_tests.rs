@@ -241,4 +241,23 @@ mod credential_unit_tests {
         // We do not mock auths, so revoke_credential must fail admin auth check
         client.revoke_credential(&1);
     }
+
+    #[test]
+    fn test_initialize_twice_returns_already_initialized_error() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let result = client.try_initialize(&admin, &tracker_id);
+
+        assert!(result.is_err(), "second initialize call should fail");
+        let contract_err = result
+            .err()
+            .expect("expected an error")
+            .expect("expected a typed contract error, not a host trap");
+        assert_eq!(
+            contract_err,
+            credential_nft::ContractError::AlreadyInitialized
+        );
+    }
 }
