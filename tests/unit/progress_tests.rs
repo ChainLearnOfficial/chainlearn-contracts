@@ -1506,6 +1506,467 @@ mod progress_unit_tests {
         assert!(client.get_progress(&learner, &course_id).eligible_for_credential);
     }
 
+    // ── Issue #222: progress delegation ──────────────────────────────────
+
+    #[test]
+    fn test_delegated_to_is_none_by_default() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        assert_eq!(client.delegated_to(&learner), None);
+    }
+
+    #[test]
+    fn test_delegate_progress_sets_delegated_to() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &delegate);
+
+        assert_eq!(client.delegated_to(&learner), Some(delegate));
+    }
+
+    #[test]
+    fn test_delegate_progress_emits_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &delegate);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "progress_delegated"),).into_val(&env),
+                    (learner, delegate).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_delegate_progress_requires_learner_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        // Nobody authorizes the call -- the learner's own auth is required.
+        env.mock_auths(&[]);
+        client.delegate_progress(&learner, &delegate);
+    }
+
+    #[test]
+    fn test_delegate_progress_replaces_previous_delegate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let first_delegate = Address::generate(&env);
+        let second_delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &first_delegate);
+        client.delegate_progress(&learner, &second_delegate);
+
+        assert_eq!(client.delegated_to(&learner), Some(second_delegate));
+    }
+
+    #[test]
+    fn test_revoke_delegation_clears_delegated_to() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &delegate);
+        assert_eq!(client.delegated_to(&learner), Some(delegate));
+
+        client.revoke_delegation(&learner);
+        assert_eq!(client.delegated_to(&learner), None);
+    }
+
+    #[test]
+    fn test_revoke_delegation_emits_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.delegate_progress(&learner, &delegate);
+
+        client.revoke_delegation(&learner);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "delegation_revoked"),).into_val(&env),
+                    (learner,).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_revoke_delegation_without_active_delegation_is_a_no_op() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+
+        // No delegation was ever set -- revoking must not panic.
+        client.revoke_delegation(&learner);
+        assert_eq!(client.delegated_to(&learner), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_revoke_delegation_requires_learner_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_auths(&[]);
+        client.revoke_delegation(&learner);
+    }
+
+    #[test]
+    fn test_complete_module_for_allows_delegate_to_act() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+
+        // The delegate authorizes and acts; the learner does not sign this
+        // call at all.
+        client.complete_module_for(&delegate, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 1);
+    }
+
+    #[test]
+    fn test_complete_module_for_allows_learner_to_act_as_their_own_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // No delegation was ever set -- the learner can still call the
+        // `_for` entry point as their own caller.
+        client.complete_module_for(&learner, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_complete_module_for_rejects_non_delegate_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // stranger authorizes (mock_all_auths lets anyone), but is neither
+        // the learner nor a delegate -- must be rejected on the merits.
+        client.complete_module_for(&stranger, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+    }
+
+    #[test]
+    fn test_complete_module_for_rejects_former_delegate_after_revocation() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        client.delegate_progress(&learner, &delegate);
+        client.revoke_delegation(&learner);
+
+        let result = client.try_complete_module_for(
+            &delegate,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "mod_1"),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_complete_module_for_requires_caller_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+
+        // The delegate is a valid delegate, but nobody actually signs this
+        // particular call -- auth must still be required, not skipped just
+        // because a delegate exists.
+        env.mock_auths(&[]);
+        client.complete_module_for(&delegate, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+    }
+
+    #[test]
+    fn test_batch_complete_module_for_allows_delegate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "mod_2"));
+        client.batch_complete_module_for(&delegate, &learner, &course_id, &batch);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_batch_complete_module_for_rejects_non_delegate_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        client.batch_complete_module_for(&stranger, &learner, &course_id, &batch);
+    }
+
+    #[test]
+    fn test_submit_quiz_score_for_allows_delegate_to_act() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+
+        client.submit_quiz_score_for(&delegate, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 80);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_submit_quiz_score_for_rejects_non_delegate_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        client.submit_quiz_score_for(&stranger, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_for_allows_delegate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 90u32));
+
+        let submitted = client.batch_submit_quiz_score_for(&delegate, &learner, &course_id, &scores);
+        assert_eq!(submitted.len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_batch_submit_quiz_score_for_rejects_non_delegate_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
+        client.batch_submit_quiz_score_for(&stranger, &learner, &course_id, &scores);
+    }
+
+    #[test]
+    fn test_retake_quiz_for_allows_delegate_to_act() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &40);
+        client.delegate_progress(&learner, &delegate);
+
+        client.retake_quiz_for(&delegate, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            90
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_retake_quiz_for_rejects_non_delegate_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &40);
+
+        client.retake_quiz_for(&stranger, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+    }
+
+    #[test]
+    fn test_delegate_for_matches_learner_direct_call_outcome() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        let direct_learner = Address::generate(&env);
+        let delegated_learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.enroll(&direct_learner, &course_id);
+        client.enroll(&delegated_learner, &course_id);
+        client.delegate_progress(&delegated_learner, &delegate);
+
+        client.complete_module(&direct_learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.submit_quiz_score(&direct_learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+
+        client.complete_module_for(
+            &delegate,
+            &delegated_learner,
+            &course_id,
+            &Symbol::new(&env, "mod_1"),
+        );
+        client.submit_quiz_score_for(
+            &delegate,
+            &delegated_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
+
+        let direct_progress = client.get_progress(&direct_learner, &course_id);
+        let delegated_progress = client.get_progress(&delegated_learner, &course_id);
+        assert_eq!(
+            direct_progress.overall_progress,
+            delegated_progress.overall_progress
+        );
+        assert_eq!(
+            direct_progress.total_quiz_score,
+            delegated_progress.total_quiz_score
+        );
+    }
+
     // ── Issue #219: on-chain upgrade counter ─────────────────────────────
 
     #[test]

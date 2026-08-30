@@ -782,7 +782,21 @@ impl ProgressTracker {
         new_score: u32,
     ) {
         learner.require_auth();
+        Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
+    }
 
+    /// Shared core of [`Self::retake_quiz`] and [`Self::retake_quiz_for`]:
+    /// validates and applies a single quiz retake, including its own
+    /// storage reads/writes (a retake only ever touches one quiz, so unlike
+    /// the batch helpers there is no benefit to hoisting `course`/`progress`
+    /// loads out to a caller) and the same events `retake_quiz` always had.
+    fn retake_quiz_in_place(
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+        quiz_id: Symbol,
+        new_score: u32,
+    ) {
         if new_score > chainlearn_shared::MAX_QUIZ_SCORE {
             panic!("score exceeds maximum");
         }
@@ -838,16 +852,16 @@ impl ProgressTracker {
         );
 
         env.events().publish(
-            (Symbol::new(&env, "quiz_retaken"),),
-            (&learner, &course_id, &quiz_id, previous_score, new_score),
+            (Symbol::new(env, "quiz_retaken"),),
+            (learner, course_id, &quiz_id, previous_score, new_score),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
             env.events().publish(
-                (Symbol::new(&env, "credential_eligible"),),
-                (&learner, &course_id),
+                (Symbol::new(env, "credential_eligible"),),
+                (learner, course_id),
             );
         }
     }
@@ -1455,6 +1469,380 @@ impl ProgressTracker {
         env.storage()
             .persistent()
             .set(&ProgressTrackerDataKey::Admin, &new_admin);
+    }
+
+    // ── Progress Delegation (#222) ───────────────────────────────────────
+
+    /// Delegate progress tracking for `learner` to `delegate`. Learner only.
+    ///
+    /// Once delegated, `delegate` may call the state-changing progress
+    /// functions (`complete_module`, `batch_complete_module`,
+    /// `submit_quiz_score`, `batch_submit_quiz_score`, `retake_quiz`) on
+    /// `learner`'s behalf, authorizing with their own key instead of the
+    /// learner's. This does not extend to enrollment (`enroll`) or to admin
+    /// actions -- it is scoped to reporting progress a learner has already
+    /// made, e.g. via a wallet-less companion app or an LMS integration
+    /// acting for the learner.
+    ///
+    /// Calling this again while a delegation is already active replaces it
+    /// with the new delegate.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `delegate` - The address allowed to submit progress for `learner`
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// client.delegate_progress(&learner, &delegate);
+    /// client.complete_module(&delegate, &course_id, &Symbol::new(&env, "mod_1"));
+    /// ```
+    pub fn delegate_progress(env: Env, learner: Address, delegate: Address) {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
+            &delegate,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "progress_delegated"),),
+            (&learner, &delegate),
+        );
+    }
+
+    /// Revoke `learner`'s active progress delegation, if any. Learner only.
+    ///
+    /// After this, only `learner` themselves may call the state-changing
+    /// progress functions for their own progress. A no-op is not treated as
+    /// an error: revoking when there is no active delegation simply leaves
+    /// the key absent.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// client.delegate_progress(&learner, &delegate);
+    /// client.revoke_delegation(&learner);
+    /// ```
+    pub fn revoke_delegation(env: Env, learner: Address) {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        env.storage()
+            .persistent()
+            .remove(&ProgressTrackerDataKey::DelegatedTo(learner.clone()));
+
+        env.events()
+            .publish((Symbol::new(&env, "delegation_revoked"),), (&learner,));
+    }
+
+    /// Returns the address `learner` has delegated progress tracking to, if
+    /// any (#222).
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    pub fn delegated_to(env: Env, learner: Address) -> Option<Address> {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::DelegatedTo(learner))
+    }
+
+    /// Authorize a state-changing progress call made by `caller` on behalf
+    /// of `learner` (#222).
+    ///
+    /// `caller` always has to authorize -- this is unconditional, exactly
+    /// like every other `require_auth()` call in this contract. What
+    /// delegation changes is *whose* address is allowed to be `caller`:
+    /// either `learner` themselves, or whoever `learner` has currently
+    /// delegated to via [`Self::delegate_progress`]. Soroban's SDK has no
+    /// way to ask "did address X authorize this call?" without panicking if
+    /// the answer is no, so unlike the learner-only entry points
+    /// (`complete_module` et al., unchanged), the delegate-aware entry
+    /// points below take `caller` as an explicit argument -- the same
+    /// shape this codebase already uses for `learn_token::transfer_from`'s
+    /// `spender` and `learn_token::mint`'s `caller`.
+    ///
+    /// # Panics
+    /// * If `caller` does not authorize the call
+    /// * If `caller` is neither `learner` nor `learner`'s active delegate
+    fn require_learner_or_delegate(env: &Env, caller: &Address, learner: &Address) {
+        caller.require_auth();
+
+        if caller == learner {
+            return;
+        }
+
+        let delegated_to: Option<Address> = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::DelegatedTo(learner.clone()));
+
+        match delegated_to {
+            Some(delegate) if delegate == *caller => {}
+            _ => panic!("caller is not the learner or their delegate"),
+        }
+    }
+
+    /// Complete a module for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::complete_module`] except that the authorizing
+    /// party is passed explicitly as `caller` and may be either `learner`
+    /// or `learner`'s currently delegated address (see
+    /// [`Self::require_learner_or_delegate`]). `complete_module` itself is
+    /// unchanged and continues to require the learner's own signature.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the module belongs to
+    /// * `module_id` - The module to mark complete
+    ///
+    /// # Panics
+    /// See [`Self::complete_module`] and [`Self::require_learner_or_delegate`].
+    pub fn complete_module_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        module_id: Symbol,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        Self::complete_module_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            module_id,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Batch-complete modules for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::batch_complete_module`] except that the
+    /// authorizing party is passed explicitly as `caller` and may be either
+    /// `learner` or `learner`'s currently delegated address. Same atomicity
+    /// as `batch_complete_module`: any invalid module aborts the whole call.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the modules belong to
+    /// * `module_ids` - The modules to mark complete, in the order to apply them
+    pub fn batch_complete_module_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        module_ids: Vec<Symbol>,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        for module_id in module_ids.iter() {
+            Self::complete_module_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                module_id,
+            );
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Submit a quiz score for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::submit_quiz_score`] except that the authorizing
+    /// party is passed explicitly as `caller` and may be either `learner`
+    /// or `learner`'s currently delegated address.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the quiz belongs to
+    /// * `quiz_id` - The quiz identifier
+    /// * `score` - The score achieved (0-100)
+    pub fn submit_quiz_score_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        quiz_id: Symbol,
+        score: u32,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        Self::submit_quiz_score_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            quiz_id,
+            score,
+            true,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Batch-submit quiz scores for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::batch_submit_quiz_score`] except that the
+    /// authorizing party is passed explicitly as `caller` and may be either
+    /// `learner` or `learner`'s currently delegated address. Same
+    /// independent-processing semantics as `batch_submit_quiz_score`: an
+    /// invalid entry is skipped rather than aborting the batch.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the quizzes belong to
+    /// * `quiz_scores` - `(quiz_id, score)` pairs to submit
+    ///
+    /// # Returns
+    /// The quiz ids that were successfully submitted.
+    pub fn batch_submit_quiz_score_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        quiz_scores: Vec<(Symbol, u32)>,
+    ) -> Vec<Symbol> {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        let mut submitted = Vec::new(&env);
+        for (quiz_id, score) in quiz_scores.iter() {
+            let ok = Self::submit_quiz_score_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                quiz_id.clone(),
+                score,
+                false,
+            );
+            if ok {
+                submitted.push_back(quiz_id);
+            }
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+
+        submitted
+    }
+
+    /// Retake a quiz for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::retake_quiz`] except that the authorizing party
+    /// is passed explicitly as `caller` and may be either `learner` or
+    /// `learner`'s currently delegated address.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the quiz belongs to
+    /// * `quiz_id` - The quiz being retaken
+    /// * `new_score` - The improved score (0-100, strictly greater than the
+    ///   score already recorded)
+    pub fn retake_quiz_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        quiz_id: Symbol,
+        new_score: u32,
+    ) {
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+        Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
     }
 }
 

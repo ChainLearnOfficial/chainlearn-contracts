@@ -145,4 +145,7 @@ pub enum ProgressTrackerDataKey {
     /// On-chain upgrade counter, set to `0` on `initialize()` and bumped by
     /// whatever upgrade mechanism the contract adopts (#219).
     Version,
+    /// The address a learner has delegated progress-tracking to, if any
+    /// (#222). Absent when the learner has no active delegation.
+    DelegatedTo(Address),
 }
