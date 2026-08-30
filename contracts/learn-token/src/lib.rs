@@ -1509,12 +1509,12 @@ mod tests {
     #[test]
     fn test_total_minted_to_updates_on_mint() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let user = Address::generate(&env);
-        client.mint(&user, &1_000);
+        client.mint(&admin, &user, &1_000);
 
         assert_eq!(client.total_minted_to(&user), 1_000);
     }
@@ -1522,14 +1522,14 @@ mod tests {
     #[test]
     fn test_total_minted_to_accumulates_across_mints() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let user = Address::generate(&env);
-        client.mint(&user, &1_000);
-        client.mint(&user, &500);
-        client.mint(&user, &250);
+        client.mint(&admin, &user, &1_000);
+        client.mint(&admin, &user, &500);
+        client.mint(&admin, &user, &250);
 
         assert_eq!(client.total_minted_to(&user), 1_750);
     }
@@ -1537,14 +1537,14 @@ mod tests {
     #[test]
     fn test_total_minted_to_is_tracked_per_address() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        client.mint(&alice, &900);
-        client.mint(&bob, &100);
+        client.mint(&admin, &alice, &900);
+        client.mint(&admin, &bob, &100);
 
         assert_eq!(client.total_minted_to(&alice), 900);
         assert_eq!(client.total_minted_to(&bob), 100);
@@ -1554,13 +1554,13 @@ mod tests {
     #[test]
     fn test_total_minted_to_unchanged_by_transfer_and_burn() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        client.mint(&alice, &1_000);
+        client.mint(&admin, &alice, &1_000);
 
         client.transfer(&alice, &bob, &400);
         client.burn(&alice, &100);
@@ -1732,7 +1732,7 @@ mod tests {
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 5_000);
 
-        client.pause();
+        client.pause(&admin);
 
         assert!(client.is_paused());
         let events = env.events().all();
@@ -1752,10 +1752,10 @@ mod tests {
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
-        client.pause();
+        client.pause(&admin);
         env.ledger().with_mut(|li| li.timestamp = 9_000);
 
-        client.unpause();
+        client.unpause(&admin);
 
         assert!(!client.is_paused());
         let events = env.events().all();
@@ -1772,41 +1772,41 @@ mod tests {
     #[should_panic(expected = "already paused")]
     fn test_pause_twice_panics() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
-        client.pause();
-        client.pause();
+        client.pause(&admin);
+        client.pause(&admin);
     }
 
     #[test]
     #[should_panic(expected = "not paused")]
     fn test_unpause_when_not_paused_panics() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
-        client.unpause();
+        client.unpause(&admin);
     }
 
     #[test]
     fn test_pause_blocks_transfers_and_unpause_restores_them() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        client.mint(&alice, &1_000);
+        client.mint(&admin, &alice, &1_000);
 
-        client.pause();
+        client.pause(&admin);
         assert!(client.try_transfer(&alice, &bob, &100).is_err());
-        assert!(client.try_mint(&alice, &100).is_err());
+        assert!(client.try_mint(&admin, &alice, &100).is_err());
 
-        client.unpause();
+        client.unpause(&admin);
         client.transfer(&alice, &bob, &100);
         assert_eq!(client.balance(&bob), 100);
     }
@@ -1843,7 +1843,7 @@ mod tests {
     #[test]
     fn test_mint() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let learner = Address::generate(&env);
@@ -1858,7 +1858,7 @@ mod tests {
     #[test]
     fn test_transfer() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2009,7 +2009,7 @@ mod tests {
     #[should_panic(expected = "cannot transfer to contract")]
     fn test_transfer_to_contract_address_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2024,7 +2024,7 @@ mod tests {
     #[should_panic(expected = "cannot transfer to contract")]
     fn test_transfer_from_to_contract_address_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2110,7 +2110,7 @@ mod tests {
     #[test]
     fn test_burn_reduces_balance_and_supply() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2126,7 +2126,7 @@ mod tests {
     #[test]
     fn test_burn_entire_balance() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2142,7 +2142,7 @@ mod tests {
     #[test]
     fn test_burn_zero_is_a_noop() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2159,7 +2159,7 @@ mod tests {
     #[should_panic(expected = "insufficient balance")]
     fn test_burn_more_than_balance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2173,7 +2173,7 @@ mod tests {
     #[should_panic(expected = "negative amount")]
     fn test_burn_negative_amount_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2187,7 +2187,7 @@ mod tests {
     #[should_panic]
     fn test_burn_requires_owner_auth() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2202,7 +2202,7 @@ mod tests {
     #[test]
     fn test_burn_from_spends_allowance() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2223,7 +2223,7 @@ mod tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_burn_from_beyond_allowance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2240,7 +2240,7 @@ mod tests {
     #[should_panic(expected = "insufficient balance")]
     fn test_burn_from_beyond_balance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2258,7 +2258,7 @@ mod tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_burn_from_without_allowance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2272,7 +2272,7 @@ mod tests {
     #[test]
     fn test_burn_from_leaves_other_allowances_untouched() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2676,15 +2676,15 @@ mod tests {
     #[test]
     fn test_governance_proposal_lifecycle() {
         let env = Env::default();
-        let (_admin, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let voter1 = Address::generate(&env);
         let voter2 = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&voter1, &100);
-        client.mint(&voter2, &200);
+        client.mint(&admin, &voter1, &100);
+        client.mint(&admin, &voter2, &200);
 
         client.snapshot(&10);
 
@@ -2709,7 +2709,7 @@ mod tests {
         let winning = client.execute_proposal(&prop_id);
         assert_eq!(winning, 1); // Choice 1 got 200 votes vs Choice 0's 100 votes
 
-        let prop = client.get_proposal(prop_id).unwrap();
+        let prop = client.get_proposal(&prop_id).unwrap();
         assert!(prop.executed);
         assert_eq!(prop.winning_choice, 1);
     }
