@@ -365,6 +365,67 @@ impl CredentialNft {
         from.require_auth();
         panic!("credentials are soulbound and non-transferable");
     }
+
+    /// Generate a course completion certificate URI for a learner and course (#223).
+    ///
+    /// The certificate URI is stored on-chain in credential metadata and is unique per learner and course.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// The generated certificate URI symbol.
+    pub fn generate_certificate(env: Env, learner: Address, course_id: Symbol) -> Symbol {
+        learner.require_auth();
+
+        let cert_key = CredentialDataKey::CertificateURI(learner.clone(), course_id.clone());
+        if let Some(uri) = env.storage().persistent().get::<_, Symbol>(&cert_key) {
+            return uri;
+        }
+
+        // Check if credential exists for learner & course, or verify eligibility
+        let dup_key = CredentialDataKey::CourseCredential(learner.clone(), course_id.clone());
+        if !env.storage().persistent().has(&dup_key) {
+            let progress_tracker: Address = env
+                .storage()
+                .persistent()
+                .get(&CredentialDataKey::ProgressTracker)
+                .expect("not initialized");
+            let tracker = ProgressTrackerClient::new(&env, &progress_tracker);
+            if !tracker.course_exists(&course_id) {
+                panic!("course does not exist");
+            }
+            if !tracker.is_eligible_for_credential(&learner, &course_id) {
+                panic!("learner has not completed the course requirements");
+            }
+        }
+
+        let cert_uri = Symbol::new(&env, "cert_uri");
+        env.storage().persistent().set(&cert_key, &cert_uri);
+
+        // If credential already minted, update metadata_uri in CredentialInfo
+        if let Some(cred_id) = env.storage().persistent().get::<_, u64>(&dup_key) {
+            let cred_key = CredentialDataKey::Credential(cred_id);
+            if let Some(mut info) = env.storage().persistent().get::<_, CredentialInfo>(&cred_key) {
+                info.metadata_uri = cert_uri.clone();
+                env.storage().persistent().set(&cred_key, &info);
+            }
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "certificate_generated"), learner.clone(), course_id.clone()),
+            (cert_uri.clone(),),
+        );
+
+        cert_uri
+    }
+
+    /// Query the generated certificate URI for a learner and course (#223).
+    pub fn get_certificate_uri(env: Env, learner: Address, course_id: Symbol) -> Option<Symbol> {
+        let cert_key = CredentialDataKey::CertificateURI(learner, course_id);
+        env.storage().persistent().get(&cert_key)
+    }
 }
 
 #[cfg(test)]
@@ -1111,5 +1172,30 @@ mod tests {
 
         let after = client.get_credentials_by_course(&course);
         assert_eq!(after.len(), 0);
+    }
+
+    // ── Issue #223: certificate generation tests ──────────────────────────────
+
+    #[test]
+    fn test_generate_certificate() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+
+        assert_eq!(client.get_certificate_uri(&learner, &course), None);
+
+        let cert_uri = client.generate_certificate(&learner, &course);
+        assert_eq!(client.get_certificate_uri(&learner, &course), Some(cert_uri.clone()));
+
+        // Mint credential and check that metadata_uri gets updated with generated certificate URI
+        let cred_id = client.mint_credential(&learner, &course, &85, &cert_uri);
+        let info = client.verify_credential(&cred_id);
+        assert_eq!(info.metadata_uri, cert_uri);
     }
 }

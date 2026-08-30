@@ -228,3 +228,73 @@ pub fn unpaused(env: &Env, admin: &Address, timestamp: u64) {
     let topics = (Symbol::new(env, "unpaused"),);
     env.events().publish(topics, (admin, timestamp));
 }
+
+/// Emitted when a vesting schedule is created (#225).
+///
+/// Topics: ["vesting_created", beneficiary]
+/// Data: (total_amount, cliff_timestamp, duration_seconds)
+pub fn vesting_created(
+    env: &Env,
+    beneficiary: &Address,
+    total_amount: i128,
+    cliff_timestamp: u64,
+    duration_seconds: u64,
+) {
+    let topics = (Symbol::new(env, "vesting_created"), beneficiary.clone());
+    env.events().publish(
+        topics,
+        (total_amount, cliff_timestamp, duration_seconds),
+    );
+}
+
+/// Emitted when vested tokens are claimed (#225).
+///
+/// Topics: ["vesting_claimed", beneficiary]
+/// Data: (claimed_amount, total_claimed)
+pub fn vesting_claimed(
+    env: &Env,
+    beneficiary: &Address,
+    claimed_amount: i128,
+    total_claimed: i128,
+) {
+    let topics = (Symbol::new(env, "vesting_claimed"), beneficiary.clone());
+    env.events().publish(topics, (claimed_amount, total_claimed));
+}
+
+/// Emitted when a governance proposal is created (#226).
+///
+/// Topics: ["proposal_created"]
+/// Data: (proposal_id, start_time, end_time)
+pub fn proposal_created(env: &Env, proposal_id: u64, start_time: u64, end_time: u64) {
+    let topics = (Symbol::new(env, "proposal_created"),);
+    env.events().publish(topics, (proposal_id, start_time, end_time));
+}
+
+/// Emitted when a vote is cast on a proposal (#226).
+///
+/// Topics: ["vote_cast", voter]
+/// Data: (proposal_id, choice, voting_power)
+pub fn vote_cast(
+    env: &Env,
+    proposal_id: u64,
+    voter: &Address,
+    choice: u32,
+    voting_power: i128,
+) {
+    let topics = (Symbol::new(env, "vote_cast"), voter.clone());
+    env.events().publish(topics, (proposal_id, choice, voting_power));
+}
+
+/// Emitted when a governance proposal is executed (#226).
+///
+/// Topics: ["proposal_executed"]
+/// Data: (proposal_id, winning_choice, winning_votes)
+pub fn proposal_executed(
+    env: &Env,
+    proposal_id: u64,
+    winning_choice: u32,
+    winning_votes: i128,
+) {
+    let topics = (Symbol::new(env, "proposal_executed"),);
+    env.events().publish(topics, (proposal_id, winning_choice, winning_votes));
+}

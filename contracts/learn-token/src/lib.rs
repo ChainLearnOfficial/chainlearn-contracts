@@ -9,6 +9,9 @@ use soroban_sdk::{
     String as SorobanString, Symbol, Vec,
 };
 
+// Re-export governance/vesting types so tests can use them.
+pub use storage::{Proposal, VestingSchedule};
+
 /// Maximum reward tokens that can be minted in a single claim (#78).
 /// Caps at MAX_QUIZ_SCORE * BASE_REWARD_PER_POINT (100 * 100 = 10_000).
 const MAX_REWARD_AMOUNT: i128 = (MAX_QUIZ_SCORE as i128) * BASE_REWARD_PER_POINT;
@@ -1110,6 +1113,336 @@ impl LearnToken {
             .expect("allowance not set");
         storage::set_allowance(&env, &owner, &spender, new_amount, data.expiration_ledger);
         events::approve(&env, &owner, &spender, new_amount, data.expiration_ledger);
+    }
+
+    // ── Permit / Gasless Approvals (#224) ─────────────────────────────────
+
+    /// Allow a spender via an off-chain signature, without the owner paying gas.
+    ///
+    /// Because Soroban's host does not expose secp256k1/ed25519 raw-signature
+    /// primitives, permit here authenticates via the standard Soroban auth
+    /// framework: the owner signs the transaction envelope off-chain (using
+    /// their Stellar keypair) and the host verifies the authorization before
+    /// this function body executes. The `nonce` parameter provides replay
+    /// protection: each successful permit increments the owner's nonce, so a
+    /// reused signature is rejected.
+    ///
+    /// # Arguments
+    /// * `owner` - Token owner (must authorize this invocation)
+    /// * `spender` - Address being granted the allowance
+    /// * `amount` - Allowance amount
+    /// * `expiration_ledger` - Ledger at which the allowance expires
+    /// * `nonce` - Current permit nonce for `owner` (must match stored value)
+    pub fn permit(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+        nonce: u64,
+    ) {
+        owner.require_auth();
+
+        if amount < 0 {
+            panic!("negative amount");
+        }
+
+        if expiration_ledger <= env.ledger().sequence() {
+            panic!("expiration_ledger must be in the future");
+        }
+
+        let current_nonce = storage::get_permit_nonce(&env, &owner);
+        if nonce != current_nonce {
+            panic!("invalid nonce");
+        }
+
+        storage::increment_permit_nonce(&env, &owner);
+        storage::set_allowance(&env, &owner, &spender, amount, expiration_ledger);
+        storage::track_allowance_spender(&env, &owner, &spender);
+        events::approve(&env, &owner, &spender, amount, expiration_ledger);
+    }
+
+    /// Returns the current permit nonce for `owner` (#224).
+    ///
+    /// Callers should read this before constructing a permit authorization so
+    /// the nonce field matches exactly what the contract expects.
+    pub fn permit_nonce(env: Env, owner: Address) -> u64 {
+        storage::get_permit_nonce(&env, &owner)
+    }
+
+    // ── Token Vesting Schedules (#225) ────────────────────────────────────
+
+    /// Create a vesting schedule for a beneficiary. Admin only.
+    ///
+    /// Tokens vest linearly from `cliff_timestamp` to
+    /// `cliff_timestamp + duration_seconds`. Before the cliff no tokens are
+    /// claimable. At the cliff and beyond, `elapsed / duration * total_amount`
+    /// is available; the remainder is released proportionally each second
+    /// until `duration_seconds` have elapsed, at which point the full
+    /// `total_amount` is claimable.
+    ///
+    /// # Arguments
+    /// * `beneficiary` - Recipient address
+    /// * `total_amount` - Total tokens to vest
+    /// * `cliff_timestamp` - Unix timestamp (seconds) after which vesting starts
+    /// * `duration_seconds` - Seconds over which tokens vest linearly after cliff
+    pub fn create_vesting(
+        env: Env,
+        beneficiary: Address,
+        total_amount: i128,
+        cliff_timestamp: u64,
+        duration_seconds: u64,
+    ) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        if total_amount <= 0 {
+            panic!("total_amount must be positive");
+        }
+        if duration_seconds == 0 {
+            panic!("duration_seconds must be positive");
+        }
+        if storage::get_vesting_schedule(&env, &beneficiary).is_some() {
+            panic!("vesting schedule already exists for beneficiary");
+        }
+
+        let schedule = storage::VestingSchedule {
+            total_amount,
+            cliff_timestamp,
+            duration_seconds,
+            created_at: env.ledger().timestamp(),
+            exhausted: false,
+        };
+        storage::set_vesting_schedule(&env, &beneficiary, &schedule);
+        events::vesting_created(&env, &beneficiary, total_amount, cliff_timestamp, duration_seconds);
+    }
+
+    /// Claim vested tokens. Beneficiary only.
+    ///
+    /// Transfers only the tokens that have vested since the last claim.
+    ///
+    /// # Arguments
+    /// * `beneficiary` - Address claiming their vested tokens (must authorize)
+    pub fn claim_vested(env: Env, beneficiary: Address) {
+        Self::require_not_paused(&env);
+        beneficiary.require_auth();
+
+        let schedule = storage::get_vesting_schedule(&env, &beneficiary)
+            .expect("no vesting schedule found");
+
+        if schedule.exhausted {
+            panic!("vesting schedule fully claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < schedule.cliff_timestamp {
+            panic!("cliff not reached");
+        }
+
+        let elapsed = now.saturating_sub(schedule.cliff_timestamp);
+        let vested_amount = if elapsed >= schedule.duration_seconds {
+            schedule.total_amount
+        } else {
+            // Linear vesting: (elapsed / duration) * total
+            ((elapsed as i128) * schedule.total_amount) / (schedule.duration_seconds as i128)
+        };
+
+        let already_claimed = storage::get_vesting_claimed(&env, &beneficiary);
+        let claimable = vested_amount - already_claimed;
+
+        if claimable <= 0 {
+            panic!("no tokens available to claim");
+        }
+
+        // Check max_supply before minting
+        let current_supply = storage::get_total_supply(&env);
+        let max_supply = storage::get_max_supply(&env);
+        if current_supply + claimable > max_supply {
+            panic!("maximum supply cap exceeded");
+        }
+
+        let new_claimed = already_claimed + claimable;
+        storage::set_vesting_claimed(&env, &beneficiary, new_claimed);
+
+        // Mark exhausted when fully claimed
+        let exhausted = new_claimed >= schedule.total_amount;
+        if exhausted {
+            let mut updated = schedule.clone();
+            updated.exhausted = true;
+            storage::set_vesting_schedule(&env, &beneficiary, &updated);
+        }
+
+        let current_balance = storage::get_balance(&env, &beneficiary);
+        storage::set_balance(&env, &beneficiary, current_balance + claimable);
+        storage::set_total_supply(&env, current_supply + claimable);
+        storage::add_total_minted_to(&env, &beneficiary, claimable);
+
+        events::vesting_claimed(&env, &beneficiary, claimable, new_claimed);
+    }
+
+    /// Return the vesting schedule for a beneficiary (#225).
+    pub fn get_vesting_schedule(env: Env, beneficiary: Address) -> Option<storage::VestingSchedule> {
+        storage::get_vesting_schedule(&env, &beneficiary)
+    }
+
+    /// Return how many tokens a beneficiary has already claimed from vesting (#225).
+    pub fn get_vesting_claimed(env: Env, beneficiary: Address) -> i128 {
+        storage::get_vesting_claimed(&env, &beneficiary)
+    }
+
+    // ── Token Governance Voting (#226) ────────────────────────────────────
+
+    /// Create a governance proposal. Admin only.
+    ///
+    /// The proposal's voting power is based on token balances at
+    /// `snapshot_ledger`. Voting opens at `start_time` and closes at
+    /// `end_time` (Unix timestamps in seconds).
+    ///
+    /// # Arguments
+    /// * `description` - Human-readable proposal description
+    /// * `choices` - Number of choices (minimum 2)
+    /// * `start_time` - Unix timestamp when voting opens
+    /// * `end_time` - Unix timestamp when voting closes (must be > start_time)
+    /// * `snapshot_ledger` - Ledger height whose balances determine voting power
+    ///
+    /// # Returns
+    /// The new proposal ID.
+    pub fn create_proposal(
+        env: Env,
+        description: SorobanString,
+        choices: u32,
+        start_time: u64,
+        end_time: u64,
+        snapshot_ledger: u32,
+    ) -> u64 {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        if choices < 2 {
+            panic!("proposal must have at least 2 choices");
+        }
+        if end_time <= start_time {
+            panic!("end_time must be after start_time");
+        }
+
+        let mut vote_totals = Vec::new(&env);
+        for _ in 0..choices {
+            vote_totals.push_back(0i128);
+        }
+
+        let proposal_id = storage::next_proposal_id(&env);
+        let proposal = storage::Proposal {
+            description,
+            choices,
+            start_time,
+            end_time,
+            snapshot_ledger,
+            vote_totals,
+            executed: false,
+            winning_choice: u32::MAX,
+        };
+        storage::set_proposal(&env, proposal_id, &proposal);
+        events::proposal_created(&env, proposal_id, start_time, end_time);
+        proposal_id
+    }
+
+    /// Cast a vote on a governance proposal.
+    ///
+    /// Voting power equals the voter's balance at the proposal's
+    /// `snapshot_ledger`. Each address may vote at most once per proposal.
+    ///
+    /// # Arguments
+    /// * `voter` - The voting address (must authorize)
+    /// * `proposal_id` - The proposal to vote on
+    /// * `choice` - Zero-based choice index (0 = first choice, etc.)
+    pub fn vote(env: Env, voter: Address, proposal_id: u64, choice: u32) {
+        voter.require_auth();
+
+        let mut proposal = storage::get_proposal(&env, proposal_id)
+            .expect("proposal not found");
+
+        let now = env.ledger().timestamp();
+        if now < proposal.start_time {
+            panic!("voting has not started");
+        }
+        if now >= proposal.end_time {
+            panic!("voting has ended");
+        }
+        if choice >= proposal.choices {
+            panic!("invalid choice");
+        }
+        if storage::has_voted(&env, proposal_id, &voter) {
+            panic!("already voted");
+        }
+
+        let voting_power = storage::get_snapshot_balance(&env, &voter, proposal.snapshot_ledger)
+            .unwrap_or_else(|| storage::get_balance(&env, &voter));
+
+        if voting_power == 0 {
+            panic!("no voting power");
+        }
+
+        let current = proposal.vote_totals.get(choice).unwrap_or(0);
+        proposal.vote_totals.set(choice, current + voting_power);
+        storage::set_proposal(&env, proposal_id, &proposal);
+        storage::set_vote(&env, proposal_id, &voter, choice);
+
+        events::vote_cast(&env, proposal_id, &voter, choice, voting_power);
+    }
+
+    /// Execute a proposal after its voting period ends.
+    ///
+    /// Tallies votes and records the winning choice. Admin only.
+    /// A proposal may only be executed once.
+    ///
+    /// # Arguments
+    /// * `proposal_id` - The proposal to execute
+    ///
+    /// # Returns
+    /// The winning choice index.
+    pub fn execute_proposal(env: Env, proposal_id: u64) -> u32 {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        let mut proposal = storage::get_proposal(&env, proposal_id)
+            .expect("proposal not found");
+
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < proposal.end_time {
+            panic!("voting period has not ended");
+        }
+
+        // Tally: find the choice with the most votes.
+        let mut winning_choice: u32 = 0;
+        let mut winning_votes: i128 = proposal.vote_totals.get(0).unwrap_or(0);
+        for i in 1..proposal.choices {
+            let votes = proposal.vote_totals.get(i).unwrap_or(0);
+            if votes > winning_votes {
+                winning_votes = votes;
+                winning_choice = i;
+            }
+        }
+
+        proposal.executed = true;
+        proposal.winning_choice = winning_choice;
+        storage::set_proposal(&env, proposal_id, &proposal);
+
+        events::proposal_executed(&env, proposal_id, winning_choice, winning_votes);
+        winning_choice
+    }
+
+    /// Retrieve a governance proposal by ID (#226).
+    pub fn get_proposal(env: Env, proposal_id: u64) -> Option<storage::Proposal> {
+        storage::get_proposal(&env, proposal_id)
+    }
+
+    /// Returns the total number of governance proposals created (#226).
+    pub fn proposal_count(env: Env) -> u64 {
+        storage::get_proposal_counter(&env)
     }
 }
 
@@ -2263,5 +2596,121 @@ mod tests {
         // No mock_all_auths() and no explicit admin auth: require_auth must panic.
         let fake_hash = BytesN::from_array(&env, &[7u8; 32]);
         client.upgrade(&fake_hash);
+    }
+
+    // ── Permit tests (#224) ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_permit_sets_allowance_and_increments_nonce() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        assert_eq!(client.permit_nonce(&owner), 0);
+        let exp = env.ledger().sequence() + 100;
+        client.permit(&owner, &spender, &500, &exp, &0);
+
+        assert_eq!(client.allowance(&owner, &spender), 500);
+        assert_eq!(client.permit_nonce(&owner), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid nonce")]
+    fn test_permit_rejects_invalid_nonce() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        let exp = env.ledger().sequence() + 100;
+        client.permit(&owner, &spender, &500, &exp, &1);
+    }
+
+    // ── Vesting tests (#225) ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_vesting_schedule_creation_and_claim() {
+        let env = Env::default();
+        let (_admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let beneficiary = Address::generate(&env);
+        env.mock_all_auths();
+
+        let cliff = 1_000u64;
+        let duration = 1_000u64;
+        client.create_vesting(&beneficiary, &10_000, &cliff, &duration);
+
+        let sched = client.get_vesting_schedule(&beneficiary).unwrap();
+        assert_eq!(sched.total_amount, 10_000);
+        assert!(!sched.exhausted);
+
+        // Before cliff: cannot claim
+        env.ledger().with_mut(|li| li.timestamp = 500);
+        assert!(client.try_claim_vested(&beneficiary).is_err());
+
+        // Halfway through vesting: 50% claimable
+        env.ledger().with_mut(|li| li.timestamp = 1_500);
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.balance(&beneficiary), 5_000);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 5_000);
+
+        // Fully vested
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.balance(&beneficiary), 10_000);
+
+        let updated_sched = client.get_vesting_schedule(&beneficiary).unwrap();
+        assert!(updated_sched.exhausted);
+    }
+
+    // ── Governance tests (#226) ──────────────────────────────────────────────
+
+    #[test]
+    fn test_governance_proposal_lifecycle() {
+        let env = Env::default();
+        let (_admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&voter1, &100);
+        client.mint(&voter2, &200);
+
+        client.snapshot(&10);
+
+        let start = 1_000u64;
+        let end = 2_000u64;
+        let prop_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Upgrade Protocol"),
+            &2,
+            &start,
+            &end,
+            &10,
+        );
+
+        assert_eq!(prop_id, 1);
+        assert_eq!(client.proposal_count(), 1);
+
+        env.ledger().with_mut(|li| li.timestamp = 1_500);
+        client.vote(&voter1, &prop_id, &0);
+        client.vote(&voter2, &prop_id, &1);
+
+        env.ledger().with_mut(|li| li.timestamp = 2_500);
+        let winning = client.execute_proposal(&prop_id);
+        assert_eq!(winning, 1); // Choice 1 got 200 votes vs Choice 0's 100 votes
+
+        let prop = client.get_proposal(prop_id).unwrap();
+        assert!(prop.executed);
+        assert_eq!(prop.winning_choice, 1);
     }
 }
