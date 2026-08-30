@@ -779,31 +779,7 @@ impl LearnToken {
 
     // ── Emergency Pause (#189) ────────────────────────────────────────────
 
-    fn require_not_paused(env: &Env) {
-        if storage::is_paused(env) {
-            panic!("contract is paused");
-        }
-    }
 
-    /// Pause all state-changing operations. Admin or Pauser only.
-    pub fn emergency_pause(env: Env, caller: Address) {
-        caller.require_auth();
-        if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
-            panic!("not authorized");
-        }
-        storage::set_paused(&env, true);
-        events::paused(&env, &caller);
-    }
-
-    /// Unpause state-changing operations. Admin or Pauser only.
-    pub fn unpause(env: Env, caller: Address) {
-        caller.require_auth();
-        if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
-            panic!("not authorized");
-        }
-        storage::set_paused(&env, false);
-        events::unpaused(&env, &caller);
-    }
 
     // ── Admin ─────────────────────────────────────────────────────────────
 
@@ -851,35 +827,34 @@ impl LearnToken {
 
     // ── Pause Controls (Admin Only) ───────────────────────────────────────
 
-    /// Pause the contract. Admin only (#238).
-    ///
-    /// Emits a `paused` event carrying the acting admin and the ledger
-    /// timestamp, so pause activity can be audited and monitored.
-    pub fn pause(env: Env) {
-        let admin = storage::get_admin(&env);
-        admin.require_auth();
+    /// Pause the contract. Admin or Pauser only (#238, #189).
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
+            panic!("not authorized");
+        }
 
         if storage::is_paused(&env) {
             panic!("already paused");
         }
 
         storage::set_paused(&env, true);
-        events::paused(&env, &admin, env.ledger().timestamp());
+        events::paused(&env, &caller, env.ledger().timestamp());
     }
 
-    /// Unpause the contract. Admin only (#238).
-    ///
-    /// Emits an `unpaused` event in the same shape as `paused`.
-    pub fn unpause(env: Env) {
-        let admin = storage::get_admin(&env);
-        admin.require_auth();
+    /// Unpause the contract. Admin or Pauser only (#238, #189).
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
+            panic!("not authorized");
+        }
 
         if !storage::is_paused(&env) {
             panic!("not paused");
         }
 
         storage::set_paused(&env, false);
-        events::unpaused(&env, &admin, env.ledger().timestamp());
+        events::unpaused(&env, &caller, env.ledger().timestamp());
     }
 
     /// Returns whether the contract is currently paused (#238).
