@@ -1116,4 +1116,30 @@ mod progress_unit_tests {
 
         client.export_progress(&learner, &course_id);
     }
+
+    // ── Issue #219: on-chain upgrade counter ─────────────────────────────
+
+    #[test]
+    fn test_contract_version_starts_at_zero() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert_eq!(client.contract_version(), 0);
+    }
+
+    #[test]
+    fn test_contract_metadata_includes_version() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(metadata.version, 0);
+        assert_eq!(metadata.version, client.contract_version());
+        assert_eq!(
+            metadata.metadata.name,
+            soroban_sdk::String::from_str(&env, "progress-tracker")
+        );
+    }
 }

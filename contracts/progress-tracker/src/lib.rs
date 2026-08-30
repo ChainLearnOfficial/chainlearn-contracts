@@ -7,6 +7,7 @@ use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 pub use types::{
     Course, LearnerStats, ProgressExport, ProgressInfo, ProgressTrackerDataKey, QuizResult,
+    VersionedContractMetadata,
 };
 
 /// Sentinel meaning "no content hash set"; enrollment skips verification (#235).
@@ -44,18 +45,46 @@ impl ProgressTracker {
             &ProgressTrackerDataKey::Metadata,
             &ContractMetadata::new(&env, "progress-tracker"),
         );
+        // On-chain upgrade counter, separate from the crate's semantic
+        // version above (#219). Starts at zero for a freshly initialized
+        // contract; bumped whenever the contract is upgraded in place.
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Version, &0u32);
         Ok(())
     }
 
-    /// Get the contract's on-chain name and version (#107).
+    /// Get the contract's on-chain name, semantic version, and upgrade
+    /// counter (#107, #219).
     ///
     /// Lets external tools (indexers, block explorers, upgrade tooling)
-    /// identify which contract and release is deployed without inferring it
-    /// from behavior.
-    pub fn contract_metadata(env: Env) -> ContractMetadata {
-        env.storage()
+    /// identify which contract and release is deployed, and how many times
+    /// it has been upgraded in place, without inferring it from behavior.
+    pub fn contract_metadata(env: Env) -> VersionedContractMetadata {
+        let metadata = env
+            .storage()
             .persistent()
             .get(&ProgressTrackerDataKey::Metadata)
+            .expect("not initialized");
+        let version = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Version)
+            .expect("not initialized");
+
+        VersionedContractMetadata { metadata, version }
+    }
+
+    /// Get the contract's on-chain upgrade counter on its own (#219).
+    ///
+    /// Starts at `0` for a never-upgraded contract. progress-tracker has no
+    /// in-place upgrade mechanism yet, so this only ever reads back the
+    /// value set at `initialize()` today; it is queryable now so indexers
+    /// and future upgrade tooling have a stable key to bump and read.
+    pub fn contract_version(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Version)
             .expect("not initialized")
     }
 
@@ -345,8 +374,7 @@ impl ProgressTracker {
         let was_eligible = progress.eligible_for_credential;
 
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&course, &progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
 
         env.storage().persistent().set(
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
@@ -441,7 +469,7 @@ impl ProgressTracker {
         };
 
         env.storage().persistent().set(&quiz_key, &result);
-        
+
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
 
@@ -450,8 +478,7 @@ impl ProgressTracker {
         // Recalculate from the updated in-memory aggregates, so everything is
         // known before the single storage write below.
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&course, &progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
 
         // Single write with all updated fields
         env.storage().persistent().set(
@@ -871,10 +898,8 @@ impl ProgressTracker {
             .persistent()
             .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
 
-        env.events().publish(
-            (Symbol::new(&env, "course_archived"),),
-            (&course_id,),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "course_archived"),), (&course_id,));
     }
 
     /// Set or update the content hash for a course. Admin only (#235).
@@ -1120,7 +1145,10 @@ impl ProgressTracker {
     // ── Emergency Pause (#189) ────────────────────────────────────────────
 
     fn is_paused(env: &Env) -> bool {
-        env.storage().persistent().get(&ProgressTrackerDataKey::Paused).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Paused)
+            .unwrap_or(false)
     }
 
     fn require_not_paused(env: &Env) {
@@ -1131,17 +1159,29 @@ impl ProgressTracker {
 
     /// Pause all state-changing operations. Admin only.
     pub fn emergency_pause(env: Env) {
-        let admin: Address = env.storage().persistent().get(&ProgressTrackerDataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&ProgressTrackerDataKey::Paused, &true);
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Paused, &true);
         // We omit events here to avoid adding it to events.rs
     }
 
     /// Unpause state-changing operations. Admin only.
     pub fn unpause(env: Env) {
-        let admin: Address = env.storage().persistent().get(&ProgressTrackerDataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&ProgressTrackerDataKey::Paused, &false);
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Paused, &false);
     }
 
     /// Returns the admin address.
@@ -1217,13 +1257,35 @@ mod tests {
 
         let metadata = client.contract_metadata();
         assert_eq!(
-            metadata.name,
+            metadata.metadata.name,
             soroban_sdk::String::from_str(&env, "progress-tracker")
         );
         assert_eq!(
-            metadata.version,
+            metadata.metadata.version,
             soroban_sdk::String::from_str(&env, chainlearn_shared::CONTRACT_VERSION)
         );
+    }
+
+    // ── Issue #219: on-chain upgrade counter ─────────────────────────────
+
+    #[test]
+    fn test_contract_version_starts_at_zero() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert_eq!(client.contract_version(), 0);
+    }
+
+    #[test]
+    fn test_contract_metadata_includes_version() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(metadata.version, 0);
+        assert_eq!(metadata.version, client.contract_version());
     }
 
     // ── Issue #108: course_exists lets other contracts validate course_id ───
@@ -1564,7 +1626,10 @@ mod tests {
         assert_eq!(export.quizzes_submitted, 1);
         assert_eq!(export.total_quiz_score, 85);
         assert_eq!(export.quiz_scores.len(), 1);
-        assert_eq!(export.quiz_scores.get(0).unwrap().quiz_id, Symbol::new(&env, "quiz_1"));
+        assert_eq!(
+            export.quiz_scores.get(0).unwrap().quiz_id,
+            Symbol::new(&env, "quiz_1")
+        );
         assert_eq!(export.quiz_scores.get(0).unwrap().score, 85);
         assert!(!export.eligible_for_credential);
 
@@ -1590,7 +1655,10 @@ mod tests {
         let export = client.export_progress(&learner, &course_id);
 
         assert_eq!(export.quiz_scores.len(), 1);
-        assert_eq!(export.quiz_scores.get(0).unwrap().quiz_id, Symbol::new(&env, "quiz_1"));
+        assert_eq!(
+            export.quiz_scores.get(0).unwrap().quiz_id,
+            Symbol::new(&env, "quiz_1")
+        );
     }
 
     #[test]
@@ -2153,7 +2221,10 @@ mod tests {
         let learner = Address::generate(&env);
 
         client.enroll(&learner, &course_id);
-        assert_eq!(client.get_progress(&learner, &course_id).overall_progress, 0);
+        assert_eq!(
+            client.get_progress(&learner, &course_id).overall_progress,
+            0
+        );
     }
 
     #[test]
