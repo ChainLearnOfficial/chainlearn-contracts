@@ -10,6 +10,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+soroban-env-common = { version = "21.0.0", default-features = false }
 chainlearn-shared = { path = "../../packages/shared" }
 
 [dev-dependencies]

@@ -747,4 +747,329 @@ mod progress_unit_tests {
             progress_tracker::ContractError::AlreadyInitialized
         );
     }
+    // ── Issue #233: get_completion_percentage ──────────────────────────────
+
+    #[test]
+    fn test_get_completion_percentage_matches_overall_progress() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        assert_eq!(client.get_completion_percentage(&learner, &course_id), 0);
+
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(
+            client.get_completion_percentage(&learner, &course_id),
+            progress.overall_progress
+        );
+        assert!(progress.overall_progress > 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_get_completion_percentage_without_enrollment_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        // Skip enrollment
+        client.get_completion_percentage(&learner, &course_id);
+    }
+
+    // ── Issue #232: get_learner_courses / get_learner_stats ────────────────
+
+    #[test]
+    fn test_get_learner_courses_empty_for_new_learner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        assert_eq!(client.get_learner_courses(&learner).len(), 0);
+    }
+
+    #[test]
+    fn test_get_learner_courses_tracks_enrollment_order() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_a = create_test_course(&env, &client);
+        let course_b = Symbol::new(&env, "course_b");
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        client.create_course(&course_b, &1, &1, &module_ids, &quiz_ids);
+
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_a);
+        client.enroll(&learner, &course_b);
+
+        let courses = client.get_learner_courses(&learner);
+        assert_eq!(courses.len(), 2);
+        assert_eq!(courses.get(0).unwrap(), course_a);
+        assert_eq!(courses.get(1).unwrap(), course_b);
+    }
+
+    #[test]
+    fn test_get_learner_stats_all_zero_for_new_learner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let stats = client.get_learner_stats(&learner);
+
+        assert_eq!(stats.courses_enrolled, 0);
+        assert_eq!(stats.courses_completed, 0);
+        assert_eq!(stats.total_quizzes_submitted, 0);
+        assert_eq!(stats.total_quiz_score, 0);
+        assert_eq!(stats.average_score, 0);
+        assert_eq!(stats.total_rewards_earned, 0);
+    }
+
+    #[test]
+    fn test_get_learner_stats_aggregates_across_courses() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+
+        // Course A: fully completed and eligible for a credential.
+        let course_a = create_test_course(&env, &client);
+        client.enroll(&learner, &course_a);
+        client.complete_module(&learner, &course_a, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_a, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_a, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_a, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(&learner, &course_a, &Symbol::new(&env, "quiz_2"), &70);
+        assert!(client.get_progress(&learner, &course_a).eligible_for_credential);
+
+        // Course B: enrolled and quizzed, but the module is never completed,
+        // so it must not count toward courses_completed.
+        let course_b = Symbol::new(&env, "course_b");
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        client.create_course(&course_b, &1, &1, &module_ids, &quiz_ids);
+        client.enroll(&learner, &course_b);
+        client.submit_quiz_score(&learner, &course_b, &Symbol::new(&env, "quiz_a"), &60);
+        assert!(!client.get_progress(&learner, &course_b).eligible_for_credential);
+
+        let stats = client.get_learner_stats(&learner);
+        assert_eq!(stats.courses_enrolled, 2);
+        assert_eq!(stats.courses_completed, 1);
+        assert_eq!(stats.total_quizzes_submitted, 3);
+        assert_eq!(stats.total_quiz_score, 210);
+        assert_eq!(stats.average_score, 70);
+        assert_eq!(stats.total_rewards_earned, 21_000);
+    }
+
+    #[test]
+    fn test_get_learner_stats_average_divides_by_quizzes_not_courses() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+
+        // Enrolled in a course but never submits a quiz -- this must not
+        // drag the average down by padding the divisor.
+        let course_a = create_test_course(&env, &client);
+        client.enroll(&learner, &course_a);
+
+        let course_b = Symbol::new(&env, "course_b");
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        client.create_course(&course_b, &1, &1, &module_ids, &quiz_ids);
+        client.enroll(&learner, &course_b);
+        client.submit_quiz_score(&learner, &course_b, &Symbol::new(&env, "quiz_a"), &90);
+
+        let stats = client.get_learner_stats(&learner);
+        assert_eq!(stats.courses_enrolled, 2);
+        assert_eq!(stats.total_quizzes_submitted, 1);
+        assert_eq!(stats.average_score, 90);
+    }
+
+    // ── Issue #234: retake_quiz ─────────────────────────────────────────────
+
+    #[test]
+    fn test_retake_quiz_replaces_score_without_double_counting() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_id = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.submit_quiz_score(&learner, &course_id, &quiz_id, &40);
+        client.retake_quiz(&learner, &course_id, &quiz_id, &90);
+
+        assert_eq!(client.get_quiz_score(&learner, &course_id, &quiz_id), 90);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 90);
+    }
+
+    #[test]
+    fn test_retake_quiz_emits_quiz_retaken_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_id = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_id, &40);
+        client.retake_quiz(&learner, &course_id, &quiz_id, &90);
+
+        // Only mod_1 is uncompleted-out-of-3, so eligibility cannot flip --
+        // the last event must be exactly quiz_retaken, not credential_eligible.
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "quiz_retaken"),).into_val(&env),
+                    (learner, course_id, quiz_id, 40u32, 90u32).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_retake_quiz_flips_eligibility_and_emits_credential_eligible() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_id = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_id, &quiz_id, &20);
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &20);
+        assert!(!client.get_progress(&learner, &course_id).eligible_for_credential);
+
+        client.retake_quiz(&learner, &course_id, &quiz_id, &90);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert!(progress.eligible_for_credential);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
+                    (learner, course_id).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "new score must be higher")]
+    fn test_retake_quiz_rejects_non_improving_score() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_id = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_id, &50);
+        client.retake_quiz(&learner, &course_id, &quiz_id, &50);
+    }
+
+    #[test]
+    #[should_panic(expected = "score exceeds maximum")]
+    fn test_retake_quiz_rejects_score_above_max() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_id = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_id, &50);
+        client.retake_quiz(&learner, &course_id, &quiz_id, &101);
+    }
+
+    #[test]
+    #[should_panic(expected = "quiz not submitted")]
+    fn test_retake_quiz_without_prior_submission_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        // No submit_quiz_score call -- a first attempt still goes through
+        // submit_quiz_score, not retake_quiz.
+        client.retake_quiz(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_retake_quiz_without_enrollment_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        // Skip enrollment
+        client.retake_quiz(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+    }
 }

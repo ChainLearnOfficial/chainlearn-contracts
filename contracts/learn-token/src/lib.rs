@@ -705,7 +705,7 @@ impl LearnToken {
             successful.push_back(quiz_id);
         }
 
-        if successful.len() > 0 {
+        if !successful.is_empty() {
             storage::set_balance(&env, &learner, current_balance);
             storage::set_total_supply(&env, current_supply);
         }
@@ -923,7 +923,13 @@ impl LearnToken {
     }
 
     /// Update the maximum supply cap. Admin only.
+    ///
+    /// # Governance Safeguard
+    /// To prevent arbitrary or unlimited supply inflation by a compromised admin key,
+    /// the cap can never be increased by more than 2x (100% increase) in a single update.
+    /// Decreasing the cap is allowed down to the circulating total supply.
     pub fn set_max_supply(env: Env, new_max_supply: i128) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         if new_max_supply < 0 {
@@ -933,7 +939,15 @@ impl LearnToken {
         if new_max_supply < current_supply {
             panic!("new cap cannot be less than current total supply");
         }
+        let old_max_supply = storage::get_max_supply(&env);
+        if old_max_supply > 0 && new_max_supply > old_max_supply {
+            let max_allowed = old_max_supply.checked_mul(2).expect("overflow");
+            if new_max_supply > max_allowed {
+                panic!("max supply increase exceeds governance limit (maximum 2x increase per update)");
+            }
+        }
         storage::set_max_supply(&env, new_max_supply);
+        events::max_supply_updated(&env, old_max_supply, new_max_supply);
     }
 
     /// Transfer admin rights to a new address.

@@ -361,6 +361,7 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
 }
 
 /// Read-only version of check_allowance_expired that does not perform storage side-effects.
+#[allow(dead_code)]
 pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
     let key = AllowanceKey {
         owner: owner.clone(),
@@ -732,20 +733,6 @@ pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
     );
 }
 
-/// Whether the contract is currently paused (#238).
-pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .persistent()
-        .get(&TokenDataKey::Paused)
-        .unwrap_or(false)
-}
-
-/// Set the paused flag (#238).
-pub fn set_paused(env: &Env, paused: bool) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Paused, &paused);
-}
 
 // ── Vesting Schedules (#225) ──────────────────────────────────────────────────
 
