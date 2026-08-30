@@ -26,7 +26,7 @@ pub enum ContractError {
     AlreadyInitialized = 0,
     /// Returned by `transfer` for every call: credentials are soulbound and
     /// permanently bound to the learner who earned them, so no transfer is
-    /// ever permitted, regardless of caller or state (#242).
+    /// ever permitted, regardless of caller or state (#242, duplicate: #227).
     Soulbound = 1,
 }
 
@@ -1478,4 +1478,12 @@ mod tests {
         // The credential's core info is unaffected by setting display data.
         assert_eq!(verification.info, client.verify_credential(&id));
     }
+
+    // Issue #227 ("Add credential transfer rejection with reason") is a
+    // content-duplicate of already-merged #242 (identical title/body); #242's
+    // Soulbound-rejection behavior and its `require_auth()`-free design are
+    // already covered by `test_transfer_always_returns_soulbound_error`,
+    // `test_transfer_rejects_even_without_auth_or_existing_credential`, and
+    // `test_transfer_does_not_mutate_credential_state` in
+    // `tests/unit/credential_tests.rs`, so no new tests are added here.
 }
