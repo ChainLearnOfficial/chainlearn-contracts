@@ -840,6 +840,8 @@ mod token_unit_tests {
         assert_eq!(successful.len(), 0);
         assert_eq!(client.balance(&learner), 0);
         assert_eq!(client.total_supply(), i128::MAX);
+    }
+
     #[test]
     fn test_governance_proposal_lifecycle() {
         let env = Env::default();
