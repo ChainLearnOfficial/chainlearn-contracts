@@ -836,5 +836,45 @@ mod token_unit_tests {
         assert_eq!(successful.len(), 0);
         assert_eq!(client.balance(&learner), 0);
         assert_eq!(client.total_supply(), i128::MAX);
+    #[test]
+    fn test_governance_proposal_lifecycle() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let voter = Address::generate(&env);
+        client.mint(&admin, &voter, &1000);
+
+        let snapshot_ledger = env.ledger().sequence();
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Increase rewards"),
+            &2,
+            &0,
+            &1000,
+            &snapshot_ledger,
+        );
+
+        let proposal = client.get_proposal(&proposal_id).unwrap();
+        assert_eq!(proposal.choices, 2);
+        assert!(!proposal.executed);
+
+        // Voting power equals the voter's balance at the snapshot ledger.
+        assert_eq!(client.balance(&voter), 1000);
+
+        client.vote(&voter, &proposal_id, &0);
+
+        let after_vote = client.get_proposal(&proposal_id).unwrap();
+        assert_eq!(after_vote.vote_totals.get(0).unwrap(), 1000);
+
+        env.ledger().with_mut(|l| {
+            l.timestamp = 2000;
+        });
+
+        let winning_choice = client.execute_proposal(&proposal_id);
+        assert_eq!(winning_choice, 0);
+
+        let executed = client.get_proposal(&proposal_id).unwrap();
+        assert!(executed.executed);
     }
 }

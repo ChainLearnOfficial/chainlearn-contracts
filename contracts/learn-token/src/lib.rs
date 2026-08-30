@@ -58,6 +58,31 @@ impl LearnToken {
             panic!("contract is paused");
         }
     }
+
+    /// Fetch a verified quiz score from the progress-tracker in a single
+    /// cross-contract call (#217).
+    ///
+    /// Calls `env.invoke_contract` directly rather than going through
+    /// `ProgressTrackerClient::new(...)`, so no client wrapper is constructed
+    /// per hop (#133). The tracker address and the `get_quiz_score` function
+    /// `Symbol` are passed in already-built so batch callers can resolve them
+    /// once and reuse them across every iteration instead of rebuilding them
+    /// (each `Symbol::new` and each `storage::get_progress_tracker` is itself a
+    /// host call) on every quiz.
+    fn fetch_quiz_score(
+        env: &Env,
+        progress_tracker: &Address,
+        get_quiz_score_fn: &Symbol,
+        learner: &Address,
+        course_id: &Symbol,
+        quiz_id: &Symbol,
+    ) -> u32 {
+        env.invoke_contract(
+            progress_tracker,
+            get_quiz_score_fn,
+            (learner, course_id, quiz_id).into_val(env),
+        )
+    }
 }
 
 #[contractimpl]
@@ -278,6 +303,21 @@ impl LearnToken {
     /// * `address` - The address to query
     pub fn total_minted_to(env: Env, address: Address) -> i128 {
         storage::get_total_minted_to(&env, &address)
+    }
+
+    /// Returns the number of persistent storage entries this contract has
+    /// created, net of any since removed (#254).
+    ///
+    /// Soroban prices persistent storage by entry count and size, so this
+    /// lets callers monitor and forecast the contract's on-chain storage
+    /// costs. Only per-entity entries that grow with usage are counted
+    /// (reward claims, claim history, roles, whitelist, snapshots, vesting
+    /// schedules, vesting claimed amounts, proposals, votes, allowance-
+    /// spender registries, permit nonces, per-address minting totals);
+    /// singleton config values set once at `initialize()` are excluded
+    /// since they don't contribute to growing storage costs.
+    pub fn get_storage_size(env: Env) -> u32 {
+        storage::get_storage_size(&env)
     }
 
     pub fn balance(env: Env, address: Address) -> i128 {
@@ -578,14 +618,16 @@ impl LearnToken {
             panic!("reward already claimed");
         }
 
-        // Verify score by querying the progress-tracker contract.
-        // Use env.invoke_contract directly to avoid the gas cost of
-        // ProgressTrackerClient::new() on every invocation (#133).
+        // Verify score by querying the progress-tracker contract via a single
+        // direct cross-contract call (#217, #133).
         let progress_tracker = storage::get_progress_tracker(&env);
-        let score: u32 = env.invoke_contract(
+        let score: u32 = Self::fetch_quiz_score(
+            &env,
             &progress_tracker,
             &Symbol::new(&env, "get_quiz_score"),
-            (&learner, &course_id, &quiz_id).into_val(&env),
+            &learner,
+            &course_id,
+            &quiz_id,
         );
 
         if score == 0 {
@@ -661,7 +703,11 @@ impl LearnToken {
         learner.require_auth();
 
         let mut successful = soroban_sdk::Vec::new(&env);
+        // Resolve the tracker address and the cross-contract function name once
+        // and reuse them for every quiz, rather than rebuilding both on each
+        // loop iteration (#217).
         let progress_tracker = storage::get_progress_tracker(&env);
+        let get_quiz_score_fn = Symbol::new(&env, "get_quiz_score");
         let max_supply = storage::get_max_supply(&env);
 
         let mut current_supply = storage::get_total_supply(&env);
@@ -672,10 +718,13 @@ impl LearnToken {
                 continue;
             }
 
-            let score: u32 = env.invoke_contract(
+            let score: u32 = Self::fetch_quiz_score(
+                &env,
                 &progress_tracker,
-                &Symbol::new(&env, "get_quiz_score"),
-                (&learner, &course_id, &quiz_id).into_val(&env),
+                &get_quiz_score_fn,
+                &learner,
+                &course_id,
+                &quiz_id,
             );
 
             if score == 0 || score > MAX_QUIZ_SCORE {
@@ -746,10 +795,13 @@ impl LearnToken {
         }
 
         let progress_tracker = storage::get_progress_tracker(&env);
-        let score: u32 = env.invoke_contract(
+        let score: u32 = Self::fetch_quiz_score(
+            &env,
             &progress_tracker,
             &Symbol::new(&env, "get_quiz_score"),
-            (&learner, &course_id, &quiz_id).into_val(&env),
+            &learner,
+            &course_id,
+            &quiz_id,
         );
 
         if score == 0 {
@@ -1607,12 +1659,12 @@ mod tests {
     #[test]
     fn test_total_minted_to_updates_on_mint() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let user = Address::generate(&env);
-        client.mint(&user, &1_000);
+        client.mint(&admin, &user, &1_000);
 
         assert_eq!(client.total_minted_to(&user), 1_000);
     }
@@ -1620,14 +1672,14 @@ mod tests {
     #[test]
     fn test_total_minted_to_accumulates_across_mints() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let user = Address::generate(&env);
-        client.mint(&user, &1_000);
-        client.mint(&user, &500);
-        client.mint(&user, &250);
+        client.mint(&admin, &user, &1_000);
+        client.mint(&admin, &user, &500);
+        client.mint(&admin, &user, &250);
 
         assert_eq!(client.total_minted_to(&user), 1_750);
     }
@@ -1635,14 +1687,14 @@ mod tests {
     #[test]
     fn test_total_minted_to_is_tracked_per_address() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        client.mint(&alice, &900);
-        client.mint(&bob, &100);
+        client.mint(&admin, &alice, &900);
+        client.mint(&admin, &bob, &100);
 
         assert_eq!(client.total_minted_to(&alice), 900);
         assert_eq!(client.total_minted_to(&bob), 100);
@@ -1652,13 +1704,13 @@ mod tests {
     #[test]
     fn test_total_minted_to_unchanged_by_transfer_and_burn() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        client.mint(&alice, &1_000);
+        client.mint(&admin, &alice, &1_000);
 
         client.transfer(&alice, &bob, &400);
         client.burn(&alice, &100);
@@ -1690,6 +1742,19 @@ mod tests {
         let balance = client.balance(&learner);
         assert!(balance > 0);
         assert_eq!(client.total_minted_to(&learner), balance);
+    }
+
+    #[test]
+    fn test_total_minted_to_zero_amount_mint_leaves_total_at_zero() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&admin, &user, &0);
+
+        assert_eq!(client.total_minted_to(&user), 0);
     }
 
     // ── Issue #237: reward claim history ─────────────────────────────────
@@ -1810,6 +1875,35 @@ mod tests {
         assert_eq!(client.get_claim_history(&learner).len(), 1);
     }
 
+    #[test]
+    fn test_claim_history_records_across_different_courses() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_a = Symbol::new(&env, "rust_101");
+        let course_b = Symbol::new(&env, "solidity_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_a, &quiz_id, 80);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_b, &quiz_id, 60);
+
+        env.ledger().with_mut(|li| li.timestamp = 100);
+        client.claim_reward(&learner, &course_a, &quiz_id);
+        env.ledger().with_mut(|li| li.timestamp = 200);
+        client.claim_reward(&learner, &course_b, &quiz_id);
+
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.get(0).unwrap().course_id, course_a);
+        assert_eq!(history.get(1).unwrap().course_id, course_b);
+        // Same quiz_id in both courses, kept distinct by course_id.
+        assert_eq!(history.get(0).unwrap().quiz_id, quiz_id);
+        assert_eq!(history.get(1).unwrap().quiz_id, quiz_id);
+    }
+
     // ── Issue #238: pause/unpause events ─────────────────────────────────
 
     #[test]
@@ -1830,7 +1924,7 @@ mod tests {
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 5_000);
 
-        client.pause();
+        client.pause(&admin);
 
         assert!(client.is_paused());
         let events = env.events().all();
@@ -1850,10 +1944,10 @@ mod tests {
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
-        client.pause();
+        client.pause(&admin);
         env.ledger().with_mut(|li| li.timestamp = 9_000);
 
-        client.unpause();
+        client.unpause(&admin);
 
         assert!(!client.is_paused());
         let events = env.events().all();
@@ -1870,43 +1964,76 @@ mod tests {
     #[should_panic(expected = "already paused")]
     fn test_pause_twice_panics() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
-        client.pause();
-        client.pause();
+        client.pause(&admin);
+        client.pause(&admin);
     }
 
     #[test]
     #[should_panic(expected = "not paused")]
     fn test_unpause_when_not_paused_panics() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
-        client.unpause();
+        client.unpause(&admin);
     }
 
     #[test]
     fn test_pause_blocks_transfers_and_unpause_restores_them() {
         let env = Env::default();
-        let (_admin, lt_id, _pt_id) = setup(&env);
+        let (admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
         env.mock_all_auths();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        client.mint(&alice, &1_000);
+        client.mint(&admin, &alice, &1_000);
 
-        client.pause();
+        client.pause(&admin);
         assert!(client.try_transfer(&alice, &bob, &100).is_err());
-        assert!(client.try_mint(&alice, &100).is_err());
+        assert!(client.try_mint(&admin, &alice, &100).is_err());
 
-        client.unpause();
+        client.unpause(&admin);
         client.transfer(&alice, &bob, &100);
         assert_eq!(client.balance(&bob), 100);
+    }
+
+    #[test]
+    fn test_pause_blocks_burn_claim_reward_and_claim_vested() {
+        let env = Env::default();
+        let (admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        client.mint(&admin, &alice, &1_000);
+
+        let beneficiary = Address::generate(&env);
+        client.create_vesting(&beneficiary, &1_000, &0, &1_000);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.pause(&admin);
+        assert!(client.try_burn(&alice, &100).is_err());
+        assert!(client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .is_err());
+        assert!(client.try_claim_vested(&beneficiary).is_err());
+
+        client.unpause(&admin);
+        client.burn(&alice, &100);
+        assert_eq!(client.balance(&alice), 900);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        assert!(client.balance(&learner) > 0);
     }
 
     #[test]
@@ -1941,7 +2068,7 @@ mod tests {
     #[test]
     fn test_mint() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let learner = Address::generate(&env);
@@ -1956,7 +2083,7 @@ mod tests {
     #[test]
     fn test_transfer() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2107,7 +2234,7 @@ mod tests {
     #[should_panic(expected = "cannot transfer to contract")]
     fn test_transfer_to_contract_address_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2122,7 +2249,7 @@ mod tests {
     #[should_panic(expected = "cannot transfer to contract")]
     fn test_transfer_from_to_contract_address_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2208,7 +2335,7 @@ mod tests {
     #[test]
     fn test_burn_reduces_balance_and_supply() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2224,7 +2351,7 @@ mod tests {
     #[test]
     fn test_burn_entire_balance() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2240,7 +2367,7 @@ mod tests {
     #[test]
     fn test_burn_zero_is_a_noop() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2257,7 +2384,7 @@ mod tests {
     #[should_panic(expected = "insufficient balance")]
     fn test_burn_more_than_balance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2271,7 +2398,7 @@ mod tests {
     #[should_panic(expected = "negative amount")]
     fn test_burn_negative_amount_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2285,7 +2412,7 @@ mod tests {
     #[should_panic]
     fn test_burn_requires_owner_auth() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let alice = Address::generate(&env);
@@ -2300,7 +2427,7 @@ mod tests {
     #[test]
     fn test_burn_from_spends_allowance() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2321,7 +2448,7 @@ mod tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_burn_from_beyond_allowance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2338,7 +2465,7 @@ mod tests {
     #[should_panic(expected = "insufficient balance")]
     fn test_burn_from_beyond_balance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2356,7 +2483,7 @@ mod tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_burn_from_without_allowance_panics() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2370,7 +2497,7 @@ mod tests {
     #[test]
     fn test_burn_from_leaves_other_allowances_untouched() {
         let env = Env::default();
-        let (_, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let owner = Address::generate(&env);
@@ -2774,15 +2901,15 @@ mod tests {
     #[test]
     fn test_governance_proposal_lifecycle() {
         let env = Env::default();
-        let (_admin, lt_contract_id, _) = setup(&env);
+        let (admin, lt_contract_id, _) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_contract_id);
 
         let voter1 = Address::generate(&env);
         let voter2 = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&voter1, &100);
-        client.mint(&voter2, &200);
+        client.mint(&admin, &voter1, &100);
+        client.mint(&admin, &voter2, &200);
 
         client.snapshot(&10);
 
@@ -2807,8 +2934,246 @@ mod tests {
         let winning = client.execute_proposal(&prop_id);
         assert_eq!(winning, 1); // Choice 1 got 200 votes vs Choice 0's 100 votes
 
-        let prop = client.get_proposal(prop_id).unwrap();
+        let prop = client.get_proposal(&prop_id).unwrap();
         assert!(prop.executed);
         assert_eq!(prop.winning_choice, 1);
+    }
+
+    // ── Issue #254: storage size tracking ─────────────────────────────────
+
+    #[test]
+    fn test_storage_size_starts_at_zero() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        // initialize() only writes singleton config entries, none of which
+        // are counted, so a freshly-initialized contract reports 0.
+        assert_eq!(client.get_storage_size(), 0);
+    }
+
+    #[test]
+    fn test_storage_size_increases_on_first_mint_to_new_address() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let before = client.get_storage_size();
+        client.mint(&admin, &Address::generate(&env), &1_000);
+
+        assert_eq!(client.get_storage_size(), before + 1);
+    }
+
+    #[test]
+    fn test_storage_size_unchanged_on_repeat_mint_to_same_address() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&admin, &user, &1_000);
+        let after_first = client.get_storage_size();
+
+        client.mint(&admin, &user, &500);
+        client.mint(&admin, &user, &250);
+
+        // The TotalMintedTo(user) entry already exists, so repeat mints
+        // update it in place rather than creating new entries.
+        assert_eq!(client.get_storage_size(), after_first);
+    }
+
+    #[test]
+    fn test_storage_size_counts_distinct_addresses_separately() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let before = client.get_storage_size();
+        client.mint(&admin, &Address::generate(&env), &900);
+        client.mint(&admin, &Address::generate(&env), &100);
+
+        assert_eq!(client.get_storage_size(), before + 2);
+    }
+
+    #[test]
+    fn test_storage_size_zero_amount_mint_still_creates_entry() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let before = client.get_storage_size();
+        let user = Address::generate(&env);
+        client.mint(&admin, &user, &0);
+
+        // The TotalMintedTo(user) entry is created (queryable total stays
+        // 0), so it still counts as a new persistent entry.
+        assert_eq!(client.get_storage_size(), before + 1);
+        assert_eq!(client.total_minted_to(&user), 0);
+    }
+
+    #[test]
+    fn test_storage_size_increases_on_first_claim_reward() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        let before = client.get_storage_size();
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        // A first-time claim creates three entries: TotalMintedTo(learner),
+        // RewardClaimed(learner, course, quiz), and ClaimHistory(learner).
+        assert_eq!(client.get_storage_size(), before + 3);
+    }
+
+    #[test]
+    fn test_storage_size_unchanged_by_rejected_double_claim() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        let after_first_claim = client.get_storage_size();
+
+        assert!(client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .is_err());
+
+        assert_eq!(client.get_storage_size(), after_first_claim);
+    }
+
+    #[test]
+    fn test_storage_size_tracks_role_grant_and_revoke() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let before = client.get_storage_size();
+        let minter = Address::generate(&env);
+        client.grant_role(&admin, &minter, &storage::AdminRole::Minter);
+        assert_eq!(client.get_storage_size(), before + 1);
+
+        client.revoke_role(&admin, &minter, &storage::AdminRole::Minter);
+        assert_eq!(client.get_storage_size(), before);
+    }
+
+    #[test]
+    fn test_storage_size_tracks_whitelist_add_and_remove() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let before = client.get_storage_size();
+        let addr = Address::generate(&env);
+        client.add_to_whitelist(&addr);
+        assert_eq!(client.get_storage_size(), before + 1);
+
+        client.remove_from_whitelist(&addr);
+        assert_eq!(client.get_storage_size(), before);
+    }
+
+    #[test]
+    fn test_storage_size_tracks_vesting_schedule_once_across_full_lifecycle() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let beneficiary = Address::generate(&env);
+        // Pre-mint so claim_vested()'s own add_total_minted_to() call (it
+        // mints too) updates an existing TotalMintedTo entry rather than
+        // creating one, isolating this test to the VestingSchedule entry.
+        client.mint(&admin, &beneficiary, &1);
+
+        let before = client.get_storage_size();
+        client.create_vesting(&beneficiary, &10_000, &1_000, &1_000);
+        assert_eq!(client.get_storage_size(), before + 1);
+
+        // claim_vested() rewrites the same VestingSchedule entry (to flip
+        // `exhausted`) and creates a new VestingClaimed entry; the
+        // VestingSchedule rewrite must not be counted a second time.
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.get_storage_size(), before + 2);
+    }
+
+    #[test]
+    fn test_storage_size_tracks_proposal_and_votes_not_repeat_updates() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        client.mint(&admin, &voter1, &100);
+        client.mint(&admin, &voter2, &200);
+        client.snapshot(&10);
+
+        let before = client.get_storage_size();
+        let prop_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Upgrade Protocol"),
+            &2,
+            &1_000,
+            &2_000,
+            &10,
+        );
+        // Proposal(prop_id) is the only entry created by create_proposal.
+        assert_eq!(client.get_storage_size(), before + 1);
+
+        env.ledger().with_mut(|li| li.timestamp = 1_500);
+        client.vote(&voter1, &prop_id, &0);
+        client.vote(&voter2, &prop_id, &1);
+        // Each vote adds one Vote(proposal, voter) entry; the Proposal
+        // entry itself is only updated (vote_totals), not re-created.
+        assert_eq!(client.get_storage_size(), before + 3);
+
+        env.ledger().with_mut(|li| li.timestamp = 2_500);
+        client.execute_proposal(&prop_id);
+        // execute_proposal() only updates the existing Proposal entry.
+        assert_eq!(client.get_storage_size(), before + 3);
+    }
+
+    #[test]
+    fn test_storage_size_permit_counts_new_entries_once_per_owner_spender() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let before = client.get_storage_size();
+
+        let exp = env.ledger().sequence() + 100;
+        client.permit(&owner, &spender, &500, &exp, &0);
+        // First permit call creates PermitNonce(owner) and
+        // AllowanceSpenders(owner) (Allowance itself is temporary storage
+        // and isn't counted).
+        assert_eq!(client.get_storage_size(), before + 2);
+
+        client.permit(&owner, &spender, &200, &exp, &1);
+        // Second call to the same owner/spender only updates existing
+        // entries.
+        assert_eq!(client.get_storage_size(), before + 2);
     }
 }

@@ -1,3 +1,4 @@
+use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contracttype, Address, Symbol, Vec};
 
 /// Represents a course with its modules and total module count.
@@ -25,6 +26,11 @@ pub struct Course {
     ///
     /// Empty means the course has no prerequisites and enrolls freely.
     pub prerequisites: Vec<Symbol>,
+    /// Version of the course content (#245).
+    ///
+    /// Incremented when off-chain content changes; learners track which
+    /// version they completed.
+    pub version: u32,
 }
 
 /// Represents a quiz submission.
@@ -61,6 +67,12 @@ pub struct ProgressInfo {
     pub overall_progress: u32,
     /// Whether the learner qualifies for a credential.
     pub eligible_for_credential: bool,
+    /// The course version when the learner became eligible for a credential (#245).
+    ///
+    /// `None` until eligibility is reached, then set to the course's version
+    /// at that moment so later version bumps do not erase the learner's
+    /// record.
+    pub completed_version: Option<u32>,
 }
 
 /// Complete progress snapshot for a learner in a course, aggregated from
@@ -87,6 +99,8 @@ pub struct ProgressExport {
     pub overall_progress: u32,
     /// Whether the learner qualifies for a credential.
     pub eligible_for_credential: bool,
+    /// The course version when the learner became eligible (#245).
+    pub completed_version: Option<u32>,
 }
 
 /// Aggregate statistics for a learner across every course they enrolled in (#232).
@@ -111,6 +125,21 @@ pub struct LearnerStats {
     pub total_rewards_earned: i128,
 }
 
+/// Contract metadata (#107) plus the on-chain upgrade counter (#219),
+/// returned together from `contract_metadata()` so callers get a single,
+/// complete identity snapshot for the deployed contract.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VersionedContractMetadata {
+    /// The contract's crate name and semantic version (#107).
+    pub metadata: ContractMetadata,
+    /// Number of times this contract has been upgraded in place (#219).
+    /// Starts at `0` for a freshly initialized contract and is bumped by
+    /// whatever upgrade mechanism the contract adopts; progress-tracker has
+    /// none yet, so this only ever reads back the initialized value today.
+    pub version: u32,
+}
+
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,5 +155,10 @@ pub enum ProgressTrackerDataKey {
     Paused,
     /// Every course a learner has enrolled in, in enrollment order (#232).
     LearnerCourses(Address),
+    /// On-chain upgrade counter, set to `0` on `initialize()` and bumped by
+    /// whatever upgrade mechanism the contract adopts (#219).
+    Version,
+    /// The address a learner has delegated progress-tracking to, if any
+    /// (#222). Absent when the learner has no active delegation.
+    DelegatedTo(Address),
 }
-

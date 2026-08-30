@@ -330,4 +330,49 @@ mod credential_unit_tests {
         let info = client.verify_credential(&cred_id);
         assert_eq!(info.metadata_uri, valid_uri);
     }
+
+    #[test]
+    fn test_renew_credential_extends_expiry() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
+        let metadata_uri = Symbol::new(&env, "ipfs_Qm123ValidURI");
+        let cred_id = client.mint_credential(&learner, &course_id, &90, &metadata_uri);
+
+        let before = client.verify_credential(&cred_id);
+        let new_expiry = before.expiry + 10_000;
+
+        client.renew_credential(&cred_id, &new_expiry);
+
+        let after = client.verify_credential(&cred_id);
+        assert_eq!(after.expiry, new_expiry);
+        assert!(after.expiry > before.expiry);
+    }
+
+    #[test]
+    fn test_revoke_credential_with_reason_is_stored_and_queryable() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
+        let metadata_uri = Symbol::new(&env, "ipfs_Qm123ValidURI");
+        let cred_id = client.mint_credential(&learner, &course_id, &90, &metadata_uri);
+
+        let reason = Symbol::new(&env, "fraud_detected");
+        client.revoke_credential_with_reason(&cred_id, &reason);
+
+        let stored_reason = client.get_revocation_reason(&cred_id);
+        assert_eq!(stored_reason, Some(reason));
+    }
 }
