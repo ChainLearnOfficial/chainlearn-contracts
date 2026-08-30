@@ -981,5 +981,251 @@ mod token_unit_tests {
         // Attempting to claim again after schedule is exhausted must panic
         client.claim_vested(&beneficiary);
     }
+
+    // ── Issue #241: admin transfer delay ─────────────────────────────────────
+
+    #[test]
+    fn test_transfer_admin_does_not_change_admin_immediately() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+
+        assert_eq!(client.admin(), admin, "admin must not change until accepted");
+        let pending = client.pending_admin().expect("pending transfer expected");
+        assert_eq!(pending.new_admin, new_admin);
+    }
+
+    #[test]
+    fn test_accept_admin_before_delay_elapses_fails() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+
+        // No time has passed at all yet.
+        let result = client.try_accept_admin();
+        assert!(result.is_err(), "accept before delay elapses must fail");
+    }
+
+    #[test]
+    fn test_accept_admin_after_delay_elapses_succeeds() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+        let delay = client.admin_transfer_delay();
+
+        env.ledger().with_mut(|l| {
+            l.timestamp += delay;
+        });
+
+        client.accept_admin();
+
+        assert_eq!(client.admin(), new_admin);
+        assert_eq!(
+            client.pending_admin(),
+            None,
+            "pending transfer must be cleared after acceptance"
+        );
+        assert_ne!(client.admin(), admin);
+    }
+
+    #[test]
+    fn test_accept_admin_requires_new_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        let delay = client.admin_transfer_delay();
+        env.ledger().with_mut(|l| {
+            l.timestamp += delay;
+        });
+
+        // Only new_admin's auth should satisfy accept_admin's require_auth;
+        // asserting the exact auth tree catches a caller-address check being
+        // silently dropped or swapped for a different address.
+        client.accept_admin();
+        assert_eq!(
+            env.auths()[0].0, new_admin,
+            "accept_admin must require new_admin's auth, not the caller's"
+        );
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_aborts_pending_transfer() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+        assert!(client.pending_admin().is_some());
+
+        client.cancel_admin_transfer();
+
+        assert_eq!(client.pending_admin(), None);
+        assert_eq!(client.admin(), admin);
+
+        // The delay elapsing afterward must not resurrect the cancelled transfer.
+        let delay = client.admin_transfer_delay();
+        env.ledger().with_mut(|l| {
+            l.timestamp += delay;
+        });
+        let result = client.try_accept_admin();
+        assert!(result.is_err(), "cancelled transfer must not be acceptable");
+        assert_eq!(client.admin(), admin);
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_requires_admin_auth() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        client.cancel_admin_transfer();
+        assert_eq!(
+            env.auths()[0].0, admin,
+            "cancel_admin_transfer must require the current admin's auth"
+        );
+    }
+
+    #[test]
+    fn test_admin_transfer_delay_is_configurable() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let default_delay = client.admin_transfer_delay();
+        let custom_delay = default_delay * 2;
+        client.set_admin_transfer_delay(&custom_delay);
+
+        assert_eq!(client.admin_transfer_delay(), custom_delay);
+
+        // A transfer initiated after the change is gated by the new delay.
+        let new_admin = Address::generate(&env);
+        client.transfer_admin(&new_admin);
+
+        env.ledger().with_mut(|l| {
+            l.timestamp += default_delay;
+        });
+        // Old (shorter) delay must not be enough anymore.
+        assert!(client.try_accept_admin().is_err());
+
+        env.ledger().with_mut(|l| {
+            l.timestamp += custom_delay - default_delay;
+        });
+        client.accept_admin();
+        assert_eq!(client.admin(), new_admin);
+    }
+
+    #[test]
+    fn test_transfer_admin_emits_initiated_event() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+
+        let all = env.events().all();
+        let (_, topics, _) = all.last().expect("no events emitted");
+        let event_name: Symbol = topics.get(0).unwrap().into_val(&env);
+        let new_admin_topic: Address = topics.get(1).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "admin_transfer_initiated"));
+        assert_eq!(new_admin_topic, new_admin);
+    }
+
+    #[test]
+    fn test_accept_admin_emits_accepted_event() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+        let delay = client.admin_transfer_delay();
+        env.ledger().with_mut(|l| {
+            l.timestamp += delay;
+        });
+        client.accept_admin();
+
+        let all = env.events().all();
+        let (_, topics, _) = all.last().expect("no events emitted");
+        let event_name: Symbol = topics.get(0).unwrap().into_val(&env);
+        let new_admin_topic: Address = topics.get(1).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "admin_transfer_accepted"));
+        assert_eq!(new_admin_topic, new_admin);
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_emits_cancelled_event() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&new_admin);
+        client.cancel_admin_transfer();
+
+        let all = env.events().all();
+        let (_, topics, _) = all.last().expect("no events emitted");
+        let event_name: Symbol = topics.get(0).unwrap().into_val(&env);
+        let new_admin_topic: Address = topics.get(1).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "admin_transfer_cancelled"));
+        assert_eq!(new_admin_topic, new_admin);
+    }
+
+    #[test]
+    fn test_re_initiating_transfer_overwrites_previous_pending_admin() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let first_candidate = Address::generate(&env);
+        let second_candidate = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.transfer_admin(&first_candidate);
+        client.transfer_admin(&second_candidate);
+
+        let pending = client.pending_admin().expect("pending transfer expected");
+        assert_eq!(
+            pending.new_admin, second_candidate,
+            "second transfer_admin call must overwrite the first candidate"
+        );
+
+        let delay = client.admin_transfer_delay();
+        env.ledger().with_mut(|l| {
+            l.timestamp += delay;
+        });
+
+        client.accept_admin();
+        assert_eq!(
+            client.admin(),
+            second_candidate,
+            "only the surviving (second) candidate can complete the transfer"
+        );
+        assert_ne!(client.admin(), first_candidate);
+    }
 }
 

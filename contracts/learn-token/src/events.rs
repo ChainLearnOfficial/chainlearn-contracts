@@ -34,8 +34,13 @@ pub fn reward_claimed(
     reward_amount: i128,
     course_id: &Symbol,
 ) {
-    let topics = (Symbol::new(env, "reward"), learner.clone(), course_id.clone());
-    env.events().publish(topics, (quiz_id, score, reward_amount));
+    let topics = (
+        Symbol::new(env, "reward"),
+        learner.clone(),
+        course_id.clone(),
+    );
+    env.events()
+        .publish(topics, (quiz_id, score, reward_amount));
 }
 
 /// Emitted when tokens are transferred directly.
@@ -241,10 +246,8 @@ pub fn vesting_created(
     duration_seconds: u64,
 ) {
     let topics = (Symbol::new(env, "vesting_created"), beneficiary.clone());
-    env.events().publish(
-        topics,
-        (total_amount, cliff_timestamp, duration_seconds),
-    );
+    env.events()
+        .publish(topics, (total_amount, cliff_timestamp, duration_seconds));
 }
 
 /// Emitted when vested tokens are claimed (#225).
@@ -258,7 +261,8 @@ pub fn vesting_claimed(
     total_claimed: i128,
 ) {
     let topics = (Symbol::new(env, "vesting_claimed"), beneficiary.clone());
-    env.events().publish(topics, (claimed_amount, total_claimed));
+    env.events()
+        .publish(topics, (claimed_amount, total_claimed));
 }
 
 /// Emitted when a governance proposal is created (#226).
@@ -267,36 +271,28 @@ pub fn vesting_claimed(
 /// Data: (proposal_id, start_time, end_time)
 pub fn proposal_created(env: &Env, proposal_id: u64, start_time: u64, end_time: u64) {
     let topics = (Symbol::new(env, "proposal_created"),);
-    env.events().publish(topics, (proposal_id, start_time, end_time));
+    env.events()
+        .publish(topics, (proposal_id, start_time, end_time));
 }
 
 /// Emitted when a vote is cast on a proposal (#226).
 ///
 /// Topics: ["vote_cast", voter]
 /// Data: (proposal_id, choice, voting_power)
-pub fn vote_cast(
-    env: &Env,
-    proposal_id: u64,
-    voter: &Address,
-    choice: u32,
-    voting_power: i128,
-) {
+pub fn vote_cast(env: &Env, proposal_id: u64, voter: &Address, choice: u32, voting_power: i128) {
     let topics = (Symbol::new(env, "vote_cast"), voter.clone());
-    env.events().publish(topics, (proposal_id, choice, voting_power));
+    env.events()
+        .publish(topics, (proposal_id, choice, voting_power));
 }
 
 /// Emitted when a governance proposal is executed (#226).
 ///
 /// Topics: ["proposal_executed"]
 /// Data: (proposal_id, winning_choice, winning_votes)
-pub fn proposal_executed(
-    env: &Env,
-    proposal_id: u64,
-    winning_choice: u32,
-    winning_votes: i128,
-) {
+pub fn proposal_executed(env: &Env, proposal_id: u64, winning_choice: u32, winning_votes: i128) {
     let topics = (Symbol::new(env, "proposal_executed"),);
-    env.events().publish(topics, (proposal_id, winning_choice, winning_votes));
+    env.events()
+        .publish(topics, (proposal_id, winning_choice, winning_votes));
 }
 
 /// Emitted when the maximum supply cap is updated.
@@ -305,5 +301,64 @@ pub fn proposal_executed(
 /// Data: (old_max_supply, new_max_supply)
 pub fn max_supply_updated(env: &Env, old_max_supply: i128, new_max_supply: i128) {
     let topics = (Symbol::new(env, "max_supply_updated"),);
-    env.events().publish(topics, (old_max_supply, new_max_supply));
+    env.events()
+        .publish(topics, (old_max_supply, new_max_supply));
+}
+
+/// Emitted when an admin transfer is initiated (#241).
+///
+/// Topics: ["admin_transfer_initiated", new_admin] — indexed by the
+/// candidate address so "is address X a pending admin anywhere" is a topic
+/// filter instead of a scan.
+/// Data: (current_admin, initiated_at, accept_after)
+pub fn admin_transfer_initiated(
+    env: &Env,
+    current_admin: &Address,
+    new_admin: &Address,
+    initiated_at: u64,
+    accept_after: u64,
+) {
+    let topics = (
+        Symbol::new(env, "admin_transfer_initiated"),
+        new_admin.clone(),
+    );
+    env.events()
+        .publish(topics, (current_admin.clone(), initiated_at, accept_after));
+}
+
+/// Emitted when a pending admin transfer is accepted and takes effect (#241).
+///
+/// Topics: ["admin_transfer_accepted", new_admin]
+/// Data: (previous_admin,)
+pub fn admin_transfer_accepted(env: &Env, previous_admin: &Address, new_admin: &Address) {
+    let topics = (
+        Symbol::new(env, "admin_transfer_accepted"),
+        new_admin.clone(),
+    );
+    env.events().publish(topics, (previous_admin.clone(),));
+}
+
+/// Emitted when a pending admin transfer is cancelled before acceptance (#241).
+///
+/// Topics: ["admin_transfer_cancelled", new_admin] — same topic slot as the
+/// other two admin-transfer events, so a client can correlate the lifecycle
+/// of one candidate transfer with a single topic filter.
+/// Data: (current_admin,)
+pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, new_admin: &Address) {
+    let topics = (
+        Symbol::new(env, "admin_transfer_cancelled"),
+        new_admin.clone(),
+    );
+    env.events().publish(topics, (current_admin.clone(),));
+}
+
+/// Emitted when the configurable admin-transfer delay is updated (#241).
+///
+/// Topics: ["admin_transfer_delay_updated"] — a rare, admin-only,
+/// contract-wide config event; there is no per-address query pattern to index.
+/// Data: (old_delay_seconds, new_delay_seconds)
+pub fn admin_transfer_delay_updated(env: &Env, old_delay_seconds: u64, new_delay_seconds: u64) {
+    let topics = (Symbol::new(env, "admin_transfer_delay_updated"),);
+    env.events()
+        .publish(topics, (old_delay_seconds, new_delay_seconds));
 }
