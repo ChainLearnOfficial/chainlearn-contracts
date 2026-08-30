@@ -375,4 +375,85 @@ mod credential_unit_tests {
         let stored_reason = client.get_revocation_reason(&cred_id);
         assert_eq!(stored_reason, Some(reason));
     }
+
+    // ── Issue #242: transfer is always rejected as Soulbound ────────────────
+
+    #[test]
+    fn test_transfer_always_returns_soulbound_error() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let other = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+
+        let result = client.try_transfer(&learner, &other, &cred_id);
+        assert!(result.is_err(), "transfer must always be rejected");
+        let contract_err = result
+            .err()
+            .expect("expected an error")
+            .expect("expected a typed contract error, not a host trap");
+        assert_eq!(contract_err, credential_nft::ContractError::Soulbound);
+    }
+
+    #[test]
+    fn test_transfer_rejects_even_without_auth_or_existing_credential() {
+        // The rejection is unconditional: it doesn't depend on auth, on
+        // `from`/`to` being real accounts, or on `credential_id` existing.
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        // Intentionally no `env.mock_all_auths()` and no minted credential.
+
+        let result = client.try_transfer(&from, &to, &999);
+        let contract_err = result
+            .err()
+            .expect("expected an error")
+            .expect("expected a typed contract error, not a host trap");
+        assert_eq!(contract_err, credential_nft::ContractError::Soulbound);
+    }
+
+    #[test]
+    fn test_transfer_does_not_mutate_credential_state() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        let other = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+
+        let before = client.verify_credential(&cred_id);
+        let learner_credentials_before = client.get_credentials_for(&learner, &0, &50);
+        let other_credentials_before = client.get_credentials_for(&other, &0, &50);
+
+        let _ = client.try_transfer(&learner, &other, &cred_id);
+
+        let after = client.verify_credential(&cred_id);
+        assert_eq!(before, after, "credential record must be unchanged");
+        assert_eq!(
+            client.get_credentials_for(&learner, &0, &50),
+            learner_credentials_before,
+            "original holder's credential list must be unchanged"
+        );
+        assert_eq!(
+            client.get_credentials_for(&other, &0, &50),
+            other_credentials_before,
+            "intended recipient must not gain the credential"
+        );
+    }
 }

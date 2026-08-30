@@ -24,6 +24,10 @@ pub trait ProgressTrackerInterface {
 #[repr(u32)]
 pub enum ContractError {
     AlreadyInitialized = 0,
+    /// Returned by `transfer` for every call: credentials are soulbound and
+    /// permanently bound to the learner who earned them, so no transfer is
+    /// ever permitted, regardless of caller or state (#242).
+    Soulbound = 1,
 }
 
 /// NFT credential contract for ChainLearn course certificates.
@@ -388,7 +392,10 @@ impl CredentialNft {
     // ── Emergency Pause (#189) ────────────────────────────────────────────
 
     fn is_paused(env: &Env) -> bool {
-        env.storage().persistent().get(&CredentialDataKey::Paused).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::Paused)
+            .unwrap_or(false)
     }
 
     fn require_not_paused(env: &Env) {
@@ -399,17 +406,29 @@ impl CredentialNft {
 
     /// Pause all state-changing operations. Admin only.
     pub fn emergency_pause(env: Env) {
-        let admin: Address = env.storage().persistent().get(&CredentialDataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&CredentialDataKey::Paused, &true);
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::Paused, &true);
         // Event would ideally be emitted here, but we will omit it for simplicity if it wasn't added to events.rs
     }
 
     /// Unpause state-changing operations. Admin only.
     pub fn unpause(env: Env) {
-        let admin: Address = env.storage().persistent().get(&CredentialDataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&CredentialDataKey::Paused, &false);
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::Paused, &false);
     }
 
     /// Returns the admin address.
@@ -456,19 +475,32 @@ impl CredentialNft {
     /// Reject transfer of a credential.
     ///
     /// Credentials are soulbound (non-transferable) and permanently bound to the
-    /// learner who earned them. This function enforces that policy by rejecting
-    /// all transfer attempts.
+    /// learner who earned them: a credential attests that a specific learner,
+    /// and no one else, met a course's completion criteria, so allowing it to
+    /// change hands would let it be sold, gifted, or otherwise separated from
+    /// the achievement it certifies. This function enforces that policy by
+    /// explicitly rejecting every transfer attempt with a typed error rather
+    /// than panicking, so callers get a clear, documented reason instead of a
+    /// raw host trap, and can handle the rejection programmatically.
+    ///
+    /// No storage is read or written: the rejection is unconditional and does
+    /// not depend on `from`, `to`, `credential_id`, or any on-chain state, so
+    /// there is nothing to authorize and no state to leave unchanged.
     ///
     /// # Arguments
-    /// * `from` - The current holder (must authorize)
-    /// * `to` - The intended recipient (not used, transfer rejected)
-    /// * `credential_id` - The credential being transferred (not used, transfer rejected)
+    /// * `from` - The current holder (unused; transfer is always rejected)
+    /// * `to` - The intended recipient (unused; transfer is always rejected)
+    /// * `credential_id` - The credential being transferred (unused; transfer is always rejected)
     ///
-    /// # Panics
-    /// Always panics with a message explaining credentials are non-transferable.
-    pub fn transfer(_env: Env, from: Address, _to: Address, _credential_id: u64) {
-        from.require_auth();
-        panic!("credentials are soulbound and non-transferable");
+    /// # Returns
+    /// Always `Err(ContractError::Soulbound)`. Never `Ok`.
+    pub fn transfer(
+        _env: Env,
+        _from: Address,
+        _to: Address,
+        _credential_id: u64,
+    ) -> Result<(), ContractError> {
+        Err(ContractError::Soulbound)
     }
 
     /// Generate a course completion certificate URI for a learner and course (#223).
@@ -512,14 +544,22 @@ impl CredentialNft {
         // If credential already minted, update metadata_uri in CredentialInfo
         if let Some(cred_id) = env.storage().persistent().get::<_, u64>(&dup_key) {
             let cred_key = CredentialDataKey::Credential(cred_id);
-            if let Some(mut info) = env.storage().persistent().get::<_, CredentialInfo>(&cred_key) {
+            if let Some(mut info) = env
+                .storage()
+                .persistent()
+                .get::<_, CredentialInfo>(&cred_key)
+            {
                 info.metadata_uri = cert_uri.clone();
                 env.storage().persistent().set(&cred_key, &info);
             }
         }
 
         env.events().publish(
-            (Symbol::new(&env, "certificate_generated"), learner.clone(), course_id.clone()),
+            (
+                Symbol::new(&env, "certificate_generated"),
+                learner.clone(),
+                course_id.clone(),
+            ),
             (cert_uri.clone(),),
         );
 
@@ -1296,7 +1336,10 @@ mod tests {
         assert_eq!(client.get_certificate_uri(&learner, &course), None);
 
         let cert_uri = client.generate_certificate(&learner, &course);
-        assert_eq!(client.get_certificate_uri(&learner, &course), Some(cert_uri.clone()));
+        assert_eq!(
+            client.get_certificate_uri(&learner, &course),
+            Some(cert_uri.clone())
+        );
 
         // Mint credential and check that metadata_uri gets updated with generated certificate URI
         let cred_id = client.mint_credential(&learner, &course, &85, &cert_uri);
