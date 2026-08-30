@@ -166,3 +166,89 @@ fn test_multi_admin_management_and_multisig_ops() {
     assert_eq!(admins.len(), 2);
     assert!(!token_client.has_role(&minter_admin, &AdminRole::Minter));
 }
+
+#[test]
+fn test_multi_admin_role_enforcement_revocation_and_events() {
+    let setup = setup_chainlearn_env();
+    let env = &setup.env;
+    let primary_admin = &setup.admin;
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+
+    let admin_minter = Address::generate(env);
+    let admin_pauser = Address::generate(env);
+    let recipient = Address::generate(env);
+
+    // 1. Add multiple admins with distinct roles
+    token_client.add_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: admin_minter.clone(),
+            role: AdminRole::Minter,
+        },
+    );
+
+    token_client.add_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: admin_pauser.clone(),
+            role: AdminRole::Pauser,
+        },
+    );
+
+    let admins = token_client.get_admins();
+    assert_eq!(admins.len(), 3);
+
+    // Verify role granted events were emitted
+    let events = env.events().all();
+    assert!(events.len() >= 2);
+
+    // 2. Enforce roles
+    assert!(token_client.has_role(&admin_minter, &AdminRole::Minter));
+    assert!(!token_client.has_role(&admin_minter, &AdminRole::Pauser));
+    assert!(token_client.has_role(&admin_pauser, &AdminRole::Pauser));
+    assert!(!token_client.has_role(&admin_pauser, &AdminRole::Minter));
+
+    // admin_minter can mint
+    token_client.mint(&admin_minter, &recipient, &500);
+    assert_eq!(token_client.balance(&recipient), 500);
+
+    // admin_minter cannot pause
+    assert!(token_client.try_pause(&admin_minter).is_err());
+
+    // admin_pauser can pause
+    token_client.pause(&admin_pauser);
+    assert!(token_client.is_paused());
+    token_client.unpause(&admin_pauser);
+
+    // admin_pauser cannot mint
+    assert!(token_client.try_mint(&admin_pauser, &recipient, &500).is_err());
+
+    // 3. Revocation
+    token_client.remove_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: admin_minter.clone(),
+            role: AdminRole::Minter,
+        },
+    );
+
+    token_client.remove_admin(
+        primary_admin,
+        &learn_token::AdminInfo {
+            address: admin_pauser.clone(),
+            role: AdminRole::Pauser,
+        },
+    );
+
+    // Verify roles are revoked and actions fail
+    assert!(!token_client.has_role(&admin_minter, &AdminRole::Minter));
+    assert!(!token_client.has_role(&admin_pauser, &AdminRole::Pauser));
+    assert!(token_client.try_mint(&admin_minter, &recipient, &100).is_err());
+    assert!(token_client.try_pause(&admin_pauser).is_err());
+
+    let final_admins = token_client.get_admins();
+    assert_eq!(final_admins.len(), 1);
+}
+

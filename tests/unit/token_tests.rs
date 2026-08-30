@@ -877,4 +877,109 @@ mod token_unit_tests {
         let executed = client.get_proposal(&proposal_id).unwrap();
         assert!(executed.executed);
     }
+
+    #[test]
+    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        let total_amount: i128 = 10_000;
+        let cliff_timestamp: u64 = 100;
+        let duration_seconds: u64 = 1_000;
+
+        env.ledger().with_mut(|l| {
+            l.timestamp = 0;
+        });
+
+        client.create_vesting(&beneficiary, &total_amount, &cliff_timestamp, &duration_seconds);
+
+        let schedule = client.get_vesting_schedule(&beneficiary).expect("schedule should exist");
+        assert_eq!(schedule.total_amount, 10_000);
+        assert_eq!(schedule.cliff_timestamp, 100);
+        assert_eq!(schedule.duration_seconds, 1_000);
+        assert!(!schedule.exhausted);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 0);
+
+        // Linear vesting halfway through cliff + 500s (50% vested)
+        env.ledger().with_mut(|l| {
+            l.timestamp = cliff_timestamp + 500;
+        });
+
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.balance(&beneficiary), 5_000);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 5_000);
+        assert_eq!(client.total_supply(), 5_000);
+
+        let mid_schedule = client.get_vesting_schedule(&beneficiary).unwrap();
+        assert!(!mid_schedule.exhausted);
+
+        // Complete linear vesting cliff + 1000s (100% vested)
+        env.ledger().with_mut(|l| {
+            l.timestamp = cliff_timestamp + 1_000;
+        });
+
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.balance(&beneficiary), 10_000);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 10_000);
+        assert_eq!(client.total_supply(), 10_000);
+
+        let final_schedule = client.get_vesting_schedule(&beneficiary).unwrap();
+        assert!(final_schedule.exhausted);
+    }
+
+    #[test]
+    #[should_panic(expected = "cliff not reached")]
+    fn test_vesting_cliff_enforced() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.ledger().with_mut(|l| {
+            l.timestamp = 0;
+        });
+
+        client.create_vesting(&beneficiary, &10_000, &100, &1_000);
+
+        // Advance to timestamp 50 (cliff is 100)
+        env.ledger().with_mut(|l| {
+            l.timestamp = 50;
+        });
+
+        client.claim_vested(&beneficiary);
+    }
+
+    #[test]
+    #[should_panic(expected = "vesting schedule fully claimed")]
+    fn test_vesting_claiming_after_exhausted_panics() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.ledger().with_mut(|l| {
+            l.timestamp = 0;
+        });
+
+        client.create_vesting(&beneficiary, &10_000, &100, &1_000);
+
+        env.ledger().with_mut(|l| {
+            l.timestamp = 1100;
+        });
+
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.balance(&beneficiary), 10_000);
+
+        // Attempting to claim again after schedule is exhausted must panic
+        client.claim_vested(&beneficiary);
+    }
 }
+
