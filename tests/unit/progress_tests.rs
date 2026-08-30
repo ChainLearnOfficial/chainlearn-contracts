@@ -1117,6 +1117,182 @@ mod progress_unit_tests {
         client.export_progress(&learner, &course_id);
     }
 
+    // ── Issue #220: batch module completion ──────────────────────────────
+
+    #[test]
+    fn test_batch_complete_module_completes_every_module_in_order() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "mod_2"));
+        batch.push_back(Symbol::new(&env, "mod_3"));
+
+        client.batch_complete_module(&learner, &course_id, &batch);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 3);
+    }
+
+    #[test]
+    fn test_batch_complete_module_matches_sequential_single_calls() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        let batch_learner = Address::generate(&env);
+        let single_learner = Address::generate(&env);
+        client.enroll(&batch_learner, &course_id);
+        client.enroll(&single_learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "mod_2"));
+        batch.push_back(Symbol::new(&env, "mod_3"));
+        client.batch_complete_module(&batch_learner, &course_id, &batch);
+
+        client.complete_module(&single_learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&single_learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&single_learner, &course_id, &Symbol::new(&env, "mod_3"));
+
+        let batch_progress = client.get_progress(&batch_learner, &course_id);
+        let single_progress = client.get_progress(&single_learner, &course_id);
+        assert_eq!(
+            batch_progress.modules_completed_bitmap,
+            single_progress.modules_completed_bitmap
+        );
+        assert_eq!(
+            batch_progress.overall_progress,
+            single_progress.overall_progress
+        );
+        assert_eq!(
+            batch_progress.eligible_for_credential,
+            single_progress.eligible_for_credential
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "module not found in course")]
+    fn test_batch_complete_module_aborts_whole_batch_on_invalid_module() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "not_a_real_module"));
+        batch.push_back(Symbol::new(&env, "mod_2"));
+
+        // The whole call panics, so this returned Vec should never observe
+        // mod_1 or mod_2 as completed. We can't inspect that from inside a
+        // should_panic test directly, but a subsequent test verifies the
+        // revert by checking storage state after the same panic.
+        client.batch_complete_module(&learner, &course_id, &batch);
+    }
+
+    #[test]
+    fn test_batch_complete_module_reverts_all_on_partial_failure() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "not_a_real_module"));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.batch_complete_module(&learner, &course_id, &batch);
+        }));
+        assert!(result.is_err());
+
+        // mod_1 must not have been left completed by the aborted batch.
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_batch_complete_module_requires_enrollment() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        client.batch_complete_module(&learner, &course_id, &batch);
+    }
+
+    #[test]
+    #[should_panic(expected = "module already completed")]
+    fn test_batch_complete_module_rejects_duplicate_within_batch() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "mod_1"));
+
+        client.batch_complete_module(&learner, &course_id, &batch);
+    }
+
+    #[test]
+    fn test_batch_complete_module_emits_module_completed_events() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "mod_2"));
+
+        client.batch_complete_module(&learner, &course_id, &batch);
+
+        let events = env.events().all();
+        let module_completed_count = events
+            .iter()
+            .filter(|(_, topics, _)| {
+                let event_name: Symbol = topics.get(0).unwrap().into_val(&env);
+                event_name == Symbol::new(&env, "module_completed")
+            })
+            .count();
+        assert_eq!(module_completed_count, 2);
+    }
+
     // ── Issue #219: on-chain upgrade counter ─────────────────────────────
 
     #[test]

@@ -325,6 +325,118 @@ impl ProgressTracker {
             ))
             .expect("not enrolled");
 
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        Self::complete_module_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            module_id,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Complete several modules for a learner in one call (#220).
+    ///
+    /// Reuses the exact same per-module validation and completion logic as
+    /// [`Self::complete_module`] via [`Self::complete_module_in_place`], applied
+    /// once per entry in `module_ids`, in order.
+    ///
+    /// Atomic: each module is validated in turn (must exist in the course,
+    /// must not already be completed, and its predecessor in course order
+    /// must already be completed), and any failure panics immediately. Since
+    /// Soroban transactions revert all storage writes on panic, a single
+    /// invalid module id anywhere in the batch aborts the whole call --
+    /// nothing from the batch is partially applied. This matches the
+    /// ordered, sequential nature of module completion (contrast with
+    /// [`Self::batch_submit_quiz_score`], where quizzes are independent
+    /// facts and a bad entry is skipped rather than aborting the batch).
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `course_id` - The course the modules belong to
+    /// * `module_ids` - The modules to mark complete, in the order to apply them
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let mut modules = Vec::new(&env);
+    /// modules.push_back(Symbol::new(&env, "mod_1"));
+    /// modules.push_back(Symbol::new(&env, "mod_2"));
+    /// client.batch_complete_module(&learner, &course_id, &modules);
+    /// ```
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    /// * If any module id does not exist in the course
+    /// * If any module is already completed
+    /// * If any module's predecessor in course order has not been completed
+    pub fn batch_complete_module(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        module_ids: Vec<Symbol>,
+    ) {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        for module_id in module_ids.iter() {
+            Self::complete_module_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                module_id,
+            );
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Shared core of [`Self::complete_module`] and [`Self::batch_complete_module`]:
+    /// validates and applies a single module completion against an
+    /// already-loaded `course`/`progress` pair, mutating `progress` in place
+    /// and publishing the same events `complete_module` always has. Callers
+    /// are responsible for the single storage write of `progress` once all
+    /// modules in a call have been applied.
+    fn complete_module_in_place(
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+        course: &Course,
+        progress: &mut ProgressInfo,
+        module_id: Symbol,
+    ) {
         // Check not already completed
         let completed_key = ProgressTrackerDataKey::ModuleCompleted(
             learner.clone(),
@@ -336,12 +448,6 @@ impl ProgressTracker {
         }
 
         // Verify module exists in course and get its index
-        let course: Course = env
-            .storage()
-            .persistent()
-            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
-            .expect("course not found");
-
         let mut module_index: Option<u32> = None;
         for (i, m) in course.module_ids.iter().enumerate() {
             if m == module_id {
@@ -373,25 +479,20 @@ impl ProgressTracker {
 
         let was_eligible = progress.eligible_for_credential;
 
-        progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
-
-        env.storage().persistent().set(
-            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &progress,
-        );
+        progress.overall_progress = rewards::calculate_progress(course, progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(course, progress);
 
         env.events().publish(
-            (Symbol::new(&env, "module_completed"),),
-            (&learner, &course_id, &module_id, progress.overall_progress),
+            (Symbol::new(env, "module_completed"),),
+            (learner, course_id, &module_id, progress.overall_progress),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
             env.events().publish(
-                (Symbol::new(&env, "credential_eligible"),),
-                (&learner, &course_id),
+                (Symbol::new(env, "credential_eligible"),),
+                (learner, course_id),
             );
         }
     }
