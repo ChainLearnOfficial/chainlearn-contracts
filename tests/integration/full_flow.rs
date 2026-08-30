@@ -13,7 +13,7 @@ fn test_full_learner_journey() {
     let env_context = setup_chainlearn_env();
     let env = env_context.env;
     let learner = env_context.learner;
-    let admin = env_context.admin;
+    let _admin = env_context.admin;
     
     let token_client = LearnTokenClient::new(&env, &env_context.token_contract_id);
     let credential_client = CredentialNftClient::new(&env, &env_context.credential_contract_id);

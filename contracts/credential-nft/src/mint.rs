@@ -1,8 +1,36 @@
 use chainlearn_shared::MIN_CREDENTIAL_SCORE;
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_env_common::SymbolStr;
+use soroban_sdk::{Address, Env, Symbol, TryFromVal};
 
 use crate::metadata::{CredentialDataKey, CredentialInfo};
 use crate::ProgressTrackerClient;
+
+/// Validate that `metadata_uri` is non-empty, meets the minimum length (>= 8 characters),
+/// and starts with a recognized URI scheme (http, https, ipfs, or cert).
+pub fn validate_metadata_uri(env: &Env, metadata_uri: &Symbol) {
+    let sstr = match SymbolStr::try_from_val(env, &metadata_uri.to_symbol_val()) {
+        Ok(s) => s,
+        Err(_) => panic!("metadata_uri is malformed"),
+    };
+    let uri: &str = sstr.as_ref();
+    if uri.is_empty() {
+        panic!("metadata_uri cannot be empty");
+    }
+    if uri.len() < 8 {
+        panic!("metadata_uri too short: minimum length is 8");
+    }
+    let has_valid_scheme = uri.starts_with("ipfs_")
+        || uri.starts_with("ipfs://")
+        || uri.starts_with("http_")
+        || uri.starts_with("http://")
+        || uri.starts_with("https_")
+        || uri.starts_with("https://")
+        || uri.starts_with("cert_")
+        || uri.starts_with("cert://");
+    if !has_valid_scheme {
+        panic!("metadata_uri is malformed: must start with a valid URI scheme");
+    }
+}
 
 /// Mint a new credential NFT for a learner.
 ///
@@ -22,6 +50,7 @@ use crate::ProgressTrackerClient;
 /// The unique credential ID.
 ///
 /// # Panics
+/// * If `metadata_uri` is empty, too short (< 8 chars), or malformed
 /// * If `course_id` does not correspond to a known course
 /// * If score is below the minimum threshold
 /// * If the learner already has a credential for this course
@@ -35,6 +64,9 @@ pub fn mint_credential(
     score: u32,
     metadata_uri: &Symbol,
 ) -> u64 {
+    // Metadata URI gate: must be non-empty, >= 8 chars, with a valid scheme
+    validate_metadata_uri(env, metadata_uri);
+
     // Score gate: only mint if score >= 50
     if score < MIN_CREDENTIAL_SCORE {
         panic!(
