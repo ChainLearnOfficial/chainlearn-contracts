@@ -1992,4 +1992,35 @@ mod progress_unit_tests {
             soroban_sdk::String::from_str(&env, "progress-tracker")
         );
     }
+
+    // ── Issue #299: course archiving ──────────────────────────────────────
+
+    #[test]
+    fn test_archive_course_rejects_new_enrollments_but_preserves_progress() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+
+        let existing_learner = Address::generate(&env);
+        client.enroll(&existing_learner, &course_id);
+        client.complete_module(&existing_learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        let progress_before = client.get_progress(&existing_learner, &course_id);
+
+        client.archive_course(&course_id);
+
+        let new_learner = Address::generate(&env);
+        let result = client.try_enroll(&new_learner, &course_id);
+        assert!(result.is_err(), "enrollment on an archived course should be rejected");
+
+        let progress_after = client.get_progress(&existing_learner, &course_id);
+        assert_eq!(
+            progress_after.overall_progress,
+            progress_before.overall_progress,
+            "existing progress must be preserved after archiving"
+        );
+    }
 }
