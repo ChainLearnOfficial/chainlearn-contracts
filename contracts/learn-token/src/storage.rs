@@ -1,5 +1,5 @@
 use chainlearn_shared::{ContractMetadata, PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD};
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
@@ -41,7 +41,11 @@ pub enum TokenDataKey {
     LastTransfer(Address),
     /// Role assignments per address (#190).
     Role(RoleKey),
-    /// Emergency pause state (#189).
+    /// Cumulative amount ever minted to an address (#236).
+    TotalMintedTo(Address),
+    /// Append-only list of a learner's reward claims (#237).
+    ClaimHistory(Address),
+    /// Whether the contract is currently paused (#238).
     Paused,
 }
 
@@ -89,6 +93,20 @@ pub struct AllowanceKey {
 pub struct AllowanceData {
     pub amount: i128,
     pub expiration_ledger: u32,
+}
+
+/// A single reward claim, recorded for a learner's history (#237).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimRecord {
+    /// The course the quiz belonged to.
+    pub course_id: Symbol,
+    /// The quiz that was claimed.
+    pub quiz_id: Symbol,
+    /// Reward amount minted for the claim.
+    pub amount: i128,
+    /// Ledger timestamp when the claim was made.
+    pub timestamp: u64,
 }
 
 #[contracttype]
@@ -599,3 +617,60 @@ pub fn get_upgrade_version(env: &Env) -> u32 {
         .get(&TokenDataKey::UpgradeVersion)
         .unwrap_or(0)
 }
+/// Get the cumulative amount ever minted to an address (#236).
+///
+/// Returns 0 for an address that has never been minted to.
+pub fn get_total_minted_to(env: &Env, address: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::TotalMintedTo(address.clone()))
+        .unwrap_or(0)
+}
+
+/// Add `amount` to the cumulative minted total for `address` (#236).
+///
+/// Called on every mint path so the running total stays in step with the
+/// balance changes that produced it.
+pub fn add_total_minted_to(env: &Env, address: &Address, amount: i128) {
+    let data_key = TokenDataKey::TotalMintedTo(address.clone());
+    let current: i128 = env.storage().persistent().get(&data_key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&data_key, &(current + amount));
+    env.storage().persistent().extend_ttl(
+        &data_key,
+        PERSISTENT_TTL_THRESHOLD,
+        PERSISTENT_TTL_EXTEND_TO,
+    );
+}
+
+/// Get a learner's full reward claim history (#237).
+///
+/// Returns an empty vector for a learner who has never claimed.
+pub fn get_claim_history(env: &Env, learner: &Address) -> Vec<ClaimRecord> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::ClaimHistory(learner.clone()))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+/// Append a claim to a learner's history (#237).
+///
+/// History is append-only: entries are never modified or removed, which is
+/// safe because `claim_reward` rejects double-claims before reaching here.
+pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
+    let data_key = TokenDataKey::ClaimHistory(learner.clone());
+    let mut history: Vec<ClaimRecord> = env
+        .storage()
+        .persistent()
+        .get(&data_key)
+        .unwrap_or_else(|| Vec::new(env));
+    history.push_back(record.clone());
+    env.storage().persistent().set(&data_key, &history);
+    env.storage().persistent().extend_ttl(
+        &data_key,
+        PERSISTENT_TTL_THRESHOLD,
+        PERSISTENT_TTL_EXTEND_TO,
+    );
+}
+

@@ -7,6 +7,9 @@ use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 pub use types::{Course, ProgressExport, ProgressInfo, ProgressTrackerDataKey, QuizResult};
 
+/// Sentinel meaning "no content hash set"; enrollment skips verification (#235).
+const EMPTY_CONTENT_HASH: &str = "none";
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -138,6 +141,8 @@ impl ProgressTracker {
             module_ids: module_ids.clone(),
             quiz_ids: quiz_ids.clone(),
             archived: false,
+            // No content hash by default; set later via `set_course_content_hash` (#235).
+            content_hash: Symbol::new(&env, EMPTY_CONTENT_HASH),
         };
 
         env.storage()
@@ -168,6 +173,15 @@ impl ProgressTracker {
     /// ```
     pub fn enroll(env: Env, learner: Address, course_id: Symbol) {
         Self::require_not_paused(&env);
+        Self::enroll_checked(env, learner, course_id, None);
+    }
+
+    pub fn enroll_checked(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        expected_content_hash: Option<Symbol>,
+    ) {
         learner.require_auth();
 
         // Verify course exists
@@ -185,6 +199,15 @@ impl ProgressTracker {
         // Verify course has at least one module (#80)
         if course.total_modules == 0 {
             panic!("course has no modules");
+        }
+
+        // Content hash verification is optional (#235): it only runs when the
+        // course has a hash set and the caller supplied one to check against.
+        if let Some(expected) = expected_content_hash {
+            let unset = Symbol::new(&env, EMPTY_CONTENT_HASH);
+            if course.content_hash != unset && course.content_hash != expected {
+                panic!("course content hash mismatch");
+            }
         }
 
         // Check not already enrolled
@@ -677,6 +700,55 @@ impl ProgressTracker {
         );
     }
 
+    /// Set or update the content hash for a course. Admin only (#235).
+    ///
+    /// The hash lets clients verify that off-chain course content matches what
+    /// the course was published with. Setting it to `none` disables
+    /// verification again.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to update
+    /// * `content_hash` - Hash of the course content, or `none` to unset
+    pub fn set_course_content_hash(env: Env, course_id: Symbol, content_hash: Symbol) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        course.content_hash = content_hash.clone();
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+
+        env.events().publish(
+            (Symbol::new(&env, "content_hash_set"),),
+            (&course_id, &content_hash),
+        );
+    }
+
+    /// Returns the content hash for a course (#235).
+    ///
+    /// Returns the `none` sentinel when no hash has been set.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    pub fn get_course_content_hash(env: Env, course_id: Symbol) -> Symbol {
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id))
+            .expect("course not found");
+        course.content_hash
+    }
+
     /// Check whether a course has been registered via `create_course` (#108).
     ///
     /// A cheap existence check -- unlike `get_course`, it never deserializes
@@ -813,6 +885,151 @@ mod tests {
 
         let course_id = create_test_course(&env, &client);
         assert!(client.course_exists(&course_id));
+    }
+
+    // ── Issue #235: course content hash verification ─────────────────────
+
+    #[test]
+    fn test_course_content_hash_defaults_to_unset() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        assert_eq!(
+            client.get_course_content_hash(&course_id),
+            Symbol::new(&env, EMPTY_CONTENT_HASH)
+        );
+    }
+
+    #[test]
+    fn test_set_and_query_course_content_hash() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let hash = Symbol::new(&env, "abc123");
+
+        client.set_course_content_hash(&course_id, &hash);
+
+        assert_eq!(client.get_course_content_hash(&course_id), hash);
+        assert_eq!(client.get_course(&course_id).content_hash, hash);
+    }
+
+    #[test]
+    fn test_course_content_hash_can_be_updated() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "v1"));
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "v2"));
+
+        assert_eq!(
+            client.get_course_content_hash(&course_id),
+            Symbol::new(&env, "v2")
+        );
+    }
+
+    #[test]
+    fn test_enroll_without_hash_is_unaffected_by_verification() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "abc123"));
+
+        // Plain `enroll` never verifies, so a set hash does not block it.
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        assert_eq!(
+            client.get_progress(&learner, &course_id).overall_progress,
+            0
+        );
+    }
+
+    #[test]
+    fn test_enroll_checked_accepts_matching_hash() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let hash = Symbol::new(&env, "abc123");
+        client.set_course_content_hash(&course_id, &hash);
+
+        let learner = Address::generate(&env);
+        client.enroll_checked(&learner, &course_id, &Some(hash));
+
+        assert_eq!(
+            client.get_progress(&learner, &course_id).overall_progress,
+            0
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "course content hash mismatch")]
+    fn test_enroll_checked_rejects_mismatched_hash() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "abc123"));
+
+        let learner = Address::generate(&env);
+        client.enroll_checked(&learner, &course_id, &Some(Symbol::new(&env, "wrong")));
+    }
+
+    #[test]
+    fn test_enroll_checked_skips_verification_when_hash_unset() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        // Course has no hash set, so verification is skipped even though the
+        // caller supplied one -- verification is optional.
+        let learner = Address::generate(&env);
+        client.enroll_checked(&learner, &course_id, &Some(Symbol::new(&env, "anything")));
+
+        assert_eq!(
+            client.get_progress(&learner, &course_id).overall_progress,
+            0
+        );
+    }
+
+    #[test]
+    fn test_enroll_checked_with_none_skips_verification() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "abc123"));
+
+        let learner = Address::generate(&env);
+        client.enroll_checked(&learner, &course_id, &None);
+
+        assert_eq!(
+            client.get_progress(&learner, &course_id).overall_progress,
+            0
+        );
     }
 
     // ── Issue #34: verified course score ─────────────────────────────────

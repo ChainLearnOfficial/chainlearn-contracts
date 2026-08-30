@@ -6,7 +6,7 @@ mod storage;
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
-    String as SorobanString, Symbol,
+    String as SorobanString, Symbol, Vec,
 };
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
@@ -53,6 +53,15 @@ pub struct ClaimEstimate {
 /// Each quiz completion mints tokens proportional to the learner's score.
 #[contract]
 pub struct LearnToken;
+
+impl LearnToken {
+    /// Panic if the contract is paused (#238).
+    fn require_not_paused(env: &Env) {
+        if storage::is_paused(env) {
+            panic!("contract is paused");
+        }
+    }
+}
 
 #[contractimpl]
 impl LearnToken {
@@ -262,6 +271,18 @@ impl LearnToken {
     }
 
     /// Returns the balance of the given address.
+    /// Returns the cumulative amount ever minted to an address (#236).
+    ///
+    /// Unlike `balance`, this only ever grows: transfers and burns do not
+    /// reduce it, so it reflects total minting rather than current holdings.
+    /// Returns 0 for an address that has never been minted to.
+    ///
+    /// # Arguments
+    /// * `address` - The address to query
+    pub fn total_minted_to(env: Env, address: Address) -> i128 {
+        storage::get_total_minted_to(&env, &address)
+    }
+
     pub fn balance(env: Env, address: Address) -> i128 {
         storage::get_balance(&env, &address)
     }
@@ -273,6 +294,7 @@ impl LearnToken {
     /// * `to` - Destination address
     /// * `amount` - Amount to transfer
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        Self::require_not_paused(&env);
         from.require_auth();
 
         Self::require_not_paused(&env);
@@ -317,6 +339,7 @@ impl LearnToken {
     /// * `to` - Destination address
     /// * `amount` - Amount to transfer
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        Self::require_not_paused(&env);
         spender.require_auth();
 
         Self::require_not_paused(&env);
@@ -418,6 +441,7 @@ impl LearnToken {
     /// * If `amount` is negative
     /// * If `from` holds less than `amount`
     pub fn burn(env: Env, from: Address, amount: i128) {
+        Self::require_not_paused(&env);
         from.require_auth();
 
         Self::require_not_paused(&env);
@@ -456,6 +480,7 @@ impl LearnToken {
     /// * If the spender's allowance is below `amount`
     /// * If `from` holds less than `amount`
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
+        Self::require_not_paused(&env);
         spender.require_auth();
 
         Self::require_not_paused(&env);
@@ -499,14 +524,11 @@ impl LearnToken {
     /// * `to` - Recipient address
     /// * `amount` - Amount to mint
     pub fn mint(env: Env, caller: Address, to: Address, amount: i128) {
-        caller.require_auth();
-
         Self::require_not_paused(&env);
+        caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Minter) {
             panic!("not authorized");
         }
-
-
 
         let zero_address = Address::from_string(&SorobanString::from_str(
             &env,
@@ -531,6 +553,9 @@ impl LearnToken {
 
         storage::set_total_supply(&env, current_supply + amount);
 
+        // Track cumulative minting per address for analytics (#236).
+        storage::add_total_minted_to(&env, &to, amount);
+
         events::mint(&env, &to, amount);
     }
 
@@ -547,6 +572,7 @@ impl LearnToken {
     /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - Unique identifier for the quiz
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         Self::require_not_paused(&env);
@@ -594,8 +620,24 @@ impl LearnToken {
 
         storage::set_total_supply(&env, current_supply + reward_amount);
 
+        // Reward claims mint too, so they count toward the per-address
+        // minted total (#236).
+        storage::add_total_minted_to(&env, &learner, reward_amount);
+
         // Mark reward as claimed to prevent double-claiming
         storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
+
+        // Record the claim so learners can query their history (#237).
+        storage::append_claim_record(
+            &env,
+            &learner,
+            &storage::ClaimRecord {
+                course_id: course_id.clone(),
+                quiz_id: quiz_id.clone(),
+                amount: reward_amount,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
 
         events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
     }
@@ -792,6 +834,60 @@ impl LearnToken {
     }
 
     /// Returns the main admin address.
+    /// Returns a learner's full reward claim history (#237).
+    ///
+    /// Each entry records the course, quiz, amount minted, and the ledger
+    /// timestamp of the claim, in the order the claims were made. Returns an
+    /// empty vector for a learner who has never claimed.
+    ///
+    /// History is immutable: `claim_reward` rejects double-claims, so entries
+    /// are only ever appended, never changed or removed.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner to query
+    pub fn get_claim_history(env: Env, learner: Address) -> Vec<storage::ClaimRecord> {
+        storage::get_claim_history(&env, &learner)
+    }
+
+    // ── Pause Controls (Admin Only) ───────────────────────────────────────
+
+    /// Pause the contract. Admin only (#238).
+    ///
+    /// Emits a `paused` event carrying the acting admin and the ledger
+    /// timestamp, so pause activity can be audited and monitored.
+    pub fn pause(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        if storage::is_paused(&env) {
+            panic!("already paused");
+        }
+
+        storage::set_paused(&env, true);
+        events::paused(&env, &admin, env.ledger().timestamp());
+    }
+
+    /// Unpause the contract. Admin only (#238).
+    ///
+    /// Emits an `unpaused` event in the same shape as `paused`.
+    pub fn unpause(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        if !storage::is_paused(&env) {
+            panic!("not paused");
+        }
+
+        storage::set_paused(&env, false);
+        events::unpaused(&env, &admin, env.ledger().timestamp());
+    }
+
+    /// Returns whether the contract is currently paused (#238).
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
+    }
+
+    /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
     }
@@ -1046,7 +1142,7 @@ impl LearnToken {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{storage::Persistent as _, Address as _, Ledger as _},
+        testutils::{storage::Persistent as _, Address as _, Events as _, Ledger as _},
         Address, Env, IntoVal, String as SorobanString, Vec,
     };
 
@@ -1088,6 +1184,323 @@ mod tests {
         pt_client.create_course(course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(learner, course_id);
         pt_client.submit_quiz_score(learner, course_id, quiz_id, &score);
+    }
+
+    // ── Issue #236: per-address minted supply tracking ───────────────────
+
+    #[test]
+    fn test_total_minted_to_defaults_to_zero() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        let never_minted = Address::generate(&env);
+        assert_eq!(client.total_minted_to(&never_minted), 0);
+    }
+
+    #[test]
+    fn test_total_minted_to_updates_on_mint() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&user, &1_000);
+
+        assert_eq!(client.total_minted_to(&user), 1_000);
+    }
+
+    #[test]
+    fn test_total_minted_to_accumulates_across_mints() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&user, &1_000);
+        client.mint(&user, &500);
+        client.mint(&user, &250);
+
+        assert_eq!(client.total_minted_to(&user), 1_750);
+    }
+
+    #[test]
+    fn test_total_minted_to_is_tracked_per_address() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        client.mint(&alice, &900);
+        client.mint(&bob, &100);
+
+        assert_eq!(client.total_minted_to(&alice), 900);
+        assert_eq!(client.total_minted_to(&bob), 100);
+        assert_eq!(client.total_supply(), 1_000);
+    }
+
+    #[test]
+    fn test_total_minted_to_unchanged_by_transfer_and_burn() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        client.mint(&alice, &1_000);
+
+        client.transfer(&alice, &bob, &400);
+        client.burn(&alice, &100);
+
+        // Minted total reflects minting only, not current holdings.
+        assert_eq!(client.total_minted_to(&alice), 1_000);
+        assert_eq!(client.balance(&alice), 500);
+        // Receiving a transfer is not minting.
+        assert_eq!(client.total_minted_to(&bob), 0);
+        assert_eq!(client.balance(&bob), 400);
+    }
+
+    #[test]
+    fn test_total_minted_to_includes_reward_claims() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        // claim_reward mints, so it counts toward the per-address total.
+        let balance = client.balance(&learner);
+        assert!(balance > 0);
+        assert_eq!(client.total_minted_to(&learner), balance);
+    }
+
+    // ── Issue #237: reward claim history ─────────────────────────────────
+
+    #[test]
+    fn test_claim_history_empty_for_new_learner() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        let learner = Address::generate(&env);
+        assert_eq!(client.get_claim_history(&learner).len(), 0);
+    }
+
+    #[test]
+    fn test_claim_history_records_quiz_amount_and_timestamp() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 12_345);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 1);
+        let record = history.get(0).unwrap();
+        assert_eq!(record.course_id, course_id);
+        assert_eq!(record.quiz_id, quiz_id);
+        assert_eq!(record.amount, client.balance(&learner));
+        assert_eq!(record.timestamp, 12_345);
+    }
+
+    #[test]
+    fn test_claim_history_accumulates_in_claim_order() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut quiz_ids = Vec::new(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+        let quiz_2 = Symbol::new(&env, "quiz_2");
+        quiz_ids.push_back(quiz_1.clone());
+        quiz_ids.push_back(quiz_2.clone());
+        pt_client.create_course(&course_id, &1, &2, &module_ids, &quiz_ids);
+        pt_client.enroll(&learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_1, &60);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_2, &90);
+
+        env.ledger().with_mut(|li| li.timestamp = 100);
+        client.claim_reward(&learner, &course_id, &quiz_1);
+        env.ledger().with_mut(|li| li.timestamp = 200);
+        client.claim_reward(&learner, &course_id, &quiz_2);
+
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.get(0).unwrap().quiz_id, quiz_1);
+        assert_eq!(history.get(0).unwrap().timestamp, 100);
+        assert_eq!(history.get(1).unwrap().quiz_id, quiz_2);
+        assert_eq!(history.get(1).unwrap().timestamp, 200);
+        // Higher score earns the larger reward.
+        assert!(history.get(1).unwrap().amount > history.get(0).unwrap().amount);
+    }
+
+    #[test]
+    fn test_claim_history_is_per_learner() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &alice, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&alice, &course_id, &quiz_id);
+
+        assert_eq!(client.get_claim_history(&alice).len(), 1);
+        assert_eq!(client.get_claim_history(&bob).len(), 0);
+    }
+
+    #[test]
+    fn test_claim_history_not_duplicated_by_rejected_double_claim() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        // Second claim panics, so history stays immutable at one entry.
+        assert!(client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .is_err());
+
+        assert_eq!(client.get_claim_history(&learner).len(), 1);
+    }
+
+    // ── Issue #238: pause/unpause events ─────────────────────────────────
+
+    #[test]
+    fn test_contract_starts_unpaused() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn test_pause_emits_event_with_admin_and_timestamp() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 5_000);
+
+        client.pause();
+
+        assert!(client.is_paused());
+        let events = env.events().all();
+        let (contract_id, topics, data) = events.last().unwrap();
+        assert_eq!(contract_id, lt_id);
+        assert_eq!(topics, (Symbol::new(&env, "paused"),).into_val(&env));
+        let (event_admin, event_ts): (Address, u64) =
+            soroban_sdk::TryFromVal::try_from_val(&env, &data).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_ts, 5_000);
+    }
+
+    #[test]
+    fn test_unpause_emits_event_with_admin_and_timestamp() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        client.pause();
+        env.ledger().with_mut(|li| li.timestamp = 9_000);
+
+        client.unpause();
+
+        assert!(!client.is_paused());
+        let events = env.events().all();
+        let (contract_id, topics, data) = events.last().unwrap();
+        assert_eq!(contract_id, lt_id);
+        assert_eq!(topics, (Symbol::new(&env, "unpaused"),).into_val(&env));
+        let (event_admin, event_ts): (Address, u64) =
+            soroban_sdk::TryFromVal::try_from_val(&env, &data).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_ts, 9_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "already paused")]
+    fn test_pause_twice_panics() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        client.pause();
+        client.pause();
+    }
+
+    #[test]
+    #[should_panic(expected = "not paused")]
+    fn test_unpause_when_not_paused_panics() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        client.unpause();
+    }
+
+    #[test]
+    fn test_pause_blocks_transfers_and_unpause_restores_them() {
+        let env = Env::default();
+        let (_admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        client.mint(&alice, &1_000);
+
+        client.pause();
+        assert!(client.try_transfer(&alice, &bob, &100).is_err());
+        assert!(client.try_mint(&alice, &100).is_err());
+
+        client.unpause();
+        client.transfer(&alice, &bob, &100);
+        assert_eq!(client.balance(&bob), 100);
     }
 
     #[test]

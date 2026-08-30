@@ -211,20 +211,20 @@ pub fn role_revoked(env: &Env, address: &Address, role: &super::storage::AdminRo
     env.events().publish(topics, (Symbol::new(env, role_str),));
 }
 
-/// Emitted when the contract is paused (#189).
+/// Emitted when the contract is paused by an admin (#238).
 ///
-/// Topics: ["paused", caller]
-/// Data: ()
-pub fn paused(env: &Env, caller: &Address) {
-    let topics = (Symbol::new(env, "paused"), caller.clone());
-    env.events().publish(topics, ());
+/// Topics: ["paused"]
+/// Data: (admin, timestamp)
+pub fn paused(env: &Env, admin: &Address, timestamp: u64) {
+    let topics = (Symbol::new(env, "paused"),);
+    env.events().publish(topics, (admin, timestamp));
 }
 
-/// Emitted when the contract is unpaused (#189).
+/// Emitted when the contract is unpaused by an admin (#238).
 ///
-/// Topics: ["unpaused", caller]
-/// Data: ()
-pub fn unpaused(env: &Env, caller: &Address) {
-    let topics = (Symbol::new(env, "unpaused"), caller.clone());
-    env.events().publish(topics, ());
+/// Topics: ["unpaused"]
+/// Data: (admin, timestamp)
+pub fn unpaused(env: &Env, admin: &Address, timestamp: u64) {
+    let topics = (Symbol::new(env, "unpaused"),);
+    env.events().publish(topics, (admin, timestamp));
 }
