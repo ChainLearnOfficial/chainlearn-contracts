@@ -736,7 +736,10 @@ impl LearnToken {
                 continue;
             }
 
-            if current_supply + reward_amount > max_supply {
+            if current_supply
+                .checked_add(reward_amount)
+                .map_or(true, |s| s > max_supply)
+            {
                 continue;
             }
 

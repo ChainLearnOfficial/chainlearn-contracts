@@ -639,6 +639,203 @@ mod token_unit_tests {
         assert_eq!(contract_err, learn_token::ContractError::AlreadyInitialized);
     }
 
+    // ── Security: overflow/underflow protection (#291) ─────────────────────
+    //
+    // `overflow-checks = true` is set for both the dev and release profiles
+    // (see Cargo.toml), so i128 arithmetic traps instead of silently
+    // wrapping. These tests verify that trap actually fires on the
+    // reachable overflow/underflow paths, that the domain-specific guards
+    // (e.g. "insufficient balance") catch underflow before it can happen,
+    // and that a reverted call leaves balances and total supply untouched.
+
+    fn setup_token_with_max_supply(env: &Env, max_supply: i128) -> (Address, Address, Address) {
+        let admin = Address::generate(env);
+
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(env, "CLearn"),
+            &SorobanString::from_str(env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &max_supply,
+        );
+
+        (admin, contract_id, pt_contract_id)
+    }
+
+    #[test]
+    #[should_panic(expected = "maximum supply cap exceeded")]
+    fn test_security_mint_supply_overflow_reverts() {
+        let env = Env::default();
+        let (admin, contract_id, _pt_contract_id) = setup_token_with_max_supply(&env, i128::MAX);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Fill supply right up to the cap: current_supply becomes i128::MAX,
+        // which does not overflow (i128::MAX + 0 offset is representable).
+        client.mint(&admin, &user, &i128::MAX);
+        assert_eq!(client.total_supply(), i128::MAX);
+
+        // One more token would push `current_supply + amount` past
+        // i128::MAX. `mint` guards this with `checked_add` rather than a
+        // raw `+`, so the overflow itself never happens — it surfaces as
+        // the same clear, domain-specific panic as an ordinary cap breach
+        // instead of a raw arithmetic trap.
+        client.mint(&admin, &user, &1);
+    }
+
+    #[test]
+    fn test_security_mint_supply_overflow_does_not_corrupt_state() {
+        let env = Env::default();
+        let (admin, contract_id, _pt_contract_id) = setup_token_with_max_supply(&env, i128::MAX);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &user, &i128::MAX);
+
+        let supply_before = client.total_supply();
+        let balance_before = client.balance(&user);
+        assert_eq!(supply_before, i128::MAX);
+        assert_eq!(balance_before, i128::MAX);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.mint(&admin, &user, &1);
+        }));
+        assert!(result.is_err(), "overflowing mint should revert");
+
+        // The trap must unwind before any storage write lands — supply and
+        // balance are exactly as they were before the reverted call.
+        assert_eq!(client.total_supply(), supply_before);
+        assert_eq!(client.balance(&user), balance_before);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient balance")]
+    fn test_security_transfer_balance_underflow_reverts() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Bob holds nothing; subtracting anything from a zero balance would
+        // underflow an unsigned/unchecked path. The explicit balance check
+        // must catch this with a clear message before any subtraction runs.
+        client.transfer(&bob, &alice, &1);
+    }
+
+    #[test]
+    fn test_security_transfer_underflow_does_not_corrupt_state() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &alice, &500);
+
+        let alice_before = client.balance(&alice);
+        let bob_before = client.balance(&bob);
+        let supply_before = client.total_supply();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.transfer(&bob, &alice, &1);
+        }));
+        assert!(result.is_err(), "underflowing transfer should revert");
+
+        assert_eq!(client.balance(&alice), alice_before);
+        assert_eq!(client.balance(&bob), bob_before);
+        assert_eq!(client.total_supply(), supply_before);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient balance")]
+    fn test_security_burn_balance_underflow_reverts() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Same underflow shape as transfer, on the burn path: a zero balance
+        // must reject a burn instead of wrapping to a huge positive balance.
+        client.burn(&user, &1);
+    }
+
+    #[test]
+    fn test_security_burn_underflow_does_not_corrupt_state() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &user, &300);
+
+        let balance_before = client.balance(&user);
+        let supply_before = client.total_supply();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.burn(&user, &1_000);
+        }));
+        assert!(result.is_err(), "underflowing burn should revert");
+
+        assert_eq!(client.balance(&user), balance_before);
+        assert_eq!(client.total_supply(), supply_before);
+    }
+
+    #[test]
+    fn test_security_batch_claim_reward_supply_overflow_skips_without_panicking() {
+        // `batch_claim_reward` is documented to skip over-cap claims rather
+        // than aborting the whole batch (partial failures don't block
+        // successful claims). With supply already at `i128::MAX`, the cap
+        // check's `current_supply + reward_amount` would overflow before
+        // ever comparing against `max_supply` unless it uses `checked_add`
+        // — an unchecked `+` there turns a should-be-skipped claim into a
+        // raw arithmetic-overflow panic, aborting the whole batch and
+        // breaking that "partial failures don't block" guarantee.
+        let env = Env::default();
+        let (admin, contract_id, pt_contract_id) = setup_token_with_max_supply(&env, i128::MAX);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let filler = Address::generate(&env);
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &filler, &i128::MAX);
+        assert_eq!(client.total_supply(), i128::MAX);
+
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(quiz_id);
+
+        let successful = client.batch_claim_reward(&learner, &course_id, &quiz_ids);
+
+        // No panic, no revert: the overflowing claim is simply skipped, and
+        // state is left exactly as it was before the call.
+        assert_eq!(successful.len(), 0);
+        assert_eq!(client.balance(&learner), 0);
+        assert_eq!(client.total_supply(), i128::MAX);
     #[test]
     fn test_governance_proposal_lifecycle() {
         let env = Env::default();
