@@ -1271,5 +1271,11 @@ mod token_unit_tests {
 
         assert_eq!(before, after, "is_initialized must be read-only");
     }
+
+    // Issue #239 (storage-size tracking) is already implemented and covered
+    // by an existing, more thorough test suite in
+    // `contracts/learn-token/src/lib.rs` (see its "Issue #254: storage size
+    // tracking" section) -- that implementation predates this branch on
+    // `main`, so no duplicate tests are added here.
 }
 

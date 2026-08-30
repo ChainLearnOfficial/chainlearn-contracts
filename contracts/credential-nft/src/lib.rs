@@ -53,16 +53,11 @@ impl CredentialNft {
         if env.storage().persistent().has(&CredentialDataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::Admin, &admin);
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::ProgressTracker, &progress_tracker);
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::CredentialCounter, &0u64);
-        env.storage().persistent().set(
+        metadata::write_entry(&env, &CredentialDataKey::Admin, &admin);
+        metadata::write_entry(&env, &CredentialDataKey::ProgressTracker, &progress_tracker);
+        metadata::write_entry(&env, &CredentialDataKey::CredentialCounter, &0u64);
+        metadata::write_entry(
+            &env,
             &CredentialDataKey::Metadata,
             &ContractMetadata::new(&env, "credential-nft"),
         );
@@ -78,6 +73,16 @@ impl CredentialNft {
     /// panics with "not initialized".
     pub fn is_initialized(env: Env) -> bool {
         env.storage().persistent().has(&CredentialDataKey::Admin)
+    }
+
+    /// Returns the number of persistent storage entries this contract has
+    /// written (#239).
+    ///
+    /// Maintained as a running counter updated on every persistent write and
+    /// removal, since Soroban has no API to enumerate or count a contract's
+    /// storage entries at runtime. Read-only and O(1): reads one counter entry.
+    pub fn get_storage_size(env: Env) -> u64 {
+        metadata::get_storage_size(&env)
     }
 
     /// Get the contract's on-chain name and version (#107).
@@ -423,9 +428,7 @@ impl CredentialNft {
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::Paused, &true);
+        metadata::write_entry(&env, &CredentialDataKey::Paused, &true);
         // Event would ideally be emitted here, but we will omit it for simplicity if it wasn't added to events.rs
     }
 
@@ -437,9 +440,7 @@ impl CredentialNft {
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::Paused, &false);
+        metadata::write_entry(&env, &CredentialDataKey::Paused, &false);
     }
 
     /// Returns the admin address.
@@ -550,7 +551,7 @@ impl CredentialNft {
         }
 
         let cert_uri = Symbol::new(&env, "cert_uri");
-        env.storage().persistent().set(&cert_key, &cert_uri);
+        metadata::write_entry(&env, &cert_key, &cert_uri);
 
         // If credential already minted, update metadata_uri in CredentialInfo
         if let Some(cred_id) = env.storage().persistent().get::<_, u64>(&dup_key) {
@@ -561,7 +562,7 @@ impl CredentialNft {
                 .get::<_, CredentialInfo>(&cred_key)
             {
                 info.metadata_uri = cert_uri.clone();
-                env.storage().persistent().set(&cred_key, &info);
+                metadata::write_entry(&env, &cred_key, &info);
             }
         }
 

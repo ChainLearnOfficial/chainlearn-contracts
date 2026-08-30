@@ -2085,4 +2085,77 @@ mod progress_unit_tests {
 
         assert_eq!(before, after, "is_initialized must be read-only");
     }
+
+    // ── Issue #239: storage size tracking ────────────────────────────────────
+
+    #[test]
+    fn test_storage_size_zero_before_initialize() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, ProgressTracker);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert_eq!(client.get_storage_size(), 0);
+    }
+
+    #[test]
+    fn test_storage_size_increases_after_initialize() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        // initialize() writes Admin and Metadata -- 2 distinct new keys.
+        assert_eq!(client.get_storage_size(), 2);
+    }
+
+    #[test]
+    fn test_storage_size_increases_on_new_entry() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let before = client.get_storage_size();
+        let _course_id = create_test_course(&env, &client);
+
+        // create_course() writes exactly one new Course(course_id) entry.
+        assert_eq!(client.get_storage_size(), before + 1);
+    }
+
+    #[test]
+    fn test_storage_size_unchanged_on_overwrite() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let before = client.get_storage_size();
+
+        // Archiving overwrites the existing Course(course_id) entry --
+        // no new key is created.
+        client.archive_course(&course_id);
+        assert_eq!(
+            client.get_storage_size(),
+            before,
+            "overwriting an existing key must not change the count"
+        );
+    }
+
+    #[test]
+    fn test_storage_size_tracks_enrollment_writes() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        let before = client.get_storage_size();
+        client.enroll(&learner, &course_id);
+
+        // enroll() writes Progress(learner, course_id) and
+        // LearnerCourses(learner) -- 2 new entries for a first-time learner.
+        assert_eq!(client.get_storage_size(), before + 2);
+    }
 }

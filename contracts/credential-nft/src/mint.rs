@@ -125,9 +125,7 @@ pub fn mint_credential(
         Some(id) => id,
         None => panic!("credential ID counter overflow"),
     };
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::CredentialCounter, &credential_id);
+    crate::metadata::write_entry(env, &CredentialDataKey::CredentialCounter, &credential_id);
 
     // Build credential info
     let info = CredentialInfo {
@@ -142,9 +140,7 @@ pub fn mint_credential(
 
     // Store credential data. The owner is available as `info.learner`, so no
     // separate owner key is kept (#116).
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::Credential(credential_id), &info);
+    crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
 
     // Track credentials per learner
     let mut learner_creds: soroban_sdk::Vec<u64> = env
@@ -153,13 +149,14 @@ pub fn mint_credential(
         .get(&CredentialDataKey::LearnerCredentials(to.clone()))
         .unwrap_or(soroban_sdk::Vec::new(env));
     learner_creds.push_back(credential_id);
-    env.storage().persistent().set(
+    crate::metadata::write_entry(
+        env,
         &CredentialDataKey::LearnerCredentials(to.clone()),
         &learner_creds,
     );
 
     // Store the course-credential mapping to prevent duplicates
-    env.storage().persistent().set(&dup_key, &credential_id);
+    crate::metadata::write_entry(env, &dup_key, &credential_id);
 
     // Index credentials by course for reverse lookup (#105)
     let mut course_creds: soroban_sdk::Vec<u64> = env
@@ -168,7 +165,8 @@ pub fn mint_credential(
         .get(&CredentialDataKey::CourseCredentials(course_id.clone()))
         .unwrap_or(soroban_sdk::Vec::new(env));
     course_creds.push_back(credential_id);
-    env.storage().persistent().set(
+    crate::metadata::write_entry(
+        env,
         &CredentialDataKey::CourseCredentials(course_id.clone()),
         &course_creds,
     );

@@ -38,10 +38,9 @@ impl ProgressTracker {
         {
             return Err(ContractError::AlreadyInitialized);
         }
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Admin, &admin);
-        env.storage().persistent().set(
+        types::write_entry(&env, &ProgressTrackerDataKey::Admin, &admin);
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Metadata,
             &ContractMetadata::new(&env, "progress-tracker"),
         );
@@ -99,6 +98,16 @@ impl ProgressTracker {
         env.storage()
             .persistent()
             .has(&ProgressTrackerDataKey::Admin)
+    }
+
+    /// Returns the number of persistent storage entries this contract has
+    /// written (#239).
+    ///
+    /// Maintained as a running counter updated on every persistent write,
+    /// since Soroban has no API to enumerate or count a contract's storage
+    /// entries at runtime. Read-only and O(1): reads one counter entry.
+    pub fn get_storage_size(env: Env) -> u64 {
+        types::get_storage_size(&env)
     }
 
     /// Register a new course with its modules and quizzes.
@@ -192,9 +201,11 @@ impl ProgressTracker {
             version: 1,
         };
 
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "course_created"),),
@@ -290,7 +301,7 @@ impl ProgressTracker {
             completed_version: None,
         };
 
-        env.storage().persistent().set(&key, &progress);
+        types::write_entry(&env, &key, &progress);
 
         // Index the enrollment so learner-wide aggregates can be computed
         // without scanning every course in the contract (#232).
@@ -301,7 +312,7 @@ impl ProgressTracker {
             .get(&courses_key)
             .unwrap_or_else(|| Vec::new(&env));
         courses.push_back(course_id.clone());
-        env.storage().persistent().set(&courses_key, &courses);
+        types::write_entry(&env, &courses_key, &courses);
 
         env.events().publish(
             (symbol_short!("enrolled"),),
@@ -490,26 +501,24 @@ impl ProgressTracker {
         }
 
         // Mark module as completed
-        env.storage().persistent().set(&completed_key, &true);
+        types::write_entry(&env, &completed_key, &true);
         progress.modules_completed_bitmap |= 1 << idx;
 
         let was_eligible = progress.eligible_for_credential;
 
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&course, &progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
 
         // Record the course version at the moment eligibility is reached (#245).
         if !was_eligible && progress.eligible_for_credential {
             progress.completed_version = Some(course.version);
         }
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &progress,
+            &*progress,
         );
-        progress.overall_progress = rewards::calculate_progress(course, progress);
-        progress.eligible_for_credential = rewards::is_eligible_for_credential(course, progress);
 
         env.events().publish(
             (Symbol::new(env, "module_completed"),),
@@ -743,7 +752,7 @@ impl ProgressTracker {
             submitted_at: env.ledger().timestamp(),
         };
 
-        env.storage().persistent().set(&quiz_key, &result);
+        types::write_entry(&env, &quiz_key, &result);
 
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
@@ -753,8 +762,7 @@ impl ProgressTracker {
         // Recalculate from the updated in-memory aggregates, so everything is
         // known before the single storage write below.
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential =
-            rewards::is_eligible_for_credential(&course, &progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
 
         // Record the course version at the moment eligibility is reached (#245).
         if !was_eligible && progress.eligible_for_credential {
@@ -762,12 +770,11 @@ impl ProgressTracker {
         }
 
         // Single write with all updated fields
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &progress,
+            &*progress,
         );
-        progress.overall_progress = rewards::calculate_progress(course, progress);
-        progress.eligible_for_credential = rewards::is_eligible_for_credential(course, progress);
 
         env.events().publish(
             (Symbol::new(env, "quiz_submitted"),),
@@ -882,7 +889,7 @@ impl ProgressTracker {
         // divisor -- is unchanged by a retake.
         result.score = new_score;
         result.submitted_at = env.ledger().timestamp();
-        env.storage().persistent().set(&quiz_key, &result);
+        types::write_entry(&env, &quiz_key, &result);
 
         progress.total_quiz_score += (new_score - previous_score) as u64;
 
@@ -896,7 +903,8 @@ impl ProgressTracker {
             progress.completed_version = Some(course.version);
         }
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -1199,9 +1207,11 @@ impl ProgressTracker {
         }
 
         course.archived = true;
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
 
         env.events()
             .publish((Symbol::new(&env, "course_archived"),), (&course_id,));
@@ -1231,9 +1241,11 @@ impl ProgressTracker {
             .expect("course not found");
 
         course.content_hash = content_hash.clone();
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "content_hash_set"),),
@@ -1349,9 +1361,11 @@ impl ProgressTracker {
         }
 
         course.prerequisites = prerequisites.clone();
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "prerequisites_set"),),
@@ -1500,9 +1514,7 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Paused, &true);
+        types::write_entry(&env, &ProgressTrackerDataKey::Paused, &true);
         // We omit events here to avoid adding it to events.rs
     }
 
@@ -1514,9 +1526,7 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Paused, &false);
+        types::write_entry(&env, &ProgressTrackerDataKey::Paused, &false);
     }
 
     /// Returns the admin address.

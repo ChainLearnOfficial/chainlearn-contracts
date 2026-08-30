@@ -490,4 +490,92 @@ mod credential_unit_tests {
 
         assert_eq!(before, after, "is_initialized must be read-only");
     }
+
+    // ── Issue #239: storage size tracking ────────────────────────────────────
+
+    #[test]
+    fn test_storage_size_zero_before_initialize() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, CredentialNft);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert_eq!(client.get_storage_size(), 0);
+    }
+
+    #[test]
+    fn test_storage_size_increases_after_initialize() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        // initialize() writes Admin, ProgressTracker, CredentialCounter, and
+        // Metadata -- 4 distinct new keys.
+        assert_eq!(client.get_storage_size(), 4);
+    }
+
+    #[test]
+    fn test_storage_size_increases_on_mint() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+
+        let before = client.get_storage_size();
+        client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        // A first-time mint for a fresh learner+course creates 4 new keys:
+        // Credential(id), LearnerCredentials(learner), the
+        // CourseCredential(learner, course) dedup key, and
+        // CourseCredentials(course). CredentialCounter already existed.
+        assert_eq!(client.get_storage_size(), before + 4);
+    }
+
+    #[test]
+    fn test_storage_size_unchanged_on_overwrite() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id =
+            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        let before = client.get_storage_size();
+        // Revoking overwrites the existing Credential(id) entry and creates
+        // exactly one new entry: Revoked(id).
+        client.revoke_credential(&cred_id);
+        assert_eq!(client.get_storage_size(), before + 1);
+    }
+
+    #[test]
+    fn test_storage_size_does_not_change_on_read_only_calls() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        let before = client.get_storage_size();
+        let _ = client.verify_credential(&cred_id);
+        let _ = client.is_credential_valid(&cred_id);
+        let _ = client.get_credentials_for(&learner, &0, &10);
+        let _ = client.try_transfer(&learner, &Address::generate(&env), &cred_id);
+
+        assert_eq!(
+            client.get_storage_size(),
+            before,
+            "read-only calls (including the rejected transfer) must not change storage size"
+        );
+    }
 }
