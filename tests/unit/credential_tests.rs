@@ -241,4 +241,74 @@ mod credential_unit_tests {
         // We do not mock auths, so revoke_credential must fail admin auth check
         client.revoke_credential(&1);
     }
+
+    #[test]
+    #[should_panic(expected = "metadata_uri cannot be empty")]
+    fn test_mint_rejects_empty_metadata_uri() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+
+        let empty_uri = Symbol::new(&env, "");
+        client.mint_credential(&learner, &course_id, &85, &empty_uri);
+    }
+
+    #[test]
+    #[should_panic(expected = "metadata_uri too short: minimum length is 8")]
+    fn test_mint_rejects_too_short_metadata_uri() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+
+        let short_uri = Symbol::new(&env, "ipfs_1");
+        client.mint_credential(&learner, &course_id, &85, &short_uri);
+    }
+
+    #[test]
+    #[should_panic(expected = "metadata_uri is malformed: must start with a valid URI scheme")]
+    fn test_mint_rejects_malformed_metadata_uri() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+
+        let malformed_uri = Symbol::new(&env, "ftp_metadata_hash");
+        client.mint_credential(&learner, &course_id, &85, &malformed_uri);
+    }
+
+    #[test]
+    fn test_mint_accepts_valid_metadata_uri() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+
+        let valid_uri = Symbol::new(&env, "ipfs_Qm123ValidURI");
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &valid_uri);
+        assert_eq!(cred_id, 1);
+        let info = client.verify_credential(&cred_id);
+        assert_eq!(info.metadata_uri, valid_uri);
+    }
 }

@@ -3,7 +3,7 @@
 use learn_token::{LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     Address, Env, IntoVal, String as SorobanString, Symbol, Vec,
 };
 
@@ -113,7 +113,7 @@ mod token_unit_tests {
     #[test]
     fn test_claim_reward_proportional_minting() {
         let env = Env::default();
-        let (admin, contract_id, pt_contract_id) = setup_token(&env);
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
@@ -135,7 +135,7 @@ mod token_unit_tests {
     #[should_panic(expected = "reward already claimed")]
     fn test_claim_reward_double_claim() {
         let env = Env::default();
-        let (admin, contract_id, pt_contract_id) = setup_token(&env);
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
@@ -154,7 +154,7 @@ mod token_unit_tests {
     #[should_panic(expected = "score exceeds maximum")]
     fn test_claim_reward_rejects_high_score() {
         let env = Env::default();
-        let (admin, _contract_id, pt_contract_id) = setup_token(&env);
+        let (_admin, _contract_id, pt_contract_id) = setup_token(&env);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
         let learner = Address::generate(&env);
@@ -229,7 +229,7 @@ mod token_unit_tests {
     #[test]
     fn test_approve_zero_allowance_revokes() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -368,6 +368,114 @@ mod token_unit_tests {
     }
 
     #[test]
+    fn test_set_max_supply_emits_event() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &5000,
+        );
+
+        env.mock_all_auths();
+
+        client.set_max_supply(&8000);
+        assert_eq!(client.max_supply(), 8000);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "max_supply_updated"),).into_val(&env),
+                    (5000i128, 8000i128).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "max supply increase exceeds governance limit")]
+    fn test_set_max_supply_rejects_exceeding_2x_increase() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &5000,
+        );
+
+        env.mock_all_auths();
+
+        // 5000 -> 15000 is 3x increase, exceeding the 2x limit (max 10000)
+        client.set_max_supply(&15000);
+    }
+
+    #[test]
+    fn test_set_max_supply_allows_reduction() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &5000,
+        );
+
+        env.mock_all_auths();
+
+        client.mint(&admin, &Address::generate(&env), &1000);
+        assert_eq!(client.total_supply(), 1000);
+
+        // Reducing from 5000 to 3000 (above current supply 1000) is allowed
+        client.set_max_supply(&3000);
+        assert_eq!(client.max_supply(), 3000);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "max_supply_updated"),).into_val(&env),
+                    (5000i128, 3000i128).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "cannot mint to zero address")]
     fn test_mint_to_zero_address_panics() {
         let env = Env::default();
@@ -448,10 +556,8 @@ mod token_unit_tests {
 
     #[test]
     fn test_reward_claimed_event_indexes_learner_and_course() {
-        use soroban_sdk::testutils::Events;
-
         let env = Env::default();
-        let (admin, contract_id, pt_contract_id) = setup_token(&env);
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
