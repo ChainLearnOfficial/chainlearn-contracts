@@ -515,7 +515,11 @@ mod token_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "transfer_from"), owner.clone(), recipient.clone())
+                    (
+                        Symbol::new(&env, "transfer_from"),
+                        owner.clone(),
+                        recipient.clone()
+                    )
                         .into_val(&env),
                     (spender, 300i128).into_val(&env),
                 )
@@ -994,7 +998,11 @@ mod token_unit_tests {
 
         client.transfer_admin(&new_admin);
 
-        assert_eq!(client.admin(), admin, "admin must not change until accepted");
+        assert_eq!(
+            client.admin(),
+            admin,
+            "admin must not change until accepted"
+        );
         let pending = client.pending_admin().expect("pending transfer expected");
         assert_eq!(pending.new_admin, new_admin);
     }
@@ -1059,7 +1067,8 @@ mod token_unit_tests {
         // silently dropped or swapped for a different address.
         client.accept_admin();
         assert_eq!(
-            env.auths()[0].0, new_admin,
+            env.auths()[0].0,
+            new_admin,
             "accept_admin must require new_admin's auth, not the caller's"
         );
     }
@@ -1101,7 +1110,8 @@ mod token_unit_tests {
 
         client.cancel_admin_transfer();
         assert_eq!(
-            env.auths()[0].0, admin,
+            env.auths()[0].0,
+            admin,
             "cancel_admin_transfer must require the current admin's auth"
         );
     }
@@ -1226,6 +1236,40 @@ mod token_unit_tests {
             "only the surviving (second) candidate can complete the transfer"
         );
         assert_ne!(client.admin(), first_candidate);
+    }
+
+    // ── Issue #240: contract initialization verification ────────────────────
+
+    #[test]
+    fn test_is_initialized_false_before_initialize() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        assert!(!client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_true_after_initialize() {
+        let env = Env::default();
+        let (_admin, contract_id, _pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        assert!(client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_does_not_mutate_state() {
+        let env = Env::default();
+        let (_admin, contract_id, _pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let before = client.contract_metadata();
+        let _ = client.is_initialized();
+        let _ = client.is_initialized();
+        let after = client.contract_metadata();
+
+        assert_eq!(before, after, "is_initialized must be read-only");
     }
 }
 

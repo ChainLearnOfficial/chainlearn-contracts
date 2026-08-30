@@ -69,6 +69,17 @@ impl CredentialNft {
         Ok(())
     }
 
+    /// Returns whether the contract has been initialized (#240).
+    ///
+    /// Read-only: performs a single storage existence check and never
+    /// mutates state. Lets deployment scripts confirm `initialize()` has
+    /// already run before calling admin-only setup steps, instead of
+    /// discovering an uninitialized contract only when some other call
+    /// panics with "not initialized".
+    pub fn is_initialized(env: Env) -> bool {
+        env.storage().persistent().has(&CredentialDataKey::Admin)
+    }
+
     /// Get the contract's on-chain name and version (#107).
     ///
     /// Lets external tools (indexers, block explorers, upgrade tooling)

@@ -289,9 +289,10 @@ mod progress_unit_tests {
             prerequisites: Vec::new(&env),
         };
         env.as_contract(&contract_id, || {
-            env.storage()
-                .persistent()
-                .set(&progress_tracker::ProgressTrackerDataKey::Course(course_id.clone()), &course);
+            env.storage().persistent().set(
+                &progress_tracker::ProgressTrackerDataKey::Course(course_id.clone()),
+                &course,
+            );
         });
 
         let learner = Address::generate(&env);
@@ -456,7 +457,10 @@ mod progress_unit_tests {
             client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
             70
         );
-        assert_eq!(client.get_progress(&learner, &course_id).quizzes_submitted, 1);
+        assert_eq!(
+            client.get_progress(&learner, &course_id).quizzes_submitted,
+            1
+        );
     }
 
     #[test]
@@ -625,9 +629,18 @@ mod progress_unit_tests {
         // up the module list.
         let course = client.get_course(&course_id);
         assert_eq!(course.module_ids.len(), 3);
-        assert_eq!(course.module_ids.get(0).unwrap(), Symbol::new(&env, "mod_1"));
-        assert_eq!(course.module_ids.get(1).unwrap(), Symbol::new(&env, "mod_2"));
-        assert_eq!(course.module_ids.get(2).unwrap(), Symbol::new(&env, "mod_3"));
+        assert_eq!(
+            course.module_ids.get(0).unwrap(),
+            Symbol::new(&env, "mod_1")
+        );
+        assert_eq!(
+            course.module_ids.get(1).unwrap(),
+            Symbol::new(&env, "mod_2")
+        );
+        assert_eq!(
+            course.module_ids.get(2).unwrap(),
+            Symbol::new(&env, "mod_3")
+        );
 
         // Ordering/ existence checks driven by Course::module_ids still work.
         let learner = Address::generate(&env);
@@ -661,7 +674,10 @@ mod progress_unit_tests {
         progress.eligible_for_credential = true;
         env.as_contract(&contract_id, || {
             env.storage().persistent().set(
-                &progress_tracker::ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+                &progress_tracker::ProgressTrackerDataKey::Progress(
+                    learner.clone(),
+                    course_id.clone(),
+                ),
                 &progress,
             );
         });
@@ -859,7 +875,11 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_a, &Symbol::new(&env, "mod_3"));
         client.submit_quiz_score(&learner, &course_a, &Symbol::new(&env, "quiz_1"), &80);
         client.submit_quiz_score(&learner, &course_a, &Symbol::new(&env, "quiz_2"), &70);
-        assert!(client.get_progress(&learner, &course_a).eligible_for_credential);
+        assert!(
+            client
+                .get_progress(&learner, &course_a)
+                .eligible_for_credential
+        );
 
         // Course B: enrolled and quizzed, but the module is never completed,
         // so it must not count toward courses_completed.
@@ -871,7 +891,11 @@ mod progress_unit_tests {
         client.create_course(&course_b, &1, &1, &module_ids, &quiz_ids);
         client.enroll(&learner, &course_b);
         client.submit_quiz_score(&learner, &course_b, &Symbol::new(&env, "quiz_a"), &60);
-        assert!(!client.get_progress(&learner, &course_b).eligible_for_credential);
+        assert!(
+            !client
+                .get_progress(&learner, &course_b)
+                .eligible_for_credential
+        );
 
         let stats = client.get_learner_stats(&learner);
         assert_eq!(stats.courses_enrolled, 2);
@@ -985,7 +1009,11 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
         client.submit_quiz_score(&learner, &course_id, &quiz_id, &20);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &20);
-        assert!(!client.get_progress(&learner, &course_id).eligible_for_credential);
+        assert!(
+            !client
+                .get_progress(&learner, &course_id)
+                .eligible_for_credential
+        );
 
         client.retake_quiz(&learner, &course_id, &quiz_id, &90);
 
@@ -2022,5 +2050,39 @@ mod progress_unit_tests {
             progress_before.overall_progress,
             "existing progress must be preserved after archiving"
         );
+    }
+
+    // ── Issue #240: contract initialization verification ────────────────────
+
+    #[test]
+    fn test_is_initialized_false_before_initialize() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, ProgressTracker);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert!(!client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_true_after_initialize() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert!(client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_does_not_mutate_state() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let before = client.contract_metadata();
+        let _ = client.is_initialized();
+        let _ = client.is_initialized();
+        let after = client.contract_metadata();
+
+        assert_eq!(before, after, "is_initialized must be read-only");
     }
 }

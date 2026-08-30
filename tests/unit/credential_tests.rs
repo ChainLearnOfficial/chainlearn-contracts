@@ -456,4 +456,38 @@ mod credential_unit_tests {
             "intended recipient must not gain the credential"
         );
     }
+
+    // ── Issue #240: contract initialization verification ────────────────────
+
+    #[test]
+    fn test_is_initialized_false_before_initialize() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, CredentialNft);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert!(!client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_true_after_initialize() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert!(client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_does_not_mutate_state() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let before = client.contract_metadata();
+        let _ = client.is_initialized();
+        let _ = client.is_initialized();
+        let after = client.contract_metadata();
+
+        assert_eq!(before, after, "is_initialized must be read-only");
+    }
 }

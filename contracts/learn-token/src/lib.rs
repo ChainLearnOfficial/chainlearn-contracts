@@ -995,6 +995,17 @@ impl LearnToken {
         storage::is_paused(&env)
     }
 
+    /// Returns whether the contract has been initialized (#240).
+    ///
+    /// Read-only: performs a single storage existence check and never
+    /// mutates state. Lets deployment scripts confirm `initialize()` has
+    /// already run before calling admin-only setup steps, instead of
+    /// discovering an uninitialized contract only when some other call
+    /// panics with "not initialized" or "contract not initialized".
+    pub fn is_initialized(env: Env) -> bool {
+        storage::is_initialized(&env)
+    }
+
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
