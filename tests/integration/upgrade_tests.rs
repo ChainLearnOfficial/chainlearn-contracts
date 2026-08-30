@@ -26,19 +26,26 @@ fn test_contract_upgrade() {
     let user = Address::generate(&env);
     client.mint(&admin, &user, &100);
     assert_eq!(client.balance(&user), 100);
+    assert_eq!(client.upgrade_version(), 0);
+    assert_eq!(client.wasm_hash(), None);
     
-    // Simulate an upgrade using a dummy hash.
-    // In a real scenario, this would use a valid uploaded WASM hash.
-    let dummy_hash = BytesN::from_array(&env, &[0; 32]);
+    // Verify initial upgrade state
+    assert_eq!(client.upgrade_version(), 0);
+    assert_eq!(client.wasm_hash(), None);
     
-    // Only verify that the contract exposes the upgrade function and it executes correctly.
-    // Depending on the soroban host test config, an invalid dummy hash might panic, 
-    // but the test primarily aims to verify the upgrade mechanism and state preservation.
-    // If it panics due to dummy hash, that's host validation, not contract failure.
-    // For unit testing purposes, we assume it succeeds or we mock it.
-    
-    // client.upgrade(&dummy_hash);
-    
-    // Verify state is preserved after simulated upgrade operations
+    // Verify state before and after upgrade verification
+    assert_eq!(client.balance(&user), 100);
+
+    // Verify multi-sig operation for critical upgrades
+    let co_admin = Address::generate(&env);
+    client.add_admin(&admin, &learn_token::AdminInfo {
+        address: co_admin.clone(),
+        role: learn_token::AdminRole::Admin,
+    });
+
+    let dummy_hash = BytesN::from_array(&env, &[1; 32]);
+    let result = client.try_upgrade_multisig(&admin, &admin, &dummy_hash);
+    assert!(result.is_err(), "Same co-signer must be rejected");
+
     assert_eq!(client.balance(&user), 100);
 }

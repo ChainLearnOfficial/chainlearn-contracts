@@ -59,6 +59,8 @@ pub enum TokenDataKey {
     Vote(ProposalVoteKey),
     /// Per-address permit nonce for replay protection (#224).
     PermitNonce(Address),
+    /// List of registered admins and their assigned roles (#212).
+    Admins,
 }
 
 #[contracttype]
@@ -67,6 +69,13 @@ pub enum AdminRole {
     Admin,
     Minter,
     Pauser,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminInfo {
+    pub address: Address,
+    pub role: AdminRole,
 }
 
 #[contracttype]
@@ -182,9 +191,10 @@ pub fn is_initialized(env: &Env) -> bool {
     env.storage().persistent().has(&TokenDataKey::Admin)
 }
 
-/// Store the admin address.
+/// Store the primary admin address and initialize the admins list (#212).
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().persistent().set(&TokenDataKey::Admin, admin);
+    add_admin(env, admin, &AdminRole::Admin);
 }
 
 /// Retrieve the admin address.
@@ -193,6 +203,48 @@ pub fn get_admin(env: &Env) -> Address {
         .persistent()
         .get(&TokenDataKey::Admin)
         .expect("contract not initialized")
+}
+
+// ── Multi-Admin Management (#212) ─────────────────────────────────────────────
+
+/// Get list of all registered admins (#212).
+pub fn get_admins(env: &Env) -> Vec<AdminInfo> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::Admins)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+/// Set list of registered admins (#212).
+pub fn set_admins(env: &Env, admins: &Vec<AdminInfo>) {
+    env.storage().persistent().set(&TokenDataKey::Admins, admins);
+}
+
+/// Add an admin to the admin list and grant the role (#212).
+pub fn add_admin(env: &Env, address: &Address, role: &AdminRole) {
+    let mut admins = get_admins(env);
+    let admin_info = AdminInfo {
+        address: address.clone(),
+        role: role.clone(),
+    };
+    if !admins.contains(&admin_info) {
+        admins.push_back(admin_info);
+        set_admins(env, &admins);
+    }
+    grant_role(env, address, role);
+}
+
+/// Remove an admin from the admin list and revoke the role (#212).
+pub fn remove_admin(env: &Env, address: &Address, role: &AdminRole) {
+    let admins = get_admins(env);
+    let mut new_admins = Vec::new(env);
+    for admin in admins.iter() {
+        if admin.address != *address || admin.role != *role {
+            new_admins.push_back(admin);
+        }
+    }
+    set_admins(env, &new_admins);
+    revoke_role(env, address, role);
 }
 
 // ── Role Management (#190) ───────────────────────────────────────────────────

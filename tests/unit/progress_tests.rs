@@ -1072,4 +1072,48 @@ mod progress_unit_tests {
         // Skip enrollment
         client.retake_quiz(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
     }
+
+    // ── Issue #211: export_progress ─────────────────────────────────────────
+
+    #[test]
+    fn test_export_progress_returns_complete_data() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 12345);
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+
+        let export = client.export_progress(&learner, &course_id);
+        assert!(export.enrolled);
+        assert_eq!(export.enrolled_at, 12345);
+        assert_eq!(export.modules_completed_bitmap, 1);
+        assert_eq!(export.total_modules, 3);
+        assert_eq!(export.quizzes_submitted, 1);
+        assert_eq!(export.total_quiz_score, 85);
+        assert!(export.overall_progress > 0);
+        assert!(!export.eligible_for_credential);
+        assert_eq!(export.quiz_scores.len(), 1);
+        assert_eq!(export.quiz_scores.get(0).unwrap().score, 85);
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_export_progress_not_enrolled_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.export_progress(&learner, &course_id);
+    }
 }

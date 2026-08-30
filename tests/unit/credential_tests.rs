@@ -259,6 +259,9 @@ mod credential_unit_tests {
             contract_err,
             credential_nft::ContractError::AlreadyInitialized
         );
+    }
+
+    #[test]
     #[should_panic(expected = "metadata_uri cannot be empty")]
     fn test_mint_rejects_empty_metadata_uri() {
         let env = Env::default();
