@@ -206,6 +206,7 @@ version = "0.1.0"
 dependencies = [
  "chainlearn-shared",
  "progress-tracker",
+ "soroban-env-common",
  "soroban-sdk",
 ]
 
