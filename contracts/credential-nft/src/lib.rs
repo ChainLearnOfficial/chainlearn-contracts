@@ -6,8 +6,9 @@ mod verify;
 mod xcall;
 
 use chainlearn_shared::ContractMetadata;
-use metadata::{CredentialDataKey, CredentialInfo};
+use metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
 use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
+use mint::validate_metadata_uri;
 
 /// Subset of the progress-tracker interface used to verify course completion
 /// and the score a credential claims.
@@ -131,6 +132,98 @@ impl CredentialNft {
         mint::mint_credential(&env, &to, &course_id, score, &metadata_uri)
     }
 
+    /// Set display properties for a credential. Admin only (#244).
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to update
+    /// * `image_url` - Optional URL of the credential image
+    /// * `description` - Optional description
+    /// * `issuer_name` - Optional issuer name
+    pub fn set_credential_display(
+        env: Env,
+        credential_id: u64,
+        image_url: Option<Symbol>,
+        description: Option<Symbol>,
+        issuer_name: Option<Symbol>,
+    ) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        // Ensure credential exists
+        if !env
+            .storage()
+            .persistent()
+            .has(&CredentialDataKey::Credential(credential_id))
+        {
+            panic!("credential not found");
+        }
+
+        let display = CredentialDisplay {
+            image_url,
+            description,
+            issuer_name,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::Display(credential_id), &display);
+
+        env.events().publish(
+            (Symbol::new(&env, "credential_display_set"),),
+            (credential_id,),
+        );
+    }
+
+    /// Get display properties for a credential (#244).
+    ///
+    /// Returns None if no display properties have been set.
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to query
+    pub fn get_credential_display(env: Env, credential_id: u64) -> Option<CredentialDisplay> {
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::Display(credential_id))
+    }
+
+    /// Update the metadata URI for a credential. Admin only (#243).
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to update
+    /// * `new_metadata_uri` - The new metadata URI
+    pub fn update_credential_metadata(env: Env, credential_id: u64, new_metadata_uri: Symbol) {
+        Self::require_not_paused(&env);
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut info: CredentialInfo = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Credential(credential_id))
+            .expect("credential not found");
+
+        // Validate the new URI using the same rules as mint.
+        validate_metadata_uri(&env, &new_metadata_uri);
+
+        info.metadata_uri = new_metadata_uri.clone();
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::Credential(credential_id), &info);
+
+        env.events().publish(
+            (Symbol::new(&env, "credential_metadata_updated"),),
+            (credential_id, new_metadata_uri),
+        );
+    }
+
     /// Verify a credential and return its info.
     ///
     /// # Arguments
@@ -155,6 +248,17 @@ impl CredentialNft {
     /// ```
     pub fn verify_credential(env: Env, credential_id: u64) -> CredentialInfo {
         verify::verify_credential(&env, credential_id)
+    }
+
+    /// Verify a credential and return its full info along with optional display properties (#244).
+    ///
+    /// # Arguments
+    /// * `credential_id` - The credential to verify
+    ///
+    /// # Returns
+    /// A `CredentialVerification` containing the credential info and optional display properties.
+    pub fn verify_credential_with_display(env: Env, credential_id: u64) -> CredentialVerification {
+        verify::verify_credential_with_display(&env, credential_id)
     }
 
     /// Get a page of credential IDs for a learner.
