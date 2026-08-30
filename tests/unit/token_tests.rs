@@ -67,13 +67,13 @@ mod token_unit_tests {
     #[test]
     fn test_mint_increases_balance_and_supply() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let recipient = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&recipient, &1000);
+        client.mint(&admin, &recipient, &1000);
         assert_eq!(client.balance(&recipient), 1000);
         assert_eq!(client.total_supply(), 1000);
     }
@@ -81,14 +81,14 @@ mod token_unit_tests {
     #[test]
     fn test_transfer_moves_tokens() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &500);
+        client.mint(&admin, &alice, &500);
         client.transfer(&alice, &bob, &200);
 
         assert_eq!(client.balance(&alice), 300);
@@ -99,21 +99,21 @@ mod token_unit_tests {
     #[should_panic(expected = "insufficient balance")]
     fn test_transfer_insufficient_balance() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&alice, &100);
+        client.mint(&admin, &alice, &100);
         client.transfer(&alice, &bob, &200);
     }
 
     #[test]
     fn test_claim_reward_proportional_minting() {
         let env = Env::default();
-        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let (admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
@@ -135,7 +135,7 @@ mod token_unit_tests {
     #[should_panic(expected = "reward already claimed")]
     fn test_claim_reward_double_claim() {
         let env = Env::default();
-        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let (admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
@@ -154,7 +154,7 @@ mod token_unit_tests {
     #[should_panic(expected = "score exceeds maximum")]
     fn test_claim_reward_rejects_high_score() {
         let env = Env::default();
-        let (_admin, _contract_id, pt_contract_id) = setup_token(&env);
+        let (admin, _contract_id, pt_contract_id) = setup_token(&env);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
         let learner = Address::generate(&env);
@@ -168,7 +168,7 @@ mod token_unit_tests {
     #[test]
     fn test_transfer_from_with_allowance() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -176,7 +176,7 @@ mod token_unit_tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &500, &999999);
 
         client.transfer_from(&spender, &owner, &recipient, &300);
@@ -190,7 +190,7 @@ mod token_unit_tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_transfer_from_insufficient_allowance() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -198,7 +198,7 @@ mod token_unit_tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &200, &999999);
         client.transfer_from(&spender, &owner, &recipient, &500);
     }
@@ -207,7 +207,7 @@ mod token_unit_tests {
     #[should_panic(expected = "insufficient allowance")]
     fn test_transfer_from_expired_allowance() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -215,7 +215,7 @@ mod token_unit_tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &500, &10);
 
         env.ledger().with_mut(|l| {
@@ -229,7 +229,7 @@ mod token_unit_tests {
     #[test]
     fn test_approve_zero_allowance_revokes() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -247,12 +247,12 @@ mod token_unit_tests {
     #[should_panic]
     fn test_mint_without_admin_auth_fails() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let recipient = Address::generate(&env);
         // We do NOT mock auths, so mint should fail auth requirement
-        client.mint(&recipient, &1000);
+        client.mint(&admin, &recipient, &1000);
     }
 
     #[test]
@@ -277,10 +277,10 @@ mod token_unit_tests {
         let user = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&user, &2000);
+        client.mint(&admin, &user, &2000);
         assert_eq!(client.total_supply(), 2000);
 
-        client.mint(&user, &3000);
+        client.mint(&admin, &user, &3000);
         assert_eq!(client.total_supply(), 5000);
         assert_eq!(client.balance(&user), 5000);
     }
@@ -308,8 +308,8 @@ mod token_unit_tests {
         let user = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&user, &3000);
-        client.mint(&user, &2001);
+        client.mint(&admin, &user, &3000);
+        client.mint(&admin, &user, &2001);
     }
 
     #[test]
@@ -335,7 +335,7 @@ mod token_unit_tests {
 
         assert_eq!(client.max_supply(), 5000);
 
-        client.mint(&Address::generate(&env), &3000);
+        client.mint(&admin, &Address::generate(&env), &3000);
 
         client.set_max_supply(&10000);
         assert_eq!(client.max_supply(), 10000);
@@ -363,7 +363,7 @@ mod token_unit_tests {
 
         env.mock_all_auths();
 
-        client.mint(&Address::generate(&env), &3000);
+        client.mint(&admin, &Address::generate(&env), &3000);
         client.set_max_supply(&2000);
     }
 
@@ -371,7 +371,7 @@ mod token_unit_tests {
     #[should_panic(expected = "cannot mint to zero address")]
     fn test_mint_to_zero_address_panics() {
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -379,7 +379,7 @@ mod token_unit_tests {
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         ));
-        client.mint(&zero_address, &1000);
+        client.mint(&admin, &zero_address, &1000);
     }
 
     #[test]
@@ -387,7 +387,7 @@ mod token_unit_tests {
         use soroban_sdk::testutils::Events;
 
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -395,7 +395,7 @@ mod token_unit_tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &500, &999999);
         client.transfer_from(&spender, &owner, &recipient, &300);
 
@@ -422,7 +422,7 @@ mod token_unit_tests {
         // #200: from/to must be queryable via topic filters, not just present
         // somewhere in the data payload.
         let env = Env::default();
-        let (_admin, contract_id, _) = setup_token(&env);
+        let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
 
         let owner = Address::generate(&env);
@@ -430,7 +430,7 @@ mod token_unit_tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
 
-        client.mint(&owner, &1000);
+        client.mint(&admin, &owner, &1000);
         client.approve(&owner, &spender, &500, &999999);
         client.transfer_from(&spender, &owner, &recipient, &300);
 
@@ -451,7 +451,7 @@ mod token_unit_tests {
         use soroban_sdk::testutils::Events;
 
         let env = Env::default();
-        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let (admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 

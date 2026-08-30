@@ -41,4 +41,6 @@ pub enum CredentialDataKey {
     RevocationReason(u64),
     /// Generated certificate URI for learner and course (#223).
     CertificateURI(Address, Symbol),
+    /// Emergency pause state (#189).
+    Paused,
 }

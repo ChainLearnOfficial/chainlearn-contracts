@@ -51,6 +51,10 @@ path = "tests/integration/token_flow.rs"
 name = "credential_flow"
 path = "tests/integration/credential_flow.rs"
 
+[[test]]
+name = "full_flow"
+path = "tests/integration/full_flow.rs"
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

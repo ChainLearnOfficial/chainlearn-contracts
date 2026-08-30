@@ -92,6 +92,7 @@ impl ProgressTracker {
         module_ids: Vec<Symbol>,
         quiz_ids: Vec<Symbol>,
     ) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -174,20 +175,10 @@ impl ProgressTracker {
     /// assert!(!progress.eligible_for_credential);
     /// ```
     pub fn enroll(env: Env, learner: Address, course_id: Symbol) {
+        Self::require_not_paused(&env);
         Self::enroll_checked(env, learner, course_id, None);
     }
 
-    /// Enroll a learner, optionally verifying the course content hash (#235).
-    ///
-    /// Behaves exactly like [`ProgressTracker::enroll`], but when
-    /// `expected_content_hash` is `Some` and the course has a hash set, the two
-    /// must match or the call panics. This keeps hash verification opt-in and
-    /// leaves the existing `enroll` signature untouched for existing callers.
-    ///
-    /// # Arguments
-    /// * `learner` - The learner address (must authorize)
-    /// * `course_id` - The course to enroll in
-    /// * `expected_content_hash` - Hash the caller expects, or `None` to skip
     pub fn enroll_checked(
         env: Env,
         learner: Address,
@@ -292,6 +283,7 @@ impl ProgressTracker {
     /// assert!(progress.overall_progress > 0);
     /// ```
     pub fn complete_module(env: Env, learner: Address, course_id: Symbol, module_id: Symbol) {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         // Verify enrollment
@@ -403,6 +395,7 @@ impl ProgressTracker {
         quiz_id: Symbol,
         score: u32,
     ) {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         if score > chainlearn_shared::MAX_QUIZ_SCORE {
@@ -855,6 +848,7 @@ impl ProgressTracker {
     /// # Arguments
     /// * `course_id` - The course to archive
     pub fn archive_course(env: Env, course_id: Symbol) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -1121,6 +1115,33 @@ impl ProgressTracker {
         env.storage()
             .persistent()
             .has(&ProgressTrackerDataKey::Course(course_id))
+    }
+
+    // ── Emergency Pause (#189) ────────────────────────────────────────────
+
+    fn is_paused(env: &Env) -> bool {
+        env.storage().persistent().get(&ProgressTrackerDataKey::Paused).unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env) {
+            panic!("contract is paused");
+        }
+    }
+
+    /// Pause all state-changing operations. Admin only.
+    pub fn emergency_pause(env: Env) {
+        let admin: Address = env.storage().persistent().get(&ProgressTrackerDataKey::Admin).expect("not initialized");
+        admin.require_auth();
+        env.storage().persistent().set(&ProgressTrackerDataKey::Paused, &true);
+        // We omit events here to avoid adding it to events.rs
+    }
+
+    /// Unpause state-changing operations. Admin only.
+    pub fn unpause(env: Env) {
+        let admin: Address = env.storage().persistent().get(&ProgressTrackerDataKey::Admin).expect("not initialized");
+        admin.require_auth();
+        env.storage().persistent().set(&ProgressTrackerDataKey::Paused, &false);
     }
 
     /// Returns the admin address.
