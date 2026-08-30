@@ -729,6 +729,24 @@ mod progress_unit_tests {
         client.get_quiz_score(&learner, &other_course_id, &Symbol::new(&env, "quiz_1"));
     }
 
+    #[test]
+    fn test_initialize_twice_returns_already_initialized_error() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let result = client.try_initialize(&admin);
+
+        assert!(result.is_err(), "second initialize call should fail");
+        let contract_err = result
+            .err()
+            .expect("expected an error")
+            .expect("expected a typed contract error, not a host trap");
+        assert_eq!(
+            contract_err,
+            progress_tracker::ContractError::AlreadyInitialized
+        );
+    }
     // ── Issue #233: get_completion_percentage ──────────────────────────────
 
     #[test]
