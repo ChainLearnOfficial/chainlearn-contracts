@@ -146,6 +146,8 @@ impl ProgressTracker {
             // No content hash by default; set later via `set_course_content_hash` (#235).
             content_hash: Symbol::new(&env, EMPTY_CONTENT_HASH),
             prerequisites: Vec::new(&env),
+            // Start at version 1; updated via `update_course_version` (#245).
+            version: 1,
         };
 
         env.storage()
@@ -243,6 +245,7 @@ impl ProgressTracker {
             total_quiz_score: 0,
             overall_progress: 0,
             eligible_for_credential: false,
+            completed_version: None,
         };
 
         env.storage().persistent().set(&key, &progress);
@@ -348,6 +351,11 @@ impl ProgressTracker {
         progress.eligible_for_credential =
             rewards::is_eligible_for_credential(&course, &progress);
 
+        // Record the course version at the moment eligibility is reached (#245).
+        if !was_eligible && progress.eligible_for_credential {
+            progress.completed_version = Some(course.version);
+        }
+
         env.storage().persistent().set(
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
@@ -452,6 +460,11 @@ impl ProgressTracker {
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
         progress.eligible_for_credential =
             rewards::is_eligible_for_credential(&course, &progress);
+
+        // Record the course version at the moment eligibility is reached (#245).
+        if !was_eligible && progress.eligible_for_credential {
+            progress.completed_version = Some(course.version);
+        }
 
         // Single write with all updated fields
         env.storage().persistent().set(
@@ -564,6 +577,11 @@ impl ProgressTracker {
 
         progress.overall_progress = rewards::calculate_progress(&course, &progress);
         progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
+
+        // Record the course version at the moment eligibility is reached (#245).
+        if !was_eligible && progress.eligible_for_credential {
+            progress.completed_version = Some(course.version);
+        }
 
         env.storage().persistent().set(
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
@@ -708,6 +726,7 @@ impl ProgressTracker {
             total_quiz_score: progress.total_quiz_score,
             overall_progress: progress.overall_progress,
             eligible_for_credential: progress.eligible_for_credential,
+            completed_version: progress.completed_version,
         }
     }
 
@@ -908,6 +927,36 @@ impl ProgressTracker {
         env.events().publish(
             (Symbol::new(&env, "content_hash_set"),),
             (&course_id, &content_hash),
+        );
+    }
+
+    /// Update the version of a course. Admin only (#245).
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to update
+    /// * `new_version` - The new version number
+    pub fn update_course_version(env: Env, course_id: Symbol, new_version: u32) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        course.version = new_version;
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+
+        env.events().publish(
+            (Symbol::new(&env, "course_version_updated"),),
+            (&course_id, new_version),
         );
     }
 
