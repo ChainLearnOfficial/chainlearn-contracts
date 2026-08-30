@@ -527,10 +527,6 @@ impl ProgressTracker {
         Self::require_not_paused(&env);
         learner.require_auth();
 
-        if score > chainlearn_shared::MAX_QUIZ_SCORE {
-            panic!("score exceeds maximum");
-        }
-
         // Verify enrollment
         let mut progress: ProgressInfo = env
             .storage()
@@ -541,22 +537,171 @@ impl ProgressTracker {
             ))
             .expect("not enrolled");
 
-        // Check not already submitted
-        let quiz_key =
-            ProgressTrackerDataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
-        if env.storage().persistent().has(&quiz_key) {
-            panic!("quiz already submitted");
-        }
-
-        // Verify course and quiz_id
         let course: Course = env
             .storage()
             .persistent()
             .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
+        // A single submission always validates strictly (`strict: true`) and
+        // panics with its original, specific message on any problem, unlike
+        // batch_submit_quiz_score's per-quiz skip -- see
+        // submit_quiz_score_in_place's doc comment for why.
+        Self::submit_quiz_score_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            quiz_id,
+            score,
+            true,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Submit several quiz scores for a learner in one call (#221).
+    ///
+    /// Reuses the exact same per-quiz validation and submission logic as
+    /// [`Self::submit_quiz_score`] via [`Self::submit_quiz_score_in_place`],
+    /// applied once per `(quiz_id, score)` pair in `quiz_scores`.
+    ///
+    /// Processed independently: unlike [`Self::batch_complete_module`], where
+    /// modules form an ordered sequence and one bad entry must abort the
+    /// whole batch, each quiz score here is an independent fact about a
+    /// different quiz -- submitting quiz A never depends on quiz B. So an
+    /// invalid entry (already submitted, score above the maximum, or a
+    /// quiz id not in the course) is skipped rather than aborting the rest
+    /// of the batch, mirroring the existing independent-batch precedent in
+    /// this codebase, `learn_token::batch_claim_reward`. The returned `Vec`
+    /// lists exactly the quiz ids that were successfully submitted, in the
+    /// order they were processed, so callers can tell which entries (if
+    /// any) were skipped.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `course_id` - The course the quizzes belong to
+    /// * `quiz_scores` - `(quiz_id, score)` pairs to submit
+    ///
+    /// # Returns
+    /// The quiz ids that were successfully submitted.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let mut scores = Vec::new(&env);
+    /// scores.push_back((Symbol::new(&env, "quiz_1"), 80));
+    /// scores.push_back((Symbol::new(&env, "quiz_2"), 90));
+    /// let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+    /// assert_eq!(submitted.len(), 2);
+    /// ```
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    pub fn batch_submit_quiz_score(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        quiz_scores: Vec<(Symbol, u32)>,
+    ) -> Vec<Symbol> {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        let mut submitted = Vec::new(&env);
+        for (quiz_id, score) in quiz_scores.iter() {
+            let ok = Self::submit_quiz_score_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                quiz_id.clone(),
+                score,
+                false,
+            );
+            if ok {
+                submitted.push_back(quiz_id);
+            }
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+
+        submitted
+    }
+
+    /// Shared core of [`Self::submit_quiz_score`] and
+    /// [`Self::batch_submit_quiz_score`]: validates and applies a single quiz
+    /// submission against an already-loaded `course`/`progress` pair,
+    /// mutating `progress` in place and publishing the same events
+    /// `submit_quiz_score` always has.
+    ///
+    /// When `strict` is `true` (the single-call path), panics with the same
+    /// specific messages `submit_quiz_score` has always used. When `strict`
+    /// is `false` (the batch path), returns `false` instead of panicking on
+    /// the same three conditions (score above the maximum, quiz already
+    /// submitted, or quiz id not found in the course), so the batch caller
+    /// can skip a bad entry without aborting the rest -- quiz scores are
+    /// independent facts about different quizzes (#221), unlike
+    /// batch_complete_module's ordered, all-or-nothing modules (#220).
+    ///
+    /// Callers are responsible for the single storage write of `progress`
+    /// once every quiz in a call has been applied.
+    fn submit_quiz_score_in_place(
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+        course: &Course,
+        progress: &mut ProgressInfo,
+        quiz_id: Symbol,
+        score: u32,
+        strict: bool,
+    ) -> bool {
+        if score > chainlearn_shared::MAX_QUIZ_SCORE {
+            if strict {
+                panic!("score exceeds maximum");
+            }
+            return false;
+        }
+
+        // Check not already submitted
+        let quiz_key =
+            ProgressTrackerDataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
+        if env.storage().persistent().has(&quiz_key) {
+            if strict {
+                panic!("quiz already submitted");
+            }
+            return false;
+        }
+
+        // Verify quiz_id belongs to the course
         if !course.quiz_ids.contains(&quiz_id) {
-            panic!("quiz_id not found in course");
+            if strict {
+                panic!("quiz_id not found in course");
+            }
+            return false;
         }
 
         // The quiz result is stored once, under its own key (#83). ProgressInfo
@@ -576,30 +721,24 @@ impl ProgressTracker {
 
         let was_eligible = progress.eligible_for_credential;
 
-        // Recalculate from the updated in-memory aggregates, so everything is
-        // known before the single storage write below.
-        progress.overall_progress = rewards::calculate_progress(&course, &progress);
-        progress.eligible_for_credential = rewards::is_eligible_for_credential(&course, &progress);
-
-        // Single write with all updated fields
-        env.storage().persistent().set(
-            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &progress,
-        );
+        progress.overall_progress = rewards::calculate_progress(course, progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(course, progress);
 
         env.events().publish(
-            (Symbol::new(&env, "quiz_submitted"),),
-            (&learner, &course_id, &quiz_id, score),
+            (Symbol::new(env, "quiz_submitted"),),
+            (learner, course_id, &quiz_id, score),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
             env.events().publish(
-                (Symbol::new(&env, "credential_eligible"),),
-                (&learner, &course_id),
+                (Symbol::new(env, "credential_eligible"),),
+                (learner, course_id),
             );
         }
+
+        true
     }
 
     /// Retake a quiz with a higher score (#234).

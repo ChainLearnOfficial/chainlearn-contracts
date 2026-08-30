@@ -1293,6 +1293,219 @@ mod progress_unit_tests {
         assert_eq!(module_completed_count, 2);
     }
 
+    // ── Issue #221: batch quiz submission ────────────────────────────────
+
+    #[test]
+    fn test_batch_submit_quiz_score_submits_every_quiz() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 70u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 90u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert_eq!(submitted.len(), 2);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_1")));
+        assert!(submitted.contains(Symbol::new(&env, "quiz_2")));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 2);
+        assert_eq!(progress.total_quiz_score, 160);
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            70
+        );
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2")),
+            90
+        );
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_skips_invalid_entries_independently() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // quiz_1 valid, "not_a_real_quiz" invalid (not in course), quiz_2
+        // valid -- the batch must process quiz_1 and quiz_2 despite the bad
+        // entry in between, unlike batch_complete_module which would abort.
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 60u32));
+        scores.push_back((Symbol::new(&env, "not_a_real_quiz"), 50u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 80u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert_eq!(submitted.len(), 2);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_1")));
+        assert!(submitted.contains(Symbol::new(&env, "quiz_2")));
+        assert!(!submitted.contains(Symbol::new(&env, "not_a_real_quiz")));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 2);
+        assert_eq!(progress.total_quiz_score, 140);
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_skips_already_submitted_quiz() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &55);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 99u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 85u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        // quiz_1 was already submitted, so the batch skips it without
+        // touching its recorded score, and still submits quiz_2.
+        assert_eq!(submitted.len(), 1);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_2")));
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            55
+        );
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_skips_score_above_maximum() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 101u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 80u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert_eq!(submitted.len(), 1);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_2")));
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_returns_empty_when_all_entries_invalid() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "not_real_1"), 50u32));
+        scores.push_back((Symbol::new(&env, "not_real_2"), 60u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert_eq!(submitted.len(), 0);
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 0);
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_matches_sequential_single_calls() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        let batch_learner = Address::generate(&env);
+        let single_learner = Address::generate(&env);
+        client.enroll(&batch_learner, &course_id);
+        client.enroll(&single_learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 65u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 95u32));
+        client.batch_submit_quiz_score(&batch_learner, &course_id, &scores);
+
+        client.submit_quiz_score(&single_learner, &course_id, &Symbol::new(&env, "quiz_1"), &65);
+        client.submit_quiz_score(&single_learner, &course_id, &Symbol::new(&env, "quiz_2"), &95);
+
+        let batch_progress = client.get_progress(&batch_learner, &course_id);
+        let single_progress = client.get_progress(&single_learner, &course_id);
+        assert_eq!(
+            batch_progress.total_quiz_score,
+            single_progress.total_quiz_score
+        );
+        assert_eq!(
+            batch_progress.overall_progress,
+            single_progress.overall_progress
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not enrolled")]
+    fn test_batch_submit_quiz_score_requires_enrollment() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
+        client.batch_submit_quiz_score(&learner, &course_id, &scores);
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_can_unlock_credential_eligibility() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        assert!(!client.get_progress(&learner, &course_id).eligible_for_credential);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 70u32));
+        client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert!(client.get_progress(&learner, &course_id).eligible_for_credential);
+    }
+
     // ── Issue #219: on-chain upgrade counter ─────────────────────────────
 
     #[test]
