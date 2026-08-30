@@ -39,8 +39,32 @@ pub enum CredentialDataKey {
     Metadata,
     /// Stores the reason for credential revocation (#194).
     RevocationReason(u64),
+    /// Display properties for a credential (#244).
+    Display(u64),
     /// Generated certificate URI for learner and course (#223).
     CertificateURI(Address, Symbol),
     /// Emergency pause state (#189).
     Paused,
+}
+
+/// Display properties for a credential NFT (#244).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialDisplay {
+    /// URL of the credential image (e.g., IPFS hash).
+    pub image_url: Option<Symbol>,
+    /// Human-readable description of the credential.
+    pub description: Option<Symbol>,
+    /// Name of the issuer organization.
+    pub issuer_name: Option<Symbol>,
+}
+
+/// Combined verification response for a credential (#244).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialVerification {
+    /// The core credential info.
+    pub info: CredentialInfo,
+    /// Optional display properties.
+    pub display: Option<CredentialDisplay>,
 }

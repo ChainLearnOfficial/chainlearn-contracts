@@ -1,7 +1,7 @@
 use chainlearn_shared::MAX_CREDENTIALS_PAGE_SIZE;
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::metadata::{CredentialDataKey, CredentialInfo};
+use crate::metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
 
 /// Read the full list of credential IDs owned by a learner.
 fn learner_credentials(env: &Env, learner: &Address) -> Vec<u64> {
@@ -27,6 +27,30 @@ pub fn verify_credential(env: &Env, credential_id: u64) -> CredentialInfo {
         .persistent()
         .get(&CredentialDataKey::Credential(credential_id))
         .expect("credential not found")
+}
+
+/// Verify a credential and return its full info along with optional display properties (#244).
+///
+/// # Arguments
+/// * `env` - Soroban environment
+/// * `credential_id` - The unique credential identifier
+///
+/// # Returns
+/// A `CredentialVerification` containing the credential info and optional display properties.
+///
+/// # Panics
+/// If the credential does not exist.
+pub fn verify_credential_with_display(env: &Env, credential_id: u64) -> CredentialVerification {
+    let info: CredentialInfo = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Credential(credential_id))
+        .expect("credential not found");
+    let display: Option<CredentialDisplay> = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Display(credential_id));
+    CredentialVerification { info, display }
 }
 
 /// Get a page of credential IDs belonging to a learner.
