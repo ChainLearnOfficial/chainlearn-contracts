@@ -1609,6 +1609,19 @@ mod tests {
         assert_eq!(client.total_minted_to(&learner), balance);
     }
 
+    #[test]
+    fn test_total_minted_to_zero_amount_mint_leaves_total_at_zero() {
+        let env = Env::default();
+        let (admin, lt_id, _pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        client.mint(&admin, &user, &0);
+
+        assert_eq!(client.total_minted_to(&user), 0);
+    }
+
     // ── Issue #237: reward claim history ─────────────────────────────────
 
     #[test]
@@ -1727,6 +1740,35 @@ mod tests {
         assert_eq!(client.get_claim_history(&learner).len(), 1);
     }
 
+    #[test]
+    fn test_claim_history_records_across_different_courses() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_a = Symbol::new(&env, "rust_101");
+        let course_b = Symbol::new(&env, "solidity_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_a, &quiz_id, 80);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_b, &quiz_id, 60);
+
+        env.ledger().with_mut(|li| li.timestamp = 100);
+        client.claim_reward(&learner, &course_a, &quiz_id);
+        env.ledger().with_mut(|li| li.timestamp = 200);
+        client.claim_reward(&learner, &course_b, &quiz_id);
+
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.get(0).unwrap().course_id, course_a);
+        assert_eq!(history.get(1).unwrap().course_id, course_b);
+        // Same quiz_id in both courses, kept distinct by course_id.
+        assert_eq!(history.get(0).unwrap().quiz_id, quiz_id);
+        assert_eq!(history.get(1).unwrap().quiz_id, quiz_id);
+    }
+
     // ── Issue #238: pause/unpause events ─────────────────────────────────
 
     #[test]
@@ -1824,6 +1866,39 @@ mod tests {
         client.unpause(&admin);
         client.transfer(&alice, &bob, &100);
         assert_eq!(client.balance(&bob), 100);
+    }
+
+    #[test]
+    fn test_pause_blocks_burn_claim_reward_and_claim_vested() {
+        let env = Env::default();
+        let (admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        client.mint(&admin, &alice, &1_000);
+
+        let beneficiary = Address::generate(&env);
+        client.create_vesting(&beneficiary, &1_000, &0, &1_000);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        client.pause(&admin);
+        assert!(client.try_burn(&alice, &100).is_err());
+        assert!(client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .is_err());
+        assert!(client.try_claim_vested(&beneficiary).is_err());
+
+        client.unpause(&admin);
+        client.burn(&alice, &100);
+        assert_eq!(client.balance(&alice), 900);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        assert!(client.balance(&learner) > 0);
     }
 
     #[test]
