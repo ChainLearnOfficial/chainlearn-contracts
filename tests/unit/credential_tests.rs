@@ -346,13 +346,13 @@ mod credential_unit_tests {
         let cred_id = client.mint_credential(&learner, &course_id, &90, &metadata_uri);
 
         let before = client.verify_credential(&cred_id);
-        let new_expiry = before.expiry + 10_000;
+        let new_expiry = before.expires_at + 10_000;
 
         client.renew_credential(&cred_id, &new_expiry);
 
         let after = client.verify_credential(&cred_id);
-        assert_eq!(after.expiry, new_expiry);
-        assert!(after.expiry > before.expiry);
+        assert_eq!(after.expires_at, new_expiry);
+        assert!(after.expires_at > before.expires_at);
     }
 
     #[test]
