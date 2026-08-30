@@ -517,7 +517,7 @@ impl ProgressTracker {
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &*progress,
+            progress,
         );
 
         env.events().publish(
@@ -792,7 +792,7 @@ impl ProgressTracker {
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &*progress,
+            progress,
         );
 
         env.events().publish(
