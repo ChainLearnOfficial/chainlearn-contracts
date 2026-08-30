@@ -732,21 +732,6 @@ pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
     );
 }
 
-/// Whether the contract is currently paused (#238).
-pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .persistent()
-        .get(&TokenDataKey::Paused)
-        .unwrap_or(false)
-}
-
-/// Set the paused flag (#238).
-pub fn set_paused(env: &Env, paused: bool) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Paused, &paused);
-}
-
 // ── Vesting Schedules (#225) ──────────────────────────────────────────────────
 
 /// Store a vesting schedule for a beneficiary.
