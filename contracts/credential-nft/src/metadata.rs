@@ -39,4 +39,6 @@ pub enum CredentialDataKey {
     Metadata,
     /// Stores the reason for credential revocation (#194).
     RevocationReason(u64),
+    /// Generated certificate URI for learner and course (#223).
+    CertificateURI(Address, Symbol),
 }

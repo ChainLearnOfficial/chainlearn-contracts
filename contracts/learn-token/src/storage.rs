@@ -45,6 +45,18 @@ pub enum TokenDataKey {
     ClaimHistory(Address),
     /// Whether the contract is currently paused (#238).
     Paused,
+    /// Vesting schedule for a beneficiary (#225).
+    VestingSchedule(Address),
+    /// Amount already claimed from a vesting schedule (#225).
+    VestingClaimed(Address),
+    /// Governance proposals, keyed by proposal ID (#226).
+    Proposal(u64),
+    /// Proposal counter (#226).
+    ProposalCounter,
+    /// Per-voter vote record for a proposal (#226).
+    Vote(ProposalVoteKey),
+    /// Per-address permit nonce for replay protection (#224).
+    PermitNonce(Address),
 }
 
 #[contracttype]
@@ -97,6 +109,52 @@ pub struct RewardKey {
     pub learner: Address,
     pub course_id: soroban_sdk::Symbol,
     pub quiz_id: soroban_sdk::Symbol,
+}
+
+/// A token vesting schedule for a beneficiary (#225).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VestingSchedule {
+    /// Total tokens to vest.
+    pub total_amount: i128,
+    /// Ledger timestamp after which tokens begin vesting.
+    pub cliff_timestamp: u64,
+    /// Duration in seconds over which tokens vest linearly after cliff.
+    pub duration_seconds: u64,
+    /// Timestamp when the schedule was created.
+    pub created_at: u64,
+    /// Whether the schedule has been fully claimed.
+    pub exhausted: bool,
+}
+
+/// A governance proposal (#226).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Proposal {
+    /// Human-readable description of the proposal.
+    pub description: soroban_sdk::String,
+    /// Number of choices (e.g. 2 = yes/no).
+    pub choices: u32,
+    /// Ledger timestamp when voting opens.
+    pub start_time: u64,
+    /// Ledger timestamp when voting closes.
+    pub end_time: u64,
+    /// Snapshot ledger height used for voting power.
+    pub snapshot_ledger: u32,
+    /// Total votes cast per choice (index 0 = choice 1, etc.).
+    pub vote_totals: soroban_sdk::Vec<i128>,
+    /// Whether the proposal has been executed.
+    pub executed: bool,
+    /// Which choice won on execution (u32::MAX = not yet executed).
+    pub winning_choice: u32,
+}
+
+/// Key for a voter's vote record on a proposal (#226).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposalVoteKey {
+    pub proposal_id: u64,
+    pub voter: Address,
 }
 
 // ── Storage Helpers ───────────────────────────────────────────────────────────
@@ -606,4 +664,105 @@ pub fn set_paused(env: &Env, paused: bool) {
     env.storage()
         .persistent()
         .set(&TokenDataKey::Paused, &paused);
+}
+
+// ── Vesting Schedules (#225) ──────────────────────────────────────────────────
+
+/// Store a vesting schedule for a beneficiary.
+pub fn set_vesting_schedule(env: &Env, beneficiary: &Address, schedule: &VestingSchedule) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::VestingSchedule(beneficiary.clone()), schedule);
+}
+
+/// Retrieve a vesting schedule for a beneficiary, if one exists.
+pub fn get_vesting_schedule(env: &Env, beneficiary: &Address) -> Option<VestingSchedule> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::VestingSchedule(beneficiary.clone()))
+}
+
+/// Get the total amount already claimed by a beneficiary from vesting.
+pub fn get_vesting_claimed(env: &Env, beneficiary: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::VestingClaimed(beneficiary.clone()))
+        .unwrap_or(0)
+}
+
+/// Record cumulative claimed amount for a beneficiary.
+pub fn set_vesting_claimed(env: &Env, beneficiary: &Address, claimed: i128) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::VestingClaimed(beneficiary.clone()), &claimed);
+}
+
+// ── Governance Proposals (#226) ───────────────────────────────────────────────
+
+/// Get the current proposal counter (next proposal ID = counter + 1).
+pub fn get_proposal_counter(env: &Env) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::ProposalCounter)
+        .unwrap_or(0)
+}
+
+/// Increment and return the next proposal ID.
+pub fn next_proposal_id(env: &Env) -> u64 {
+    let next = get_proposal_counter(env) + 1;
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::ProposalCounter, &next);
+    next
+}
+
+/// Store a governance proposal.
+pub fn set_proposal(env: &Env, proposal_id: u64, proposal: &Proposal) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::Proposal(proposal_id), proposal);
+}
+
+/// Retrieve a governance proposal by ID.
+pub fn get_proposal(env: &Env, proposal_id: u64) -> Option<Proposal> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::Proposal(proposal_id))
+}
+
+/// Record that a voter has voted on a proposal (choice index).
+pub fn set_vote(env: &Env, proposal_id: u64, voter: &Address, choice: u32) {
+    let key = TokenDataKey::Vote(ProposalVoteKey {
+        proposal_id,
+        voter: voter.clone(),
+    });
+    env.storage().persistent().set(&key, &choice);
+}
+
+/// Whether a voter has already voted on a proposal.
+pub fn has_voted(env: &Env, proposal_id: u64, voter: &Address) -> bool {
+    let key = TokenDataKey::Vote(ProposalVoteKey {
+        proposal_id,
+        voter: voter.clone(),
+    });
+    env.storage().persistent().has(&key)
+}
+
+// ── Permit Nonces (#224) ──────────────────────────────────────────────────────
+
+/// Get the current permit nonce for an owner (starts at 0).
+pub fn get_permit_nonce(env: &Env, owner: &Address) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::PermitNonce(owner.clone()))
+        .unwrap_or(0)
+}
+
+/// Increment the permit nonce for an owner and return the new value.
+pub fn increment_permit_nonce(env: &Env, owner: &Address) -> u64 {
+    let next = get_permit_nonce(env, owner) + 1;
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::PermitNonce(owner.clone()), &next);
+    next
 }
