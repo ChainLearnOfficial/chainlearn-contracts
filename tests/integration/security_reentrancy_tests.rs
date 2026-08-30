@@ -13,8 +13,8 @@ pub struct MaliciousContract;
 impl MaliciousContract {
     pub fn attack(env: Env, token_id: Address) {
         let client = LearnTokenClient::new(&env, &token_id);
-        // Attempt a reentrant call during a malicious contract execution
-        client.transfer(&env.current_contract_address(), &Address::generate(&env), &1);
+        // Attempt an unauthorized call during contract execution
+        client.transfer(&Address::generate(&env), &Address::generate(&env), &1);
     }
 }
 

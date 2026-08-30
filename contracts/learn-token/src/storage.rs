@@ -59,6 +59,10 @@ pub enum TokenDataKey {
     Vote(ProposalVoteKey),
     /// Per-address permit nonce for replay protection (#224).
     PermitNonce(Address),
+    /// Count of persistent entries the contract has created (#254).
+    StorageEntryCount,
+    /// List of registered admins and their assigned roles (#212).
+    Admins,
 }
 
 #[contracttype]
@@ -67,6 +71,13 @@ pub enum AdminRole {
     Admin,
     Minter,
     Pauser,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminInfo {
+    pub address: Address,
+    pub role: AdminRole,
 }
 
 #[contracttype]
@@ -182,9 +193,10 @@ pub fn is_initialized(env: &Env) -> bool {
     env.storage().persistent().has(&TokenDataKey::Admin)
 }
 
-/// Store the admin address.
+/// Store the primary admin address and initialize the admins list (#212).
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().persistent().set(&TokenDataKey::Admin, admin);
+    add_admin(env, admin, &AdminRole::Admin);
 }
 
 /// Retrieve the admin address.
@@ -193,6 +205,48 @@ pub fn get_admin(env: &Env) -> Address {
         .persistent()
         .get(&TokenDataKey::Admin)
         .expect("contract not initialized")
+}
+
+// ── Multi-Admin Management (#212) ─────────────────────────────────────────────
+
+/// Get list of all registered admins (#212).
+pub fn get_admins(env: &Env) -> Vec<AdminInfo> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::Admins)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+/// Set list of registered admins (#212).
+pub fn set_admins(env: &Env, admins: &Vec<AdminInfo>) {
+    env.storage().persistent().set(&TokenDataKey::Admins, admins);
+}
+
+/// Add an admin to the admin list and grant the role (#212).
+pub fn add_admin(env: &Env, address: &Address, role: &AdminRole) {
+    let mut admins = get_admins(env);
+    let admin_info = AdminInfo {
+        address: address.clone(),
+        role: role.clone(),
+    };
+    if !admins.contains(&admin_info) {
+        admins.push_back(admin_info);
+        set_admins(env, &admins);
+    }
+    grant_role(env, address, role);
+}
+
+/// Remove an admin from the admin list and revoke the role (#212).
+pub fn remove_admin(env: &Env, address: &Address, role: &AdminRole) {
+    let admins = get_admins(env);
+    let mut new_admins = Vec::new(env);
+    for admin in admins.iter() {
+        if admin.address != *address || admin.role != *role {
+            new_admins.push_back(admin);
+        }
+    }
+    set_admins(env, &new_admins);
+    revoke_role(env, address, role);
 }
 
 // ── Role Management (#190) ───────────────────────────────────────────────────
@@ -229,7 +283,11 @@ pub fn grant_role(env: &Env, address: &Address, role: &AdminRole) {
         address: address.clone(),
         role: role.clone(),
     });
+    let is_new = !env.storage().persistent().has(&key);
     env.storage().persistent().set(&key, &true);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Revoke a role from an address.
@@ -238,7 +296,11 @@ pub fn revoke_role(env: &Env, address: &Address, role: &AdminRole) {
         address: address.clone(),
         role: role.clone(),
     });
+    let existed = env.storage().persistent().has(&key);
     env.storage().persistent().remove(&key);
+    if existed {
+        track_entry_removed(env);
+    }
 }
 
 
@@ -470,12 +532,16 @@ pub fn set_reward_claimed(
         quiz_id: quiz_id.clone(),
     };
     let data_key = TokenDataKey::RewardClaimed(key);
+    let is_new = !env.storage().persistent().has(&data_key);
     env.storage().persistent().set(&data_key, &true);
     env.storage().persistent().extend_ttl(
         &data_key,
         PERSISTENT_TTL_THRESHOLD,
         PERSISTENT_TTL_EXTEND_TO,
     );
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Store the progress-tracker contract address.
@@ -551,16 +617,22 @@ pub fn is_whitelisted(env: &Env, address: &Address) -> bool {
 
 /// Add an address to the whitelist.
 pub fn add_to_whitelist(env: &Env, address: &Address) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Whitelist(address.clone()), &true);
+    let key = TokenDataKey::Whitelist(address.clone());
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, &true);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Remove an address from the whitelist.
 pub fn remove_from_whitelist(env: &Env, address: &Address) {
-    env.storage()
-        .persistent()
-        .remove(&TokenDataKey::Whitelist(address.clone()));
+    let key = TokenDataKey::Whitelist(address.clone());
+    let existed = env.storage().persistent().has(&key);
+    env.storage().persistent().remove(&key);
+    if existed {
+        track_entry_removed(env);
+    }
 }
 
 /// Record the ledger sequence of the most recent transfer made by `sender`.
@@ -596,7 +668,11 @@ pub fn set_snapshot_balance(env: &Env, address: &Address, ledger_height: u32, ba
         address: address.clone(),
         ledger_height,
     });
+    let is_new = !env.storage().persistent().has(&key);
     env.storage().persistent().set(&key, &balance);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Get a snapshot of an address's balance at a given ledger height.
@@ -623,10 +699,14 @@ pub fn get_snapshot_balance(env: &Env, address: &Address, ledger_height: u32) ->
 /// tracked. Idempotent — safe to call on every approval.
 pub fn track_allowance_spender(env: &Env, owner: &Address, spender: &Address) {
     let key = TokenDataKey::AllowanceSpenders(owner.clone());
+    let is_new = !env.storage().persistent().has(&key);
     let mut spenders: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
     if !spenders.contains(spender) {
         spenders.push_back(spender.clone());
         env.storage().persistent().set(&key, &spenders);
+        if is_new {
+            track_entry_created(env);
+        }
     }
 }
 
@@ -692,6 +772,7 @@ pub fn get_total_minted_to(env: &Env, address: &Address) -> i128 {
 /// balance changes that produced it.
 pub fn add_total_minted_to(env: &Env, address: &Address, amount: i128) {
     let data_key = TokenDataKey::TotalMintedTo(address.clone());
+    let is_new = !env.storage().persistent().has(&data_key);
     let current: i128 = env.storage().persistent().get(&data_key).unwrap_or(0);
     env.storage()
         .persistent()
@@ -701,6 +782,9 @@ pub fn add_total_minted_to(env: &Env, address: &Address, amount: i128) {
         PERSISTENT_TTL_THRESHOLD,
         PERSISTENT_TTL_EXTEND_TO,
     );
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Get a learner's full reward claim history (#237).
@@ -719,6 +803,7 @@ pub fn get_claim_history(env: &Env, learner: &Address) -> Vec<ClaimRecord> {
 /// safe because `claim_reward` rejects double-claims before reaching here.
 pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
     let data_key = TokenDataKey::ClaimHistory(learner.clone());
+    let is_new = !env.storage().persistent().has(&data_key);
     let mut history: Vec<ClaimRecord> = env
         .storage()
         .persistent()
@@ -731,6 +816,10 @@ pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
         PERSISTENT_TTL_THRESHOLD,
         PERSISTENT_TTL_EXTEND_TO,
     );
+    if is_new {
+        track_entry_created(env);
+    }
+}
 }
 
 
@@ -738,9 +827,12 @@ pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
 
 /// Store a vesting schedule for a beneficiary.
 pub fn set_vesting_schedule(env: &Env, beneficiary: &Address, schedule: &VestingSchedule) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::VestingSchedule(beneficiary.clone()), schedule);
+    let key = TokenDataKey::VestingSchedule(beneficiary.clone());
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, schedule);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Retrieve a vesting schedule for a beneficiary, if one exists.
@@ -760,9 +852,12 @@ pub fn get_vesting_claimed(env: &Env, beneficiary: &Address) -> i128 {
 
 /// Record cumulative claimed amount for a beneficiary.
 pub fn set_vesting_claimed(env: &Env, beneficiary: &Address, claimed: i128) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::VestingClaimed(beneficiary.clone()), &claimed);
+    let key = TokenDataKey::VestingClaimed(beneficiary.clone());
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, &claimed);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 // ── Governance Proposals (#226) ───────────────────────────────────────────────
@@ -786,9 +881,12 @@ pub fn next_proposal_id(env: &Env) -> u64 {
 
 /// Store a governance proposal.
 pub fn set_proposal(env: &Env, proposal_id: u64, proposal: &Proposal) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Proposal(proposal_id), proposal);
+    let key = TokenDataKey::Proposal(proposal_id);
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, proposal);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Retrieve a governance proposal by ID.
@@ -804,7 +902,11 @@ pub fn set_vote(env: &Env, proposal_id: u64, voter: &Address, choice: u32) {
         proposal_id,
         voter: voter.clone(),
     });
+    let is_new = !env.storage().persistent().has(&key);
     env.storage().persistent().set(&key, &choice);
+    if is_new {
+        track_entry_created(env);
+    }
 }
 
 /// Whether a voter has already voted on a proposal.
@@ -829,8 +931,60 @@ pub fn get_permit_nonce(env: &Env, owner: &Address) -> u64 {
 /// Increment the permit nonce for an owner and return the new value.
 pub fn increment_permit_nonce(env: &Env, owner: &Address) -> u64 {
     let next = get_permit_nonce(env, owner) + 1;
+    let key = TokenDataKey::PermitNonce(owner.clone());
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, &next);
+    if is_new {
+        track_entry_created(env);
+    }
+    next
+}
+
+// ── Storage Size Tracking (#254) ─────────────────────────────────────────────
+//
+// Soroban has no host API to enumerate or count a contract's own storage
+// keys, so the entry count is tracked by hand: every storage helper that
+// creates a brand-new per-entity entry (as opposed to overwriting one that
+// already exists) calls `track_entry_created` / `track_entry_removed`
+// around the write, guarded by a `has()` check so repeat writes to the
+// same key don't inflate the count.
+//
+// Singleton config values set once at `initialize()` (admin, name, symbol,
+// decimals, total supply, max supply, metadata, transfer restriction,
+// wasm hash, upgrade version, paused flag, proposal counter) are not
+// counted -- they don't grow with usage, so they aren't what a caller is
+// asking about when checking "how much storage is this contract using".
+// `Balance` and `Allowance` are also excluded: balances are written on
+// every transfer/mint/burn and allowances live in temporary storage, so
+// instrumenting either would add a `has()` check to the contract's hottest
+// paths for a self-referential accounting entry that isn't itself billed
+// as persistent storage in the allowance's case.
+
+/// Increment the storage entry counter. Call exactly once per brand-new
+/// persistent entry (i.e. only after confirming the entry did not already
+/// exist).
+fn track_entry_created(env: &Env) {
+    let next = get_storage_size(env) + 1;
     env.storage()
         .persistent()
-        .set(&TokenDataKey::PermitNonce(owner.clone()), &next);
-    next
+        .set(&TokenDataKey::StorageEntryCount, &next);
+}
+
+/// Decrement the storage entry counter. Call exactly once per persistent
+/// entry removed.
+fn track_entry_removed(env: &Env) {
+    let current = get_storage_size(env);
+    let next = current.saturating_sub(1);
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::StorageEntryCount, &next);
+}
+
+/// Number of persistent entries the contract has created, net of any that
+/// have since been removed. Defaults to 0 before any tracked entry exists.
+pub fn get_storage_size(env: &Env) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::StorageEntryCount)
+        .unwrap_or(0)
 }

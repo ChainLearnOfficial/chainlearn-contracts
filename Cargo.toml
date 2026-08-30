@@ -79,6 +79,10 @@ path = "tests/integration/admin_role_flow.rs"
 name = "batch_operations"
 path = "tests/integration/batch_operations.rs"
 
+[[test]]
+name = "xcontract_calls_bench"
+path = "tests/benchmarks/xcontract_calls.rs"
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

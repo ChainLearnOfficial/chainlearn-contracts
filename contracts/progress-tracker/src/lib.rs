@@ -7,6 +7,7 @@ use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 pub use types::{
     Course, LearnerStats, ProgressExport, ProgressInfo, ProgressTrackerDataKey, QuizResult,
+    VersionedContractMetadata,
 };
 
 /// Sentinel meaning "no content hash set"; enrollment skips verification (#235).
@@ -44,18 +45,46 @@ impl ProgressTracker {
             &ProgressTrackerDataKey::Metadata,
             &ContractMetadata::new(&env, "progress-tracker"),
         );
+        // On-chain upgrade counter, separate from the crate's semantic
+        // version above (#219). Starts at zero for a freshly initialized
+        // contract; bumped whenever the contract is upgraded in place.
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Version, &0u32);
         Ok(())
     }
 
-    /// Get the contract's on-chain name and version (#107).
+    /// Get the contract's on-chain name, semantic version, and upgrade
+    /// counter (#107, #219).
     ///
     /// Lets external tools (indexers, block explorers, upgrade tooling)
-    /// identify which contract and release is deployed without inferring it
-    /// from behavior.
-    pub fn contract_metadata(env: Env) -> ContractMetadata {
-        env.storage()
+    /// identify which contract and release is deployed, and how many times
+    /// it has been upgraded in place, without inferring it from behavior.
+    pub fn contract_metadata(env: Env) -> VersionedContractMetadata {
+        let metadata = env
+            .storage()
             .persistent()
             .get(&ProgressTrackerDataKey::Metadata)
+            .expect("not initialized");
+        let version = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Version)
+            .expect("not initialized");
+
+        VersionedContractMetadata { metadata, version }
+    }
+
+    /// Get the contract's on-chain upgrade counter on its own (#219).
+    ///
+    /// Starts at `0` for a never-upgraded contract. progress-tracker has no
+    /// in-place upgrade mechanism yet, so this only ever reads back the
+    /// value set at `initialize()` today; it is queryable now so indexers
+    /// and future upgrade tooling have a stable key to bump and read.
+    pub fn contract_version(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Version)
             .expect("not initialized")
     }
 
@@ -299,6 +328,118 @@ impl ProgressTracker {
             ))
             .expect("not enrolled");
 
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        Self::complete_module_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            module_id,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Complete several modules for a learner in one call (#220).
+    ///
+    /// Reuses the exact same per-module validation and completion logic as
+    /// [`Self::complete_module`] via [`Self::complete_module_in_place`], applied
+    /// once per entry in `module_ids`, in order.
+    ///
+    /// Atomic: each module is validated in turn (must exist in the course,
+    /// must not already be completed, and its predecessor in course order
+    /// must already be completed), and any failure panics immediately. Since
+    /// Soroban transactions revert all storage writes on panic, a single
+    /// invalid module id anywhere in the batch aborts the whole call --
+    /// nothing from the batch is partially applied. This matches the
+    /// ordered, sequential nature of module completion (contrast with
+    /// [`Self::batch_submit_quiz_score`], where quizzes are independent
+    /// facts and a bad entry is skipped rather than aborting the batch).
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `course_id` - The course the modules belong to
+    /// * `module_ids` - The modules to mark complete, in the order to apply them
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let mut modules = Vec::new(&env);
+    /// modules.push_back(Symbol::new(&env, "mod_1"));
+    /// modules.push_back(Symbol::new(&env, "mod_2"));
+    /// client.batch_complete_module(&learner, &course_id, &modules);
+    /// ```
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    /// * If any module id does not exist in the course
+    /// * If any module is already completed
+    /// * If any module's predecessor in course order has not been completed
+    pub fn batch_complete_module(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        module_ids: Vec<Symbol>,
+    ) {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        for module_id in module_ids.iter() {
+            Self::complete_module_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                module_id,
+            );
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Shared core of [`Self::complete_module`] and [`Self::batch_complete_module`]:
+    /// validates and applies a single module completion against an
+    /// already-loaded `course`/`progress` pair, mutating `progress` in place
+    /// and publishing the same events `complete_module` always has. Callers
+    /// are responsible for the single storage write of `progress` once all
+    /// modules in a call have been applied.
+    fn complete_module_in_place(
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+        course: &Course,
+        progress: &mut ProgressInfo,
+        module_id: Symbol,
+    ) {
         // Check not already completed
         let completed_key = ProgressTrackerDataKey::ModuleCompleted(
             learner.clone(),
@@ -310,12 +451,6 @@ impl ProgressTracker {
         }
 
         // Verify module exists in course and get its index
-        let course: Course = env
-            .storage()
-            .persistent()
-            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
-            .expect("course not found");
-
         let mut module_index: Option<u32> = None;
         for (i, m) in course.module_ids.iter().enumerate() {
             if m == module_id {
@@ -360,18 +495,20 @@ impl ProgressTracker {
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
+        progress.overall_progress = rewards::calculate_progress(course, progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(course, progress);
 
         env.events().publish(
-            (Symbol::new(&env, "module_completed"),),
-            (&learner, &course_id, &module_id, progress.overall_progress),
+            (Symbol::new(env, "module_completed"),),
+            (learner, course_id, &module_id, progress.overall_progress),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
             env.events().publish(
-                (Symbol::new(&env, "credential_eligible"),),
-                (&learner, &course_id),
+                (Symbol::new(env, "credential_eligible"),),
+                (learner, course_id),
             );
         }
     }
@@ -406,10 +543,6 @@ impl ProgressTracker {
         Self::require_not_paused(&env);
         learner.require_auth();
 
-        if score > chainlearn_shared::MAX_QUIZ_SCORE {
-            panic!("score exceeds maximum");
-        }
-
         // Verify enrollment
         let mut progress: ProgressInfo = env
             .storage()
@@ -420,22 +553,171 @@ impl ProgressTracker {
             ))
             .expect("not enrolled");
 
-        // Check not already submitted
-        let quiz_key =
-            ProgressTrackerDataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
-        if env.storage().persistent().has(&quiz_key) {
-            panic!("quiz already submitted");
-        }
-
-        // Verify course and quiz_id
         let course: Course = env
             .storage()
             .persistent()
             .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
+        // A single submission always validates strictly (`strict: true`) and
+        // panics with its original, specific message on any problem, unlike
+        // batch_submit_quiz_score's per-quiz skip -- see
+        // submit_quiz_score_in_place's doc comment for why.
+        Self::submit_quiz_score_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            quiz_id,
+            score,
+            true,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Submit several quiz scores for a learner in one call (#221).
+    ///
+    /// Reuses the exact same per-quiz validation and submission logic as
+    /// [`Self::submit_quiz_score`] via [`Self::submit_quiz_score_in_place`],
+    /// applied once per `(quiz_id, score)` pair in `quiz_scores`.
+    ///
+    /// Processed independently: unlike [`Self::batch_complete_module`], where
+    /// modules form an ordered sequence and one bad entry must abort the
+    /// whole batch, each quiz score here is an independent fact about a
+    /// different quiz -- submitting quiz A never depends on quiz B. So an
+    /// invalid entry (already submitted, score above the maximum, or a
+    /// quiz id not in the course) is skipped rather than aborting the rest
+    /// of the batch, mirroring the existing independent-batch precedent in
+    /// this codebase, `learn_token::batch_claim_reward`. The returned `Vec`
+    /// lists exactly the quiz ids that were successfully submitted, in the
+    /// order they were processed, so callers can tell which entries (if
+    /// any) were skipped.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `course_id` - The course the quizzes belong to
+    /// * `quiz_scores` - `(quiz_id, score)` pairs to submit
+    ///
+    /// # Returns
+    /// The quiz ids that were successfully submitted.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// let mut scores = Vec::new(&env);
+    /// scores.push_back((Symbol::new(&env, "quiz_1"), 80));
+    /// scores.push_back((Symbol::new(&env, "quiz_2"), 90));
+    /// let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+    /// assert_eq!(submitted.len(), 2);
+    /// ```
+    ///
+    /// # Panics
+    /// * If the learner is not enrolled in the course
+    pub fn batch_submit_quiz_score(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+        quiz_scores: Vec<(Symbol, u32)>,
+    ) -> Vec<Symbol> {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        let mut submitted = Vec::new(&env);
+        for (quiz_id, score) in quiz_scores.iter() {
+            let ok = Self::submit_quiz_score_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                quiz_id.clone(),
+                score,
+                false,
+            );
+            if ok {
+                submitted.push_back(quiz_id);
+            }
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+
+        submitted
+    }
+
+    /// Shared core of [`Self::submit_quiz_score`] and
+    /// [`Self::batch_submit_quiz_score`]: validates and applies a single quiz
+    /// submission against an already-loaded `course`/`progress` pair,
+    /// mutating `progress` in place and publishing the same events
+    /// `submit_quiz_score` always has.
+    ///
+    /// When `strict` is `true` (the single-call path), panics with the same
+    /// specific messages `submit_quiz_score` has always used. When `strict`
+    /// is `false` (the batch path), returns `false` instead of panicking on
+    /// the same three conditions (score above the maximum, quiz already
+    /// submitted, or quiz id not found in the course), so the batch caller
+    /// can skip a bad entry without aborting the rest -- quiz scores are
+    /// independent facts about different quizzes (#221), unlike
+    /// batch_complete_module's ordered, all-or-nothing modules (#220).
+    ///
+    /// Callers are responsible for the single storage write of `progress`
+    /// once every quiz in a call has been applied.
+    fn submit_quiz_score_in_place(
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+        course: &Course,
+        progress: &mut ProgressInfo,
+        quiz_id: Symbol,
+        score: u32,
+        strict: bool,
+    ) -> bool {
+        if score > chainlearn_shared::MAX_QUIZ_SCORE {
+            if strict {
+                panic!("score exceeds maximum");
+            }
+            return false;
+        }
+
+        // Check not already submitted
+        let quiz_key =
+            ProgressTrackerDataKey::QuizResult(learner.clone(), course_id.clone(), quiz_id.clone());
+        if env.storage().persistent().has(&quiz_key) {
+            if strict {
+                panic!("quiz already submitted");
+            }
+            return false;
+        }
+
+        // Verify quiz_id belongs to the course
         if !course.quiz_ids.contains(&quiz_id) {
-            panic!("quiz_id not found in course");
+            if strict {
+                panic!("quiz_id not found in course");
+            }
+            return false;
         }
 
         // The quiz result is stored once, under its own key (#83). ProgressInfo
@@ -449,7 +731,7 @@ impl ProgressTracker {
         };
 
         env.storage().persistent().set(&quiz_key, &result);
-        
+
         progress.quizzes_submitted += 1;
         progress.total_quiz_score += score as u64;
 
@@ -471,20 +753,24 @@ impl ProgressTracker {
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
+        progress.overall_progress = rewards::calculate_progress(course, progress);
+        progress.eligible_for_credential = rewards::is_eligible_for_credential(course, progress);
 
         env.events().publish(
-            (Symbol::new(&env, "quiz_submitted"),),
-            (&learner, &course_id, &quiz_id, score),
+            (Symbol::new(env, "quiz_submitted"),),
+            (learner, course_id, &quiz_id, score),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
             env.events().publish(
-                (Symbol::new(&env, "credential_eligible"),),
-                (&learner, &course_id),
+                (Symbol::new(env, "credential_eligible"),),
+                (learner, course_id),
             );
         }
+
+        true
     }
 
     /// Retake a quiz with a higher score (#234).
@@ -528,7 +814,21 @@ impl ProgressTracker {
         new_score: u32,
     ) {
         learner.require_auth();
+        Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
+    }
 
+    /// Shared core of [`Self::retake_quiz`] and [`Self::retake_quiz_for`]:
+    /// validates and applies a single quiz retake, including its own
+    /// storage reads/writes (a retake only ever touches one quiz, so unlike
+    /// the batch helpers there is no benefit to hoisting `course`/`progress`
+    /// loads out to a caller) and the same events `retake_quiz` always had.
+    fn retake_quiz_in_place(
+        env: &Env,
+        learner: &Address,
+        course_id: &Symbol,
+        quiz_id: Symbol,
+        new_score: u32,
+    ) {
         if new_score > chainlearn_shared::MAX_QUIZ_SCORE {
             panic!("score exceeds maximum");
         }
@@ -589,16 +889,16 @@ impl ProgressTracker {
         );
 
         env.events().publish(
-            (Symbol::new(&env, "quiz_retaken"),),
-            (&learner, &course_id, &quiz_id, previous_score, new_score),
+            (Symbol::new(env, "quiz_retaken"),),
+            (learner, course_id, &quiz_id, previous_score, new_score),
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
             env.events().publish(
-                (Symbol::new(&env, "credential_eligible"),),
-                (&learner, &course_id),
+                (Symbol::new(env, "credential_eligible"),),
+                (learner, course_id),
             );
         }
     }
@@ -890,10 +1190,8 @@ impl ProgressTracker {
             .persistent()
             .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
 
-        env.events().publish(
-            (Symbol::new(&env, "course_archived"),),
-            (&course_id,),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "course_archived"),), (&course_id,));
     }
 
     /// Set or update the content hash for a course. Admin only (#235).
@@ -1169,7 +1467,10 @@ impl ProgressTracker {
     // ── Emergency Pause (#189) ────────────────────────────────────────────
 
     fn is_paused(env: &Env) -> bool {
-        env.storage().persistent().get(&ProgressTrackerDataKey::Paused).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Paused)
+            .unwrap_or(false)
     }
 
     fn require_not_paused(env: &Env) {
@@ -1180,17 +1481,29 @@ impl ProgressTracker {
 
     /// Pause all state-changing operations. Admin only.
     pub fn emergency_pause(env: Env) {
-        let admin: Address = env.storage().persistent().get(&ProgressTrackerDataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&ProgressTrackerDataKey::Paused, &true);
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Paused, &true);
         // We omit events here to avoid adding it to events.rs
     }
 
     /// Unpause state-changing operations. Admin only.
     pub fn unpause(env: Env) {
-        let admin: Address = env.storage().persistent().get(&ProgressTrackerDataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
-        env.storage().persistent().set(&ProgressTrackerDataKey::Paused, &false);
+        env.storage()
+            .persistent()
+            .set(&ProgressTrackerDataKey::Paused, &false);
     }
 
     /// Returns the admin address.
@@ -1224,6 +1537,380 @@ impl ProgressTracker {
         env.storage()
             .persistent()
             .set(&ProgressTrackerDataKey::Admin, &new_admin);
+    }
+
+    // ── Progress Delegation (#222) ───────────────────────────────────────
+
+    /// Delegate progress tracking for `learner` to `delegate`. Learner only.
+    ///
+    /// Once delegated, `delegate` may call the state-changing progress
+    /// functions (`complete_module`, `batch_complete_module`,
+    /// `submit_quiz_score`, `batch_submit_quiz_score`, `retake_quiz`) on
+    /// `learner`'s behalf, authorizing with their own key instead of the
+    /// learner's. This does not extend to enrollment (`enroll`) or to admin
+    /// actions -- it is scoped to reporting progress a learner has already
+    /// made, e.g. via a wallet-less companion app or an LMS integration
+    /// acting for the learner.
+    ///
+    /// Calling this again while a delegation is already active replaces it
+    /// with the new delegate.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    /// * `delegate` - The address allowed to submit progress for `learner`
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// client.delegate_progress(&learner, &delegate);
+    /// client.complete_module(&delegate, &course_id, &Symbol::new(&env, "mod_1"));
+    /// ```
+    pub fn delegate_progress(env: Env, learner: Address, delegate: Address) {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
+            &delegate,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "progress_delegated"),),
+            (&learner, &delegate),
+        );
+    }
+
+    /// Revoke `learner`'s active progress delegation, if any. Learner only.
+    ///
+    /// After this, only `learner` themselves may call the state-changing
+    /// progress functions for their own progress. A no-op is not treated as
+    /// an error: revoking when there is no active delegation simply leaves
+    /// the key absent.
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address (must authorize)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// env.mock_all_auths();
+    /// client.delegate_progress(&learner, &delegate);
+    /// client.revoke_delegation(&learner);
+    /// ```
+    pub fn revoke_delegation(env: Env, learner: Address) {
+        Self::require_not_paused(&env);
+        learner.require_auth();
+
+        env.storage()
+            .persistent()
+            .remove(&ProgressTrackerDataKey::DelegatedTo(learner.clone()));
+
+        env.events()
+            .publish((Symbol::new(&env, "delegation_revoked"),), (&learner,));
+    }
+
+    /// Returns the address `learner` has delegated progress tracking to, if
+    /// any (#222).
+    ///
+    /// # Arguments
+    /// * `learner` - The learner address
+    pub fn delegated_to(env: Env, learner: Address) -> Option<Address> {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::DelegatedTo(learner))
+    }
+
+    /// Authorize a state-changing progress call made by `caller` on behalf
+    /// of `learner` (#222).
+    ///
+    /// `caller` always has to authorize -- this is unconditional, exactly
+    /// like every other `require_auth()` call in this contract. What
+    /// delegation changes is *whose* address is allowed to be `caller`:
+    /// either `learner` themselves, or whoever `learner` has currently
+    /// delegated to via [`Self::delegate_progress`]. Soroban's SDK has no
+    /// way to ask "did address X authorize this call?" without panicking if
+    /// the answer is no, so unlike the learner-only entry points
+    /// (`complete_module` et al., unchanged), the delegate-aware entry
+    /// points below take `caller` as an explicit argument -- the same
+    /// shape this codebase already uses for `learn_token::transfer_from`'s
+    /// `spender` and `learn_token::mint`'s `caller`.
+    ///
+    /// # Panics
+    /// * If `caller` does not authorize the call
+    /// * If `caller` is neither `learner` nor `learner`'s active delegate
+    fn require_learner_or_delegate(env: &Env, caller: &Address, learner: &Address) {
+        caller.require_auth();
+
+        if caller == learner {
+            return;
+        }
+
+        let delegated_to: Option<Address> = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::DelegatedTo(learner.clone()));
+
+        match delegated_to {
+            Some(delegate) if delegate == *caller => {}
+            _ => panic!("caller is not the learner or their delegate"),
+        }
+    }
+
+    /// Complete a module for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::complete_module`] except that the authorizing
+    /// party is passed explicitly as `caller` and may be either `learner`
+    /// or `learner`'s currently delegated address (see
+    /// [`Self::require_learner_or_delegate`]). `complete_module` itself is
+    /// unchanged and continues to require the learner's own signature.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the module belongs to
+    /// * `module_id` - The module to mark complete
+    ///
+    /// # Panics
+    /// See [`Self::complete_module`] and [`Self::require_learner_or_delegate`].
+    pub fn complete_module_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        module_id: Symbol,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        Self::complete_module_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            module_id,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Batch-complete modules for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::batch_complete_module`] except that the
+    /// authorizing party is passed explicitly as `caller` and may be either
+    /// `learner` or `learner`'s currently delegated address. Same atomicity
+    /// as `batch_complete_module`: any invalid module aborts the whole call.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the modules belong to
+    /// * `module_ids` - The modules to mark complete, in the order to apply them
+    pub fn batch_complete_module_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        module_ids: Vec<Symbol>,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        for module_id in module_ids.iter() {
+            Self::complete_module_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                module_id,
+            );
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Submit a quiz score for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::submit_quiz_score`] except that the authorizing
+    /// party is passed explicitly as `caller` and may be either `learner`
+    /// or `learner`'s currently delegated address.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the quiz belongs to
+    /// * `quiz_id` - The quiz identifier
+    /// * `score` - The score achieved (0-100)
+    pub fn submit_quiz_score_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        quiz_id: Symbol,
+        score: u32,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        Self::submit_quiz_score_in_place(
+            &env,
+            &learner,
+            &course_id,
+            &course,
+            &mut progress,
+            quiz_id,
+            score,
+            true,
+        );
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+    }
+
+    /// Batch-submit quiz scores for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::batch_submit_quiz_score`] except that the
+    /// authorizing party is passed explicitly as `caller` and may be either
+    /// `learner` or `learner`'s currently delegated address. Same
+    /// independent-processing semantics as `batch_submit_quiz_score`: an
+    /// invalid entry is skipped rather than aborting the batch.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the quizzes belong to
+    /// * `quiz_scores` - `(quiz_id, score)` pairs to submit
+    ///
+    /// # Returns
+    /// The quiz ids that were successfully submitted.
+    pub fn batch_submit_quiz_score_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        quiz_scores: Vec<(Symbol, u32)>,
+    ) -> Vec<Symbol> {
+        Self::require_not_paused(&env);
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+
+        let mut progress: ProgressInfo = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Progress(
+                learner.clone(),
+                course_id.clone(),
+            ))
+            .expect("not enrolled");
+
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        let mut submitted = Vec::new(&env);
+        for (quiz_id, score) in quiz_scores.iter() {
+            let ok = Self::submit_quiz_score_in_place(
+                &env,
+                &learner,
+                &course_id,
+                &course,
+                &mut progress,
+                quiz_id.clone(),
+                score,
+                false,
+            );
+            if ok {
+                submitted.push_back(quiz_id);
+            }
+        }
+
+        env.storage().persistent().set(
+            &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
+            &progress,
+        );
+
+        submitted
+    }
+
+    /// Retake a quiz for `learner`, authorized by `caller` (#222).
+    ///
+    /// Identical to [`Self::retake_quiz`] except that the authorizing party
+    /// is passed explicitly as `caller` and may be either `learner` or
+    /// `learner`'s currently delegated address.
+    ///
+    /// # Arguments
+    /// * `caller` - The authorizing address: `learner` or their delegate
+    /// * `learner` - The learner whose progress this updates
+    /// * `course_id` - The course the quiz belongs to
+    /// * `quiz_id` - The quiz being retaken
+    /// * `new_score` - The improved score (0-100, strictly greater than the
+    ///   score already recorded)
+    pub fn retake_quiz_for(
+        env: Env,
+        caller: Address,
+        learner: Address,
+        course_id: Symbol,
+        quiz_id: Symbol,
+        new_score: u32,
+    ) {
+        Self::require_learner_or_delegate(&env, &caller, &learner);
+        Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
     }
 }
 
@@ -1266,13 +1953,35 @@ mod tests {
 
         let metadata = client.contract_metadata();
         assert_eq!(
-            metadata.name,
+            metadata.metadata.name,
             soroban_sdk::String::from_str(&env, "progress-tracker")
         );
         assert_eq!(
-            metadata.version,
+            metadata.metadata.version,
             soroban_sdk::String::from_str(&env, chainlearn_shared::CONTRACT_VERSION)
         );
+    }
+
+    // ── Issue #219: on-chain upgrade counter ─────────────────────────────
+
+    #[test]
+    fn test_contract_version_starts_at_zero() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert_eq!(client.contract_version(), 0);
+    }
+
+    #[test]
+    fn test_contract_metadata_includes_version() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(metadata.version, 0);
+        assert_eq!(metadata.version, client.contract_version());
     }
 
     // ── Issue #108: course_exists lets other contracts validate course_id ───
@@ -1613,7 +2322,10 @@ mod tests {
         assert_eq!(export.quizzes_submitted, 1);
         assert_eq!(export.total_quiz_score, 85);
         assert_eq!(export.quiz_scores.len(), 1);
-        assert_eq!(export.quiz_scores.get(0).unwrap().quiz_id, Symbol::new(&env, "quiz_1"));
+        assert_eq!(
+            export.quiz_scores.get(0).unwrap().quiz_id,
+            Symbol::new(&env, "quiz_1")
+        );
         assert_eq!(export.quiz_scores.get(0).unwrap().score, 85);
         assert!(!export.eligible_for_credential);
 
@@ -1639,7 +2351,10 @@ mod tests {
         let export = client.export_progress(&learner, &course_id);
 
         assert_eq!(export.quiz_scores.len(), 1);
-        assert_eq!(export.quiz_scores.get(0).unwrap().quiz_id, Symbol::new(&env, "quiz_1"));
+        assert_eq!(
+            export.quiz_scores.get(0).unwrap().quiz_id,
+            Symbol::new(&env, "quiz_1")
+        );
     }
 
     #[test]
@@ -2202,7 +2917,10 @@ mod tests {
         let learner = Address::generate(&env);
 
         client.enroll(&learner, &course_id);
-        assert_eq!(client.get_progress(&learner, &course_id).overall_progress, 0);
+        assert_eq!(
+            client.get_progress(&learner, &course_id).overall_progress,
+            0
+        );
     }
 
     #[test]
