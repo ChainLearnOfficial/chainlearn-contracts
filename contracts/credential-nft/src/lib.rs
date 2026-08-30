@@ -3,6 +3,7 @@
 mod metadata;
 mod mint;
 mod verify;
+mod xcall;
 
 use chainlearn_shared::ContractMetadata;
 use metadata::{CredentialDataKey, CredentialInfo};
@@ -392,11 +393,11 @@ impl CredentialNft {
                 .persistent()
                 .get(&CredentialDataKey::ProgressTracker)
                 .expect("not initialized");
-            let tracker = ProgressTrackerClient::new(&env, &progress_tracker);
-            if !tracker.course_exists(&course_id) {
+            // Direct cross-contract calls, tracker address resolved once (#217, #133).
+            if !xcall::course_exists(&env, &progress_tracker, &course_id) {
                 panic!("course does not exist");
             }
-            if !tracker.is_eligible_for_credential(&learner, &course_id) {
+            if !xcall::is_eligible_for_credential(&env, &progress_tracker, &learner, &course_id) {
                 panic!("learner has not completed the course requirements");
             }
         }

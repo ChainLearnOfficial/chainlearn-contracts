@@ -3,7 +3,7 @@ use soroban_env_common::SymbolStr;
 use soroban_sdk::{Address, Env, Symbol, TryFromVal};
 
 use crate::metadata::{CredentialDataKey, CredentialInfo};
-use crate::ProgressTrackerClient;
+use crate::xcall;
 
 /// Validate that `metadata_uri` is non-empty, meets the minimum length (>= 8 characters),
 /// and starts with a recognized URI scheme (http, https, ipfs, or cert).
@@ -88,16 +88,16 @@ pub fn mint_credential(
         .persistent()
         .get(&CredentialDataKey::ProgressTracker)
         .expect("not initialized");
-    let tracker = ProgressTrackerClient::new(env, &progress_tracker);
 
     // Course gate: reject unknown course_ids explicitly instead of relying on
     // it transitively failing eligibility, so a bad course_id fails with a
-    // clear reason (#108).
-    if !tracker.course_exists(course_id) {
+    // clear reason (#108). The tracker address is resolved once above and
+    // reused for each check via direct cross-contract calls (#217, #133).
+    if !xcall::course_exists(env, &progress_tracker, course_id) {
         panic!("course does not exist");
     }
 
-    if !tracker.is_eligible_for_credential(to, course_id) {
+    if !xcall::is_eligible_for_credential(env, &progress_tracker, to, course_id) {
         panic!("learner has not completed the course requirements");
     }
 
@@ -106,7 +106,7 @@ pub fn mint_credential(
     // caller could mint a credential reading 100 for a learner who scored 50
     // (#34). The tracker's value is the average across the learner's submitted
     // quizzes for this course.
-    let verified_score = tracker.get_course_score(to, course_id);
+    let verified_score = xcall::get_course_score(env, &progress_tracker, to, course_id);
     if score != verified_score {
         panic!(
             "score {} does not match verified score {}",

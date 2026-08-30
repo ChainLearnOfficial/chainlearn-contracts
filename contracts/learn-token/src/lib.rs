@@ -64,6 +64,31 @@ impl LearnToken {
             panic!("contract is paused");
         }
     }
+
+    /// Fetch a verified quiz score from the progress-tracker in a single
+    /// cross-contract call (#217).
+    ///
+    /// Calls `env.invoke_contract` directly rather than going through
+    /// `ProgressTrackerClient::new(...)`, so no client wrapper is constructed
+    /// per hop (#133). The tracker address and the `get_quiz_score` function
+    /// `Symbol` are passed in already-built so batch callers can resolve them
+    /// once and reuse them across every iteration instead of rebuilding them
+    /// (each `Symbol::new` and each `storage::get_progress_tracker` is itself a
+    /// host call) on every quiz.
+    fn fetch_quiz_score(
+        env: &Env,
+        progress_tracker: &Address,
+        get_quiz_score_fn: &Symbol,
+        learner: &Address,
+        course_id: &Symbol,
+        quiz_id: &Symbol,
+    ) -> u32 {
+        env.invoke_contract(
+            progress_tracker,
+            get_quiz_score_fn,
+            (learner, course_id, quiz_id).into_val(env),
+        )
+    }
 }
 
 #[contractimpl]
@@ -584,14 +609,16 @@ impl LearnToken {
             panic!("reward already claimed");
         }
 
-        // Verify score by querying the progress-tracker contract.
-        // Use env.invoke_contract directly to avoid the gas cost of
-        // ProgressTrackerClient::new() on every invocation (#133).
+        // Verify score by querying the progress-tracker contract via a single
+        // direct cross-contract call (#217, #133).
         let progress_tracker = storage::get_progress_tracker(&env);
-        let score: u32 = env.invoke_contract(
+        let score: u32 = Self::fetch_quiz_score(
+            &env,
             &progress_tracker,
             &Symbol::new(&env, "get_quiz_score"),
-            (&learner, &course_id, &quiz_id).into_val(&env),
+            &learner,
+            &course_id,
+            &quiz_id,
         );
 
         if score == 0 {
@@ -667,7 +694,11 @@ impl LearnToken {
         learner.require_auth();
 
         let mut successful = soroban_sdk::Vec::new(&env);
+        // Resolve the tracker address and the cross-contract function name once
+        // and reuse them for every quiz, rather than rebuilding both on each
+        // loop iteration (#217).
         let progress_tracker = storage::get_progress_tracker(&env);
+        let get_quiz_score_fn = Symbol::new(&env, "get_quiz_score");
         let max_supply = storage::get_max_supply(&env);
 
         let mut current_supply = storage::get_total_supply(&env);
@@ -678,10 +709,13 @@ impl LearnToken {
                 continue;
             }
 
-            let score: u32 = env.invoke_contract(
+            let score: u32 = Self::fetch_quiz_score(
+                &env,
                 &progress_tracker,
-                &Symbol::new(&env, "get_quiz_score"),
-                (&learner, &course_id, &quiz_id).into_val(&env),
+                &get_quiz_score_fn,
+                &learner,
+                &course_id,
+                &quiz_id,
             );
 
             if score == 0 || score > MAX_QUIZ_SCORE {
@@ -748,10 +782,13 @@ impl LearnToken {
         }
 
         let progress_tracker = storage::get_progress_tracker(&env);
-        let score: u32 = env.invoke_contract(
+        let score: u32 = Self::fetch_quiz_score(
+            &env,
             &progress_tracker,
             &Symbol::new(&env, "get_quiz_score"),
-            (&learner, &course_id, &quiz_id).into_val(&env),
+            &learner,
+            &course_id,
+            &quiz_id,
         );
 
         if score == 0 {
