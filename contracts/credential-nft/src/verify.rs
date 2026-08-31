@@ -174,14 +174,10 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     }
 
     info.revoked = true;
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::Credential(credential_id), &info);
+    crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
     // Kept in sync with `info.revoked` so `is_credential_valid` can check
     // revocation without deserializing the full `CredentialInfo` (#109).
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::Revoked(credential_id), &true);
+    crate::metadata::write_entry(env, &CredentialDataKey::Revoked(credential_id), &true);
 
     // #104 — prune from learner's credential list
     let mut learner_list: Vec<u64> = env
@@ -193,7 +189,8 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
         (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
     {
         learner_list.remove(pos);
-        env.storage().persistent().set(
+        crate::metadata::write_entry(
+            env,
             &CredentialDataKey::LearnerCredentials(info.learner.clone()),
             &learner_list,
         );
@@ -211,7 +208,8 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
         (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
     {
         course_list.remove(pos);
-        env.storage().persistent().set(
+        crate::metadata::write_entry(
+            env,
             &CredentialDataKey::CourseCredentials(info.course_id.clone()),
             &course_list,
         );
@@ -250,16 +248,14 @@ pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symb
     }
 
     info.revoked = true;
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::Credential(credential_id), &info);
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::Revoked(credential_id), &true);
+    crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
+    crate::metadata::write_entry(env, &CredentialDataKey::Revoked(credential_id), &true);
     // Store the revocation reason (#194)
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::RevocationReason(credential_id), &reason);
+    crate::metadata::write_entry(
+        env,
+        &CredentialDataKey::RevocationReason(credential_id),
+        &reason,
+    );
 
     // #104 — prune from learner's credential list
     let mut learner_list: Vec<u64> = env
@@ -271,7 +267,8 @@ pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symb
         (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
     {
         learner_list.remove(pos);
-        env.storage().persistent().set(
+        crate::metadata::write_entry(
+            env,
             &CredentialDataKey::LearnerCredentials(info.learner.clone()),
             &learner_list,
         );
@@ -289,7 +286,8 @@ pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symb
         (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
     {
         course_list.remove(pos);
-        env.storage().persistent().set(
+        crate::metadata::write_entry(
+            env,
             &CredentialDataKey::CourseCredentials(info.course_id.clone()),
             &course_list,
         );
@@ -340,9 +338,7 @@ pub fn renew_credential(env: &Env, credential_id: u64, new_expiry: u32) {
     }
 
     info.expires_at = new_expiry;
-    env.storage()
-        .persistent()
-        .set(&CredentialDataKey::Credential(credential_id), &info);
+    crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
 
     env.events().publish(
         (Symbol::new(env, "credential_renewed"),),

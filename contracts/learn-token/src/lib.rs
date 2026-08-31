@@ -179,9 +179,7 @@ impl LearnToken {
     /// Only has an effect when `Cooldown` is active; a no-op otherwise so it
     /// is safe to call unconditionally after every successful transfer.
     fn record_transfer_timestamp(env: &Env, from: &Address) {
-        if let storage::TransferRestriction::Cooldown(_) =
-            storage::get_transfer_restriction(env)
-        {
+        if let storage::TransferRestriction::Cooldown(_) = storage::get_transfer_restriction(env) {
             storage::set_last_transfer_ledger(env, from, env.ledger().sequence());
         }
     }
@@ -830,13 +828,9 @@ impl LearnToken {
         }
     }
 
-
     // ── Emergency Pause (#189) ────────────────────────────────────────────
 
-
-
     // ── Admin ─────────────────────────────────────────────────────────────
-
 
     /// Grant an admin role to an address. Admin only.
     pub fn grant_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
@@ -1001,6 +995,17 @@ impl LearnToken {
         storage::is_paused(&env)
     }
 
+    /// Returns whether the contract has been initialized (#240).
+    ///
+    /// Read-only: performs a single storage existence check and never
+    /// mutates state. Lets deployment scripts confirm `initialize()` has
+    /// already run before calling admin-only setup steps, instead of
+    /// discovering an uninitialized contract only when some other call
+    /// panics with "not initialized" or "contract not initialized".
+    pub fn is_initialized(env: Env) -> bool {
+        storage::is_initialized(&env)
+    }
+
     /// Returns the admin address.
     pub fn admin(env: Env) -> Address {
         storage::get_admin(&env)
@@ -1079,17 +1084,41 @@ impl LearnToken {
         if old_max_supply > 0 && new_max_supply > old_max_supply {
             let max_allowed = old_max_supply.checked_mul(2).expect("overflow");
             if new_max_supply > max_allowed {
-                panic!("max supply increase exceeds governance limit (maximum 2x increase per update)");
+                panic!(
+                    "max supply increase exceeds governance limit (maximum 2x increase per update)"
+                );
             }
         }
         storage::set_max_supply(&env, new_max_supply);
         events::max_supply_updated(&env, old_max_supply, new_max_supply);
     }
 
-    /// Transfer admin rights to a new address.
+    /// Initiate a delayed transfer of admin rights to a new address (#241).
+    ///
+    /// This does **not** change the admin immediately. It records
+    /// `new_admin` as pending; the transfer only takes effect once
+    /// `new_admin` calls [`Self::accept_admin`] after
+    /// [`Self::admin_transfer_delay`] has elapsed. The current admin can call
+    /// [`Self::cancel_admin_transfer`] any time before acceptance to abort it.
+    ///
+    /// # Why a delay
+    /// An immediate transfer means a single compromised admin key can hand
+    /// control to an attacker-controlled address in one transaction, with no
+    /// window to notice or react. Delaying the handoff — and emitting an
+    /// `admin_transfer_initiated` event when it starts — gives the real admin
+    /// (or anyone monitoring the contract) time to call
+    /// `cancel_admin_transfer` before the new address can ever exercise
+    /// admin rights.
+    ///
+    /// Calling this again before a pending transfer is accepted overwrites
+    /// it with the new candidate and restarts the delay from now.
     ///
     /// # Arguments
     /// * `new_admin` - The new admin address
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    /// * If `new_admin` is the zero address
     pub fn transfer_admin(env: Env, new_admin: Address) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
@@ -1102,7 +1131,97 @@ impl LearnToken {
             panic!("cannot transfer admin to zero address");
         }
 
-        storage::set_admin(&env, &new_admin);
+        let initiated_at = env.ledger().timestamp();
+        let delay = storage::get_admin_transfer_delay(&env);
+        storage::set_pending_admin(
+            &env,
+            &storage::PendingAdminTransfer {
+                new_admin: new_admin.clone(),
+                initiated_at,
+            },
+        );
+
+        events::admin_transfer_initiated(
+            &env,
+            &admin,
+            &new_admin,
+            initiated_at,
+            initiated_at.saturating_add(delay),
+        );
+    }
+
+    /// Complete a pending admin transfer once its delay has elapsed (#241).
+    ///
+    /// Must be called by the pending `new_admin` address, proving control of
+    /// that key before it's granted admin rights. Clears the pending
+    /// transfer and emits `admin_transfer_accepted` on success.
+    ///
+    /// # Panics
+    /// * If there is no pending admin transfer
+    /// * If the caller is not the pending `new_admin`
+    /// * If [`Self::admin_transfer_delay`] has not yet elapsed since
+    ///   `transfer_admin` was called
+    pub fn accept_admin(env: Env) {
+        let pending = storage::get_pending_admin(&env).expect("no pending admin transfer");
+        pending.new_admin.require_auth();
+
+        let delay = storage::get_admin_transfer_delay(&env);
+        let ready_at = pending.initiated_at.saturating_add(delay);
+        if env.ledger().timestamp() < ready_at {
+            panic!("admin transfer delay has not elapsed");
+        }
+
+        let previous_admin = storage::get_admin(&env);
+        storage::set_admin(&env, &pending.new_admin);
+        storage::clear_pending_admin(&env);
+
+        events::admin_transfer_accepted(&env, &previous_admin, &pending.new_admin);
+    }
+
+    /// Cancel a pending admin transfer before it is accepted (#241).
+    ///
+    /// Admin only. The primary safeguard against a compromised admin key:
+    /// the legitimate admin can abort an unauthorized `transfer_admin` call
+    /// any time before the pending `new_admin` accepts it.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    /// * If there is no pending admin transfer
+    pub fn cancel_admin_transfer(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        let pending = storage::get_pending_admin(&env).expect("no pending admin transfer");
+        storage::clear_pending_admin(&env);
+
+        events::admin_transfer_cancelled(&env, &admin, &pending.new_admin);
+    }
+
+    /// Returns the in-flight pending admin transfer, if any (#241).
+    pub fn pending_admin(env: Env) -> Option<storage::PendingAdminTransfer> {
+        storage::get_pending_admin(&env)
+    }
+
+    /// Returns the current admin-transfer delay, in seconds (#241).
+    pub fn admin_transfer_delay(env: Env) -> u64 {
+        storage::get_admin_transfer_delay(&env)
+    }
+
+    /// Set the admin-transfer delay, in seconds. Admin only (#241).
+    ///
+    /// Applies to transfers initiated after this call; it does not change
+    /// the deadline of a transfer already pending.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    pub fn set_admin_transfer_delay(env: Env, delay_seconds: u64) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+
+        let old_delay = storage::get_admin_transfer_delay(&env);
+        storage::set_admin_transfer_delay(&env, delay_seconds);
+
+        events::admin_transfer_delay_updated(&env, old_delay, delay_seconds);
     }
 
     /// Update the progress-tracker contract address. Admin only.
@@ -1364,7 +1483,13 @@ impl LearnToken {
             exhausted: false,
         };
         storage::set_vesting_schedule(&env, &beneficiary, &schedule);
-        events::vesting_created(&env, &beneficiary, total_amount, cliff_timestamp, duration_seconds);
+        events::vesting_created(
+            &env,
+            &beneficiary,
+            total_amount,
+            cliff_timestamp,
+            duration_seconds,
+        );
     }
 
     /// Claim vested tokens. Beneficiary only.
@@ -1377,8 +1502,8 @@ impl LearnToken {
         Self::require_not_paused(&env);
         beneficiary.require_auth();
 
-        let schedule = storage::get_vesting_schedule(&env, &beneficiary)
-            .expect("no vesting schedule found");
+        let schedule =
+            storage::get_vesting_schedule(&env, &beneficiary).expect("no vesting schedule found");
 
         if schedule.exhausted {
             panic!("vesting schedule fully claimed");
@@ -1431,7 +1556,10 @@ impl LearnToken {
     }
 
     /// Return the vesting schedule for a beneficiary (#225).
-    pub fn get_vesting_schedule(env: Env, beneficiary: Address) -> Option<storage::VestingSchedule> {
+    pub fn get_vesting_schedule(
+        env: Env,
+        beneficiary: Address,
+    ) -> Option<storage::VestingSchedule> {
         storage::get_vesting_schedule(&env, &beneficiary)
     }
 
@@ -1508,8 +1636,7 @@ impl LearnToken {
     pub fn vote(env: Env, voter: Address, proposal_id: u64, choice: u32) {
         voter.require_auth();
 
-        let mut proposal = storage::get_proposal(&env, proposal_id)
-            .expect("proposal not found");
+        let mut proposal = storage::get_proposal(&env, proposal_id).expect("proposal not found");
 
         let now = env.ledger().timestamp();
         if now < proposal.start_time {
@@ -1554,8 +1681,7 @@ impl LearnToken {
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
-        let mut proposal = storage::get_proposal(&env, proposal_id)
-            .expect("proposal not found");
+        let mut proposal = storage::get_proposal(&env, proposal_id).expect("proposal not found");
 
         if proposal.executed {
             panic!("proposal already executed");

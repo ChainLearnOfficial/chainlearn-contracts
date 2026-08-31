@@ -1,5 +1,5 @@
 use chainlearn_shared::ContractMetadata;
-use soroban_sdk::{contracttype, Address, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol, Val, Vec};
 
 /// Represents a course with its modules and total module count.
 #[contracttype]
@@ -189,6 +189,56 @@ pub enum ProgressTrackerDataKey {
     /// The address a learner has delegated progress-tracking to, if any
     /// (#222). Absent when the learner has no active delegation.
     DelegatedTo(Address),
+    /// Running count of persistent storage entries this contract has
+    /// written, excluding this counter entry itself (#239).
+    StorageSize,
+}
+
+// ── Storage Size Tracking (#239) ─────────────────────────────────────────────
+//
+// Soroban has no API to enumerate or count a contract's storage entries at
+// runtime, so the count is maintained as an ordinary persistent counter,
+// kept in sync by routing every persistent write through `write_entry`
+// below instead of calling `env.storage().persistent().set` directly. It
+// checks whether the key already exists before writing, so overwriting an
+// existing key does not double-count it.
+
+/// Get the current persistent-entry count (#239).
+///
+/// O(1): reads a single counter entry, never scans storage.
+pub fn get_storage_size(env: &Env) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&ProgressTrackerDataKey::StorageSize)
+        .unwrap_or(0)
+}
+
+fn bump_storage_size(env: &Env, delta: i64) {
+    let current = get_storage_size(env);
+    let next = if delta >= 0 {
+        current.saturating_add(delta as u64)
+    } else {
+        current.saturating_sub((-delta) as u64)
+    };
+    env.storage()
+        .persistent()
+        .set(&ProgressTrackerDataKey::StorageSize, &next);
+}
+
+/// Write `value` to persistent storage at `key`, incrementing
+/// [`get_storage_size`] iff `key` did not already exist. Use this (instead
+/// of `env.storage().persistent().set` directly) for every persistent write
+/// so the counter stays accurate.
+pub fn write_entry<K, V>(env: &Env, key: &K, value: &V)
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+{
+    let is_new = !env.storage().persistent().has(key);
+    env.storage().persistent().set(key, value);
+    if is_new {
+        bump_storage_size(env, 1);
+    }
     /// Achievements earned by a learner.
     Achievements(Address),
     /// Achievement earned by a specific learner and achievement type (for deduplication).

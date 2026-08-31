@@ -63,6 +63,12 @@ pub enum TokenDataKey {
     StorageEntryCount,
     /// List of registered admins and their assigned roles (#212).
     Admins,
+    /// In-flight admin transfer awaiting its delay to elapse, if any (#241).
+    PendingAdmin,
+    /// Configurable delay (in seconds) a pending admin transfer must wait
+    /// before it can be accepted (#241). Defaults to
+    /// `DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS` until overridden.
+    AdminTransferDelay,
 }
 
 #[contracttype]
@@ -86,7 +92,6 @@ pub struct RoleKey {
     pub address: Address,
     pub role: AdminRole,
 }
-
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,6 +159,23 @@ pub struct VestingSchedule {
     pub created_at: u64,
     /// Whether the schedule has been fully claimed.
     pub exhausted: bool,
+}
+
+/// An admin transfer that has been initiated but not yet accepted (#241).
+///
+/// `transfer_admin` records one of these instead of updating `Admin`
+/// immediately, so a compromised admin key can't hand control to an
+/// attacker-controlled address in a single transaction: the current admin
+/// (or anyone watching `admin_transfer_initiated` events) has until
+/// `initiated_at + delay` to call `cancel_admin_transfer` before `new_admin`
+/// can call `accept_admin`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingAdminTransfer {
+    /// The address the admin role is being transferred to.
+    pub new_admin: Address,
+    /// Ledger timestamp `transfer_admin` was called.
+    pub initiated_at: u64,
 }
 
 /// A governance proposal (#226).
@@ -249,6 +271,48 @@ pub fn remove_admin(env: &Env, address: &Address, role: &AdminRole) {
     revoke_role(env, address, role);
 }
 
+// ── Admin Transfer Delay (#241) ──────────────────────────────────────────────
+
+/// Default delay (in seconds) a pending admin transfer must wait before it
+/// can be accepted, until the admin sets a different value via
+/// `set_admin_transfer_delay`. 172_800s = 48 hours.
+pub const DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS: u64 = 172_800;
+
+/// Store the in-flight pending admin transfer.
+pub fn set_pending_admin(env: &Env, pending: &PendingAdminTransfer) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::PendingAdmin, pending);
+}
+
+/// Retrieve the in-flight pending admin transfer, if any.
+pub fn get_pending_admin(env: &Env) -> Option<PendingAdminTransfer> {
+    env.storage().persistent().get(&TokenDataKey::PendingAdmin)
+}
+
+/// Clear the in-flight pending admin transfer (accepted or cancelled).
+pub fn clear_pending_admin(env: &Env) {
+    env.storage()
+        .persistent()
+        .remove(&TokenDataKey::PendingAdmin);
+}
+
+/// Set the configurable admin-transfer delay, in seconds.
+pub fn set_admin_transfer_delay(env: &Env, delay_seconds: u64) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::AdminTransferDelay, &delay_seconds);
+}
+
+/// Get the configurable admin-transfer delay, in seconds. Falls back to
+/// `DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS` until explicitly set.
+pub fn get_admin_transfer_delay(env: &Env) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::AdminTransferDelay)
+        .unwrap_or(DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS)
+}
+
 // ── Role Management (#190) ───────────────────────────────────────────────────
 
 /// Check if an address has a specific role.
@@ -258,7 +322,7 @@ pub fn has_role(env: &Env, address: &Address, role: &AdminRole) -> bool {
     if address == &admin {
         return true;
     }
-    
+
     // Also, anyone with AdminRole::Admin has all roles
     if role != &AdminRole::Admin {
         let admin_key = TokenDataKey::Role(RoleKey {
@@ -303,7 +367,6 @@ pub fn revoke_role(env: &Env, address: &Address, role: &AdminRole) {
     }
 }
 
-
 // ── Emergency Pause (#189) ──────────────────────────────────────────────────
 
 /// Check if the contract is currently paused.
@@ -316,9 +379,10 @@ pub fn is_paused(env: &Env) -> bool {
 
 /// Set the paused state.
 pub fn set_paused(env: &Env, paused: bool) {
-    env.storage().persistent().set(&TokenDataKey::Paused, &paused);
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::Paused, &paused);
 }
-
 
 /// Get the balance for a given address.
 pub fn get_balance(env: &Env, address: &Address) -> i128 {
@@ -424,7 +488,11 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
 
 /// Read-only version of check_allowance_expired that does not perform storage side-effects.
 #[allow(dead_code)]
-pub fn check_allowance_expired_readonly(env: &Env, owner: &Address, spender: &Address) -> (bool, bool, u32) {
+pub fn check_allowance_expired_readonly(
+    env: &Env,
+    owner: &Address,
+    spender: &Address,
+) -> (bool, bool, u32) {
     let key = AllowanceKey {
         owner: owner.clone(),
         spender: spender.clone(),
@@ -714,7 +782,10 @@ pub fn track_allowance_spender(env: &Env, owner: &Address, spender: &Address) {
 /// spenders whose allowance has since expired or been fully spent).
 pub fn get_allowance_spenders(env: &Env, owner: &Address) -> Vec<Address> {
     let key = TokenDataKey::AllowanceSpenders(owner.clone());
-    env.storage().persistent().get(&key).unwrap_or(Vec::new(env))
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env))
 }
 
 /// Replace `owner`'s tracked-spender list wholesale (used after a cleanup
@@ -820,8 +891,6 @@ pub fn append_claim_record(env: &Env, learner: &Address, record: &ClaimRecord) {
         track_entry_created(env);
     }
 }
-}
-
 
 // ── Vesting Schedules (#225) ──────────────────────────────────────────────────
 
