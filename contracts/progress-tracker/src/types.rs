@@ -140,6 +140,34 @@ pub struct VersionedContractMetadata {
     pub version: u32,
 }
 
+/// Represents an achievement earned by a learner.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Achievement {
+    /// Type of achievement earned.
+    pub achievement_type: AchievementType,
+    /// Timestamp when the achievement was earned.
+    pub earned_at: u64,
+    /// Optional course ID associated with the achievement (for course-specific achievements).
+    pub course_id: Option<Symbol>,
+}
+
+/// Types of achievements that learners can earn.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AchievementType {
+    /// First course completed (credential earned).
+    FirstCourse,
+    /// Perfect score (100%) on any quiz.
+    PerfectScore,
+    /// Completed a course in less than the average time (speed learner).
+    SpeedLearner,
+    /// Completed 5 courses.
+    CourseMaster,
+    /// Achieved 100% completion on a course (all modules, perfect quiz scores).
+    PerfectCourse,
+}
+
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -211,4 +239,8 @@ where
     if is_new {
         bump_storage_size(env, 1);
     }
+    /// Achievements earned by a learner.
+    Achievements(Address),
+    /// Achievement earned by a specific learner and achievement type (for deduplication).
+    AchievementEarned(Address, AchievementType),
 }
