@@ -80,6 +80,22 @@ name = "batch_operations"
 path = "tests/integration/batch_operations.rs"
 
 [[test]]
+name = "security_double_spending_tests"
+path = "tests/integration/security_double_spending_tests.rs"
+
+[[test]]
+name = "xcontract_call_tests"
+path = "tests/unit/xcontract_call_tests.rs"
+
+[[test]]
+name = "event_emission_tests"
+path = "tests/unit/event_emission_tests.rs"
+
+[[test]]
+name = "gas_benchmarks"
+path = "tests/benchmarks/gas_benchmarks.rs"
+
+[[test]]
 name = "xcontract_calls_bench"
 path = "tests/benchmarks/xcontract_calls.rs"
 
