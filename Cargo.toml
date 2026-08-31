@@ -84,6 +84,22 @@ name = "security_double_spending_tests"
 path = "tests/integration/security_double_spending_tests.rs"
 
 [[test]]
+name = "emergency_pause_flow"
+path = "tests/integration/emergency_pause_flow.rs"
+
+[[test]]
+name = "token_vesting_flow"
+path = "tests/integration/token_vesting_flow.rs"
+
+[[test]]
+name = "multi_admin_flow"
+path = "tests/integration/multi_admin_flow.rs"
+
+[[test]]
+name = "content_hash_flow"
+path = "tests/integration/content_hash_flow.rs"
+
+[[test]]
 name = "xcontract_call_tests"
 path = "tests/unit/xcontract_call_tests.rs"
 
