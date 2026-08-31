@@ -80,6 +80,10 @@ name = "batch_operations"
 path = "tests/integration/batch_operations.rs"
 
 [[test]]
+name = "security_double_spending_tests"
+path = "tests/integration/security_double_spending_tests.rs"
+
+[[test]]
 name = "xcontract_calls_bench"
 path = "tests/benchmarks/xcontract_calls.rs"
 
