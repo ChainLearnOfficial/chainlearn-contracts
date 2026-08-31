@@ -7,8 +7,8 @@ mod xcall;
 
 use chainlearn_shared::ContractMetadata;
 use metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
-use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 use mint::validate_metadata_uri;
+use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
 
 /// Subset of the progress-tracker interface used to verify course completion
 /// and the score a credential claims.
@@ -26,7 +26,7 @@ pub enum ContractError {
     AlreadyInitialized = 0,
     /// Returned by `transfer` for every call: credentials are soulbound and
     /// permanently bound to the learner who earned them, so no transfer is
-    /// ever permitted, regardless of caller or state (#242).
+    /// ever permitted, regardless of caller or state (#242, duplicate: #227).
     Soulbound = 1,
 }
 
@@ -1430,4 +1430,60 @@ mod tests {
         let info = client.verify_credential(&id);
         assert_eq!(info.metadata_uri, uri);
     }
+
+    // ── #227 fix: verify_credential_with_display's Vec-based optional ──────
+
+    #[test]
+    fn test_verify_credential_with_display_defaults_to_none_set() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
+        let id = client.mint_credential(&learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+
+        // No display properties were ever set for this credential.
+        let verification = client.verify_credential_with_display(&id);
+        assert_eq!(verification.info, client.verify_credential(&id));
+        assert!(verification.display.is_empty());
+    }
+
+    #[test]
+    fn test_verify_credential_with_display_returns_set_properties() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
+        let id = client.mint_credential(&learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+
+        let image_url = Some(Symbol::new(&env, "ipfs_img"));
+        let description = Some(Symbol::new(&env, "rust_cert"));
+        client.set_credential_display(&id, &image_url, &description, &None);
+
+        let verification = client.verify_credential_with_display(&id);
+        assert_eq!(verification.display.len(), 1);
+        let display = verification.display.get(0).unwrap();
+        assert_eq!(display.image_url, image_url);
+        assert_eq!(display.description, description);
+        assert!(display.issuer_name.is_none());
+        // The credential's core info is unaffected by setting display data.
+        assert_eq!(verification.info, client.verify_credential(&id));
+    }
+
+    // Issue #227 ("Add credential transfer rejection with reason") is a
+    // content-duplicate of already-merged #242 (identical title/body); #242's
+    // Soulbound-rejection behavior and its `require_auth()`-free design are
+    // already covered by `test_transfer_always_returns_soulbound_error`,
+    // `test_transfer_rejects_even_without_auth_or_existing_credential`, and
+    // `test_transfer_does_not_mutate_credential_state` in
+    // `tests/unit/credential_tests.rs`, so no new tests are added here.
 }

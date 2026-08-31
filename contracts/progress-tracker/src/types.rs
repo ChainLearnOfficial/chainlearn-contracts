@@ -192,6 +192,10 @@ pub enum ProgressTrackerDataKey {
     /// Running count of persistent storage entries this contract has
     /// written, excluding this counter entry itself (#239).
     StorageSize,
+    /// Achievements earned by a learner.
+    Achievements(Address),
+    /// Achievement earned by a specific learner and achievement type (for deduplication).
+    AchievementEarned(Address, AchievementType),
 }
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
@@ -239,8 +243,4 @@ where
     if is_new {
         bump_storage_size(env, 1);
     }
-    /// Achievements earned by a learner.
-    Achievements(Address),
-    /// Achievement earned by a specific learner and achievement type (for deduplication).
-    AchievementEarned(Address, AchievementType),
 }

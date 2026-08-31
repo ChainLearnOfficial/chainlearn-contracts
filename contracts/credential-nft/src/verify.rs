@@ -1,7 +1,10 @@
 use chainlearn_shared::MAX_CREDENTIALS_PAGE_SIZE;
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
+use crate::metadata::{
+    no_display, one_display, CredentialDataKey, CredentialDisplay, CredentialInfo,
+    CredentialVerification,
+};
 
 /// Read the full list of credential IDs owned by a learner.
 fn learner_credentials(env: &Env, learner: &Address) -> Vec<u64> {
@@ -46,10 +49,14 @@ pub fn verify_credential_with_display(env: &Env, credential_id: u64) -> Credenti
         .persistent()
         .get(&CredentialDataKey::Credential(credential_id))
         .expect("credential not found");
-    let display: Option<CredentialDisplay> = env
+    let stored: Option<CredentialDisplay> = env
         .storage()
         .persistent()
         .get(&CredentialDataKey::Display(credential_id));
+    let display = match stored {
+        Some(d) => one_display(env, d),
+        None => no_display(env),
+    };
     CredentialVerification { info, display }
 }
 

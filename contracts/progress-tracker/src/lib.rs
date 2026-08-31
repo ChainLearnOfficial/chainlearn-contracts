@@ -517,7 +517,7 @@ impl ProgressTracker {
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &*progress,
+            progress,
         );
 
         env.events().publish(
@@ -542,7 +542,7 @@ impl ProgressTracker {
             );
             
             // Check for CourseMaster achievement (5 courses completed)
-            let stats = Self::get_learner_stats_internal(env, learner);
+            let stats = Self::get_learner_stats(env.clone(), learner.clone());
             if stats.courses_completed >= 5 {
                 Self::earn_achievement(
                     env,
@@ -792,7 +792,7 @@ impl ProgressTracker {
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
-            &*progress,
+            progress,
         );
 
         env.events().publish(
@@ -1549,7 +1549,7 @@ impl ProgressTracker {
         // Emit achievement earned event
         env.events().publish(
             (Symbol::new(env, "achievement_earned"),),
-            (learner, &achievement_type, course_id, timestamp),
+            (learner, achievement_type, course_id, timestamp),
         );
     }
 

@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol, Val};
+use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol, Val, Vec};
 
 /// On-chain metadata for a minted credential NFT.
 #[contracttype]
@@ -128,11 +128,41 @@ pub struct CredentialDisplay {
 }
 
 /// Combined verification response for a credential (#244).
+///
+/// `display` holds at most one element rather than being
+/// `Option<CredentialDisplay>` (#227 fix): `soroban-sdk` 21.7.7's
+/// `#[contracttype]` derive does not implement the `ScVal` (client/spec)
+/// conversion for `Option<T>` where `T` is a custom struct -- only for SDK
+/// built-ins like `Symbol`. `Option<CredentialDisplay>` as a struct field
+/// compiled under a bare `cargo check` (which only exercises the runtime
+/// `Val` path) but failed `cargo test`/the generated client with a concrete
+/// `E0277` trait-bound error on `TryFrom<&Option<CredentialDisplay>> for
+/// ScVal`, confirmed directly against this SDK version -- this was a real,
+/// previously-undetected break in the merged #244/#376 code, not a
+/// hypothetical. A 0-or-1 `Vec` stands in for the optional wrapper at this
+/// one field without weakening the "optional" contract -- every field
+/// *inside* `CredentialDisplay` itself is a true `Option<Symbol>`, which
+/// does work.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CredentialVerification {
     /// The core credential info.
     pub info: CredentialInfo,
-    /// Optional display properties.
-    pub display: Option<CredentialDisplay>,
+    /// Display properties, if any were set. Empty when none were set;
+    /// otherwise holds exactly one element.
+    pub display: Vec<CredentialDisplay>,
+}
+
+/// Build the empty `display` value for a [`CredentialVerification`] with no
+/// display data set.
+pub fn no_display(env: &Env) -> Vec<CredentialDisplay> {
+    Vec::new(env)
+}
+
+/// Wrap a single [`CredentialDisplay`] as the `display` value for a
+/// [`CredentialVerification`].
+pub fn one_display(env: &Env, display: CredentialDisplay) -> Vec<CredentialDisplay> {
+    let mut v = Vec::new(env);
+    v.push_back(display);
+    v
 }
