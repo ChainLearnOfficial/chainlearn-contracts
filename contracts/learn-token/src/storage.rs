@@ -69,6 +69,8 @@ pub enum TokenDataKey {
     /// before it can be accepted (#241). Defaults to
     /// `DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS` until overridden.
     AdminTransferDelay,
+    /// Reentrancy guard lock status (#354).
+    ReentrancyGuard,
 }
 
 #[contracttype]
@@ -241,7 +243,9 @@ pub fn get_admins(env: &Env) -> Vec<AdminInfo> {
 
 /// Set list of registered admins (#212).
 pub fn set_admins(env: &Env, admins: &Vec<AdminInfo>) {
-    env.storage().persistent().set(&TokenDataKey::Admins, admins);
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::Admins, admins);
 }
 
 /// Add an admin to the admin list and grant the role (#212).
@@ -768,7 +772,11 @@ pub fn get_snapshot_balance(env: &Env, address: &Address, ledger_height: u32) ->
 pub fn track_allowance_spender(env: &Env, owner: &Address, spender: &Address) {
     let key = TokenDataKey::AllowanceSpenders(owner.clone());
     let is_new = !env.storage().persistent().has(&key);
-    let mut spenders: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    let mut spenders: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
     if !spenders.contains(spender) {
         spenders.push_back(spender.clone());
         env.storage().persistent().set(&key, &spenders);
@@ -1056,4 +1064,27 @@ pub fn get_storage_size(env: &Env) -> u32 {
         .persistent()
         .get(&TokenDataKey::StorageEntryCount)
         .unwrap_or(0)
+}
+
+// ── Reentrancy Guard (#354) ───────────────────────────────────────────────────
+
+/// Check whether contract execution is currently inside a guarded call.
+pub fn is_reentrancy_locked(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&TokenDataKey::ReentrancyGuard)
+        .unwrap_or(false)
+}
+
+/// Set reentrancy guard state.
+pub fn set_reentrancy_locked(env: &Env, locked: bool) {
+    if locked {
+        env.storage()
+            .instance()
+            .set(&TokenDataKey::ReentrancyGuard, &true);
+    } else {
+        env.storage()
+            .instance()
+            .remove(&TokenDataKey::ReentrancyGuard);
+    }
 }

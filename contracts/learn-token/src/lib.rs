@@ -51,6 +51,27 @@ pub struct ClaimEstimate {
 #[contract]
 pub struct LearnToken;
 
+/// RAII guard preventing reentrancy attacks across cross-contract calls (#354).
+struct ReentrancyGuard<'a> {
+    env: &'a Env,
+}
+
+impl<'a> ReentrancyGuard<'a> {
+    fn enter(env: &'a Env) -> Self {
+        if storage::is_reentrancy_locked(env) {
+            panic!("reentrancy guard: reentrant call detected");
+        }
+        storage::set_reentrancy_locked(env, true);
+        Self { env }
+    }
+}
+
+impl<'a> Drop for ReentrancyGuard<'a> {
+    fn drop(&mut self) {
+        storage::set_reentrancy_locked(self.env, false);
+    }
+}
+
 impl LearnToken {
     /// Panic if the contract is paused (#238).
     fn require_not_paused(env: &Env) {
@@ -329,10 +350,9 @@ impl LearnToken {
     /// * `to` - Destination address
     /// * `amount` - Amount to transfer
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         from.require_auth();
-
-        Self::require_not_paused(&env);
 
         if from == to {
             return;
@@ -374,10 +394,9 @@ impl LearnToken {
     /// * `to` - Destination address
     /// * `amount` - Amount to transfer
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         spender.require_auth();
-
-        Self::require_not_paused(&env);
 
         if from == to {
             return;
@@ -476,10 +495,9 @@ impl LearnToken {
     /// * If `amount` is negative
     /// * If `from` holds less than `amount`
     pub fn burn(env: Env, from: Address, amount: i128) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         from.require_auth();
-
-        Self::require_not_paused(&env);
 
         if amount < 0 {
             panic!("negative amount");
@@ -515,10 +533,9 @@ impl LearnToken {
     /// * If the spender's allowance is below `amount`
     /// * If `from` holds less than `amount`
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         spender.require_auth();
-
-        Self::require_not_paused(&env);
 
         if amount < 0 {
             panic!("negative amount");
@@ -559,6 +576,7 @@ impl LearnToken {
     /// * `to` - Recipient address
     /// * `amount` - Amount to mint
     pub fn mint(env: Env, caller: Address, to: Address, amount: i128) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Minter) {
@@ -579,7 +597,10 @@ impl LearnToken {
 
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply.checked_add(amount).map_or(true, |s| s > max_supply) {
+        if current_supply
+            .checked_add(amount)
+            .map_or(true, |s| s > max_supply)
+        {
             panic!("maximum supply cap exceeded");
         }
 
@@ -607,10 +628,9 @@ impl LearnToken {
     /// * `course_id` - The course the quiz belongs to
     /// * `quiz_id` - Unique identifier for the quiz
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         learner.require_auth();
-
-        Self::require_not_paused(&env);
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
             panic!("reward already claimed");
@@ -698,6 +718,8 @@ impl LearnToken {
         course_id: Symbol,
         quiz_ids: soroban_sdk::Vec<Symbol>,
     ) -> soroban_sdk::Vec<Symbol> {
+        let _guard = ReentrancyGuard::enter(&env);
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         let mut successful = soroban_sdk::Vec::new(&env);
@@ -816,7 +838,10 @@ impl LearnToken {
 
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply.checked_add(reward_amount).map_or(true, |s| s > max_supply) {
+        if current_supply
+            .checked_add(reward_amount)
+            .map_or(true, |s| s > max_supply)
+        {
             return fail("maximum supply cap exceeded");
         }
 
@@ -884,12 +909,7 @@ impl LearnToken {
     }
 
     /// Perform a critical operation requiring multi-sig authorization from two admins (#212).
-    pub fn execute_multisig_op(
-        env: Env,
-        caller: Address,
-        co_signer: Address,
-        operation: Symbol,
-    ) {
+    pub fn execute_multisig_op(env: Env, caller: Address, co_signer: Address, operation: Symbol) {
         caller.require_auth();
         co_signer.require_auth();
 
@@ -1499,6 +1519,7 @@ impl LearnToken {
     /// # Arguments
     /// * `beneficiary` - Address claiming their vested tokens (must authorize)
     pub fn claim_vested(env: Env, beneficiary: Address) {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         beneficiary.require_auth();
 
@@ -3073,9 +3094,9 @@ mod tests {
         let (_admin, lt_id, _pt_id) = setup(&env);
         let client = LearnTokenClient::new(&env, &lt_id);
 
-        // initialize() only writes singleton config entries, none of which
-        // are counted, so a freshly-initialized contract reports 0.
-        assert_eq!(client.get_storage_size(), 0);
+        // initialize() sets the initial admin role (#212), which is tracked
+        // as 1 persistent entry.
+        assert_eq!(client.get_storage_size(), 1);
     }
 
     #[test]

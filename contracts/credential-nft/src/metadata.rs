@@ -48,6 +48,8 @@ pub enum CredentialDataKey {
     /// Running count of persistent storage entries this contract has
     /// written, excluding this counter entry itself (#239).
     StorageSize,
+    /// Reentrancy guard lock status (#354).
+    ReentrancyGuard,
 }
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
@@ -112,6 +114,29 @@ where
     env.storage().persistent().remove(key);
     if existed {
         bump_storage_size(env, -1);
+    }
+}
+
+// ── Reentrancy Guard (#354) ───────────────────────────────────────────────────
+
+/// Check whether contract execution is currently inside a guarded call.
+pub fn is_reentrancy_locked(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&CredentialDataKey::ReentrancyGuard)
+        .unwrap_or(false)
+}
+
+/// Set reentrancy guard state.
+pub fn set_reentrancy_locked(env: &Env, locked: bool) {
+    if locked {
+        env.storage()
+            .instance()
+            .set(&CredentialDataKey::ReentrancyGuard, &true);
+    } else {
+        env.storage()
+            .instance()
+            .remove(&CredentialDataKey::ReentrancyGuard);
     }
 }
 

@@ -37,6 +37,27 @@ pub enum ContractError {
 #[contract]
 pub struct CredentialNft;
 
+/// RAII guard preventing reentrancy attacks across cross-contract calls (#354).
+struct ReentrancyGuard<'a> {
+    env: &'a Env,
+}
+
+impl<'a> ReentrancyGuard<'a> {
+    fn enter(env: &'a Env) -> Self {
+        if metadata::is_reentrancy_locked(env) {
+            panic!("reentrancy guard: reentrant call detected");
+        }
+        metadata::set_reentrancy_locked(env, true);
+        Self { env }
+    }
+}
+
+impl<'a> Drop for ReentrancyGuard<'a> {
+    fn drop(&mut self) {
+        metadata::set_reentrancy_locked(self.env, false);
+    }
+}
+
 #[contractimpl]
 impl CredentialNft {
     /// Initialize the credential contract with an admin.
@@ -141,6 +162,7 @@ impl CredentialNft {
         score: u32,
         metadata_uri: Symbol,
     ) -> u64 {
+        let _guard = ReentrancyGuard::enter(&env);
         Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
