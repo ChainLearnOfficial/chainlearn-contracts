@@ -9,7 +9,7 @@ use credential_nft::{CredentialNft, CredentialNftClient};
 use learn_token::{AdminRole, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     Address, Env, IntoVal, String as SorobanString, Symbol, Vec,
 };
 
@@ -119,7 +119,7 @@ mod progress_tracker_events {
         let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
         assert_eq!(event_name, Symbol::new(&env, "module_completed"));
 
-        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.clone();
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.clone().into_val(&env);
         assert_eq!(data_vec.len(), 4);
         let data_learner: Address = data_vec.get(0).unwrap().into_val(&env);
         let data_course: Symbol = data_vec.get(1).unwrap().into_val(&env);
@@ -150,7 +150,7 @@ mod progress_tracker_events {
         let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
         assert_eq!(event_name, Symbol::new(&env, "quiz_submitted"));
 
-        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.clone();
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.clone().into_val(&env);
         assert_eq!(data_vec.len(), 4);
         let data_score: u32 = data_vec.get(3).unwrap().into_val(&env);
         assert_eq!(data_score, 85);
@@ -427,7 +427,12 @@ mod learn_token_events {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "reward"), learner.clone(), course_id.clone()).into_val(&env),
+                    (
+                        Symbol::new(&env, "reward"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
                     (quiz_id, 80u32, 8000i128).into_val(&env),
                 )
             ]
@@ -671,7 +676,7 @@ mod credential_nft_events {
 
         let all = env.events().all();
         let (_, _, data) = all.last().expect("no events emitted");
-        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.clone();
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.clone().into_val(&env);
         assert_eq!(data_vec.len(), 5);
         let data_uri: Symbol = data_vec.get(4).unwrap().into_val(&env);
         assert_eq!(data_uri, uri);

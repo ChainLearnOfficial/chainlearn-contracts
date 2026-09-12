@@ -564,7 +564,8 @@ mod credential_unit_tests {
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id =
+            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
 
         let before = client.get_storage_size();
         let _ = client.verify_credential(&cred_id);

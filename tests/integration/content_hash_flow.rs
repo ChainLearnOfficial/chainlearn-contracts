@@ -7,7 +7,7 @@ mod fixtures;
 use fixtures::setup_chainlearn_env;
 
 use progress_tracker::ProgressTrackerClient;
-use soroban_sdk::{testutils::Address as _, testutils::Events as _, Symbol};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, IntoVal, Symbol};
 
 /// Course content hash defaults to "none" (unset).
 #[test]

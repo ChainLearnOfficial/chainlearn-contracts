@@ -532,7 +532,7 @@ impl ProgressTracker {
                 (Symbol::new(env, "credential_eligible"),),
                 (learner, course_id),
             );
-            
+
             // Award FirstCourse achievement when learner becomes eligible for credential
             Self::earn_achievement(
                 env,
@@ -540,16 +540,11 @@ impl ProgressTracker {
                 AchievementType::FirstCourse,
                 Some(course_id.clone()),
             );
-            
+
             // Check for CourseMaster achievement (5 courses completed)
             let stats = Self::get_learner_stats(env.clone(), learner.clone());
             if stats.courses_completed >= 5 {
-                Self::earn_achievement(
-                    env,
-                    learner,
-                    AchievementType::CourseMaster,
-                    None,
-                );
+                Self::earn_achievement(env, learner, AchievementType::CourseMaster, None);
             }
         }
     }
@@ -1514,10 +1509,8 @@ impl ProgressTracker {
         course_id: Option<Symbol>,
     ) {
         // Check if achievement already earned
-        let achievement_key = ProgressTrackerDataKey::AchievementEarned(
-            learner.clone(),
-            achievement_type.clone(),
-        );
+        let achievement_key =
+            ProgressTrackerDataKey::AchievementEarned(learner.clone(), achievement_type.clone());
         if env.storage().persistent().has(&achievement_key) {
             return; // Already earned, skip
         }
@@ -1530,9 +1523,7 @@ impl ProgressTracker {
         };
 
         // Store that this achievement type has been earned
-        env.storage()
-            .persistent()
-            .set(&achievement_key, &true);
+        env.storage().persistent().set(&achievement_key, &true);
 
         // Add to learner's achievements list
         let achievements_key = ProgressTrackerDataKey::Achievements(learner.clone());
@@ -1580,7 +1571,10 @@ impl ProgressTracker {
     pub fn has_achievement(env: Env, learner: Address, achievement_type: AchievementType) -> bool {
         env.storage()
             .persistent()
-            .has(&ProgressTrackerDataKey::AchievementEarned(learner, achievement_type))
+            .has(&ProgressTrackerDataKey::AchievementEarned(
+                learner,
+                achievement_type,
+            ))
     }
 
     /// Check whether a course has been registered via `create_course` (#108).

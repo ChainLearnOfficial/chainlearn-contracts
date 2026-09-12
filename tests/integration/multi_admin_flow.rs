@@ -6,8 +6,8 @@
 mod fixtures;
 use fixtures::setup_chainlearn_env;
 
-use learn_token::{AdminRole, LearnTokenClient, AdminInfo};
-use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Symbol};
+use learn_token::{AdminInfo, AdminRole, LearnTokenClient};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, IntoVal, Symbol};
 
 /// Add multiple admins with Minter, Pauser, and Admin roles.
 /// Verify each role is enforced, then revoke and verify access is lost.
@@ -156,7 +156,9 @@ fn test_multiple_admins_distinct_roles_enforced_and_revoked() {
     assert!(token_client.try_mint(&minter_a, &recipient, &100).is_err());
     assert!(token_client.try_mint(&minter_b, &recipient, &100).is_err());
     assert!(token_client.try_pause(&pauser).is_err());
-    assert!(token_client.try_mint(&full_admin, &recipient, &100).is_err());
+    assert!(token_client
+        .try_mint(&full_admin, &recipient, &100)
+        .is_err());
 
     // Only primary admin remains.
     let final_admins = token_client.get_admins();

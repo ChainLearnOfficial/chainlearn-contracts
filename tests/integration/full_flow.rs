@@ -1,10 +1,10 @@
 //! Full flow integration tests for cross-contract interactions.
 
 mod fixtures;
-use fixtures::{setup_chainlearn_env, create_sample_course, complete_full_course};
+use fixtures::{complete_full_course, create_sample_course, setup_chainlearn_env};
 
-use learn_token::LearnTokenClient;
 use credential_nft::CredentialNftClient;
+use learn_token::LearnTokenClient;
 use progress_tracker::ProgressTrackerClient;
 use soroban_sdk::Symbol;
 
@@ -14,7 +14,7 @@ fn test_full_learner_journey() {
     let env = env_context.env;
     let learner = env_context.learner;
     let _admin = env_context.admin;
-    
+
     let token_client = LearnTokenClient::new(&env, &env_context.token_contract_id);
     let credential_client = CredentialNftClient::new(&env, &env_context.credential_contract_id);
     let progress_client = ProgressTrackerClient::new(&env, &env_context.progress_contract_id);
@@ -23,7 +23,7 @@ fn test_full_learner_journey() {
 
     // 1. Create a course and enroll the learner
     let course_id = create_sample_course(&env, &progress_client);
-    
+
     // 2. Complete the full course (enrolls, completes modules, submits quizzes)
     complete_full_course(&env, &learner, &course_id, &progress_client);
 

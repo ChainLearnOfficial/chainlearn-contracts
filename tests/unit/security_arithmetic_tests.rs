@@ -12,7 +12,7 @@ fn test_underflow_balance_subtraction() {
     let pt_contract_id = env.register_contract(None, ProgressTracker);
     let contract_id = env.register_contract(None, learn_token::LearnToken);
     let client = LearnTokenClient::new(&env, &contract_id);
-    
+
     client.initialize(
         &admin,
         &SorobanString::from_str(&env, "ChainLearn"),
@@ -24,7 +24,7 @@ fn test_underflow_balance_subtraction() {
 
     let user = Address::generate(&env);
     env.mock_all_auths();
-    
+
     client.transfer(&user, &admin, &1000);
 }
 
@@ -36,7 +36,7 @@ fn test_underflow_balance_burn() {
     let pt_contract_id = env.register_contract(None, ProgressTracker);
     let contract_id = env.register_contract(None, learn_token::LearnToken);
     let client = LearnTokenClient::new(&env, &contract_id);
-    
+
     client.initialize(
         &admin,
         &SorobanString::from_str(&env, "ChainLearn"),
@@ -48,7 +48,7 @@ fn test_underflow_balance_burn() {
 
     let user = Address::generate(&env);
     env.mock_all_auths();
-    
+
     client.burn(&user, &1000);
 }
 
@@ -60,7 +60,7 @@ fn test_overflow_supply() {
     let pt_contract_id = env.register_contract(None, ProgressTracker);
     let contract_id = env.register_contract(None, learn_token::LearnToken);
     let client = LearnTokenClient::new(&env, &contract_id);
-    
+
     client.initialize(
         &admin,
         &SorobanString::from_str(&env, "ChainLearn"),
@@ -72,7 +72,7 @@ fn test_overflow_supply() {
 
     let user = Address::generate(&env);
     env.mock_all_auths();
-    
+
     client.mint(&admin, &user, &i128::MAX);
     // This will trigger the maximum supply cap exceeded panic
     client.mint(&admin, &user, &1);

@@ -7,10 +7,10 @@
 mod fixtures;
 use fixtures::setup_chainlearn_env;
 
-use learn_token::{LearnTokenClient, AdminRole};
-use progress_tracker::ProgressTrackerClient;
 use credential_nft::CredentialNftClient;
-use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Symbol, Vec};
+use learn_token::{AdminRole, LearnTokenClient};
+use progress_tracker::ProgressTrackerClient;
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, IntoVal, Symbol, Vec};
 
 // ── Issue #281: learn-token emergency pause ──────────────────────────────
 
@@ -47,7 +47,9 @@ fn test_token_emergency_pause_prevents_state_changes() {
 
     // ── Transfers revert when paused ──
     let recipient = Address::generate(env);
-    assert!(token_client.try_transfer(learner, &recipient, &1000).is_err());
+    assert!(token_client
+        .try_transfer(learner, &recipient, &1000)
+        .is_err());
     assert_eq!(token_client.balance(learner), 10_000); // unchanged
 
     // ── Minting reverts when paused ──
@@ -59,8 +61,14 @@ fn test_token_emergency_pause_prevents_state_changes() {
     // ── Read-only functions still work ──
     assert_eq!(token_client.balance(learner), 10_000);
     assert_eq!(token_client.total_supply(), 10_000);
-    assert_eq!(token_client.name(), soroban_sdk::String::from_str(env, "CLearn"));
-    assert_eq!(token_client.symbol(), soroban_sdk::String::from_str(env, "CLRN"));
+    assert_eq!(
+        token_client.name(),
+        soroban_sdk::String::from_str(env, "CLearn")
+    );
+    assert_eq!(
+        token_client.symbol(),
+        soroban_sdk::String::from_str(env, "CLRN")
+    );
     assert_eq!(token_client.decimals(), 7);
 
     // ── Unpause ──
@@ -109,25 +117,23 @@ fn test_progress_tracker_emergency_pause() {
 
     // ── Enrollment reverts when paused ──
     let new_learner = Address::generate(env);
-    assert!(progress_client.try_enroll(&new_learner, &course_id).is_err());
+    assert!(progress_client
+        .try_enroll(&new_learner, &course_id)
+        .is_err());
 
     // ── Module completion reverts when paused ──
     // Enroll a learner before pausing so we can test complete_module.
     progress_client.unpause();
     progress_client.enroll(learner, &course_id);
     progress_client.emergency_pause();
-    assert!(
-        progress_client
-            .try_complete_module(learner, &course_id, &Symbol::new(env, "mod_basics"))
-            .is_err()
-    );
+    assert!(progress_client
+        .try_complete_module(learner, &course_id, &Symbol::new(env, "mod_basics"))
+        .is_err());
 
     // ── Quiz submission reverts when paused ──
-    assert!(
-        progress_client
-            .try_submit_quiz_score(learner, &course_id, &Symbol::new(env, "quiz_midterm"), &80)
-            .is_err()
-    );
+    assert!(progress_client
+        .try_submit_quiz_score(learner, &course_id, &Symbol::new(env, "quiz_midterm"), &80)
+        .is_err());
 
     // ── Read-only functions still work ──
     let course = progress_client.get_course(&course_id);
@@ -182,11 +188,9 @@ fn test_credential_nft_emergency_pause() {
 
     // ── Minting reverts when paused ──
     let new_learner = Address::generate(env);
-    assert!(
-        credential_client
-            .try_mint_credential(&new_learner, &course_id, &85, &uri)
-            .is_err()
-    );
+    assert!(credential_client
+        .try_mint_credential(&new_learner, &course_id, &85, &uri)
+        .is_err());
 
     // ── Revoking reverts when paused ──
     assert!(credential_client.try_revoke_credential(&cred_id).is_err());
@@ -204,7 +208,11 @@ fn test_credential_nft_emergency_pause() {
     credential_client.unpause();
 
     // ── Operations resume ──
-    let new_cred_id = credential_client.mint_credential(learner, &course_id, &85, &uri);
+    progress_client.enroll(&new_learner, &course_id);
+    progress_client.complete_module(&new_learner, &course_id, &Symbol::new(env, "mod_1"));
+    progress_client.complete_module(&new_learner, &course_id, &Symbol::new(env, "mod_2"));
+    progress_client.submit_quiz_score(&new_learner, &course_id, &Symbol::new(env, "quiz_1"), &85);
+    let new_cred_id = credential_client.mint_credential(&new_learner, &course_id, &85, &uri);
     assert_eq!(new_cred_id, cred_id + 1);
 }
 

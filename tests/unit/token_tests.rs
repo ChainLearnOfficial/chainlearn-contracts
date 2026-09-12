@@ -901,9 +901,16 @@ mod token_unit_tests {
             l.timestamp = 0;
         });
 
-        client.create_vesting(&beneficiary, &total_amount, &cliff_timestamp, &duration_seconds);
+        client.create_vesting(
+            &beneficiary,
+            &total_amount,
+            &cliff_timestamp,
+            &duration_seconds,
+        );
 
-        let schedule = client.get_vesting_schedule(&beneficiary).expect("schedule should exist");
+        let schedule = client
+            .get_vesting_schedule(&beneficiary)
+            .expect("schedule should exist");
         assert_eq!(schedule.total_amount, 10_000);
         assert_eq!(schedule.cliff_timestamp, 100);
         assert_eq!(schedule.duration_seconds, 1_000);
@@ -1280,4 +1287,3 @@ mod token_unit_tests {
     // tracking" section) -- that implementation predates this branch on
     // `main`, so no duplicate tests are added here.
 }
-

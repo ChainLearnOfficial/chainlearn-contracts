@@ -1480,8 +1480,18 @@ mod progress_unit_tests {
         scores.push_back((Symbol::new(&env, "quiz_2"), 95u32));
         client.batch_submit_quiz_score(&batch_learner, &course_id, &scores);
 
-        client.submit_quiz_score(&single_learner, &course_id, &Symbol::new(&env, "quiz_1"), &65);
-        client.submit_quiz_score(&single_learner, &course_id, &Symbol::new(&env, "quiz_2"), &95);
+        client.submit_quiz_score(
+            &single_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &65,
+        );
+        client.submit_quiz_score(
+            &single_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_2"),
+            &95,
+        );
 
         let batch_progress = client.get_progress(&batch_learner, &course_id);
         let single_progress = client.get_progress(&single_learner, &course_id);
@@ -1525,14 +1535,22 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
-        assert!(!client.get_progress(&learner, &course_id).eligible_for_credential);
+        assert!(
+            !client
+                .get_progress(&learner, &course_id)
+                .eligible_for_credential
+        );
 
         let mut scores = Vec::new(&env);
         scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
         scores.push_back((Symbol::new(&env, "quiz_2"), 70u32));
         client.batch_submit_quiz_score(&learner, &course_id, &scores);
 
-        assert!(client.get_progress(&learner, &course_id).eligible_for_credential);
+        assert!(
+            client
+                .get_progress(&learner, &course_id)
+                .eligible_for_credential
+        );
     }
 
     // ── Issue #222: progress delegation ──────────────────────────────────
@@ -1849,7 +1867,13 @@ mod progress_unit_tests {
         client.enroll(&learner, &course_id);
         client.delegate_progress(&learner, &delegate);
 
-        client.submit_quiz_score_for(&delegate, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score_for(
+            &delegate,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
 
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.quizzes_submitted, 1);
@@ -1869,7 +1893,13 @@ mod progress_unit_tests {
         let stranger = Address::generate(&env);
         client.enroll(&learner, &course_id);
 
-        client.submit_quiz_score_for(&stranger, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score_for(
+            &stranger,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
     }
 
     #[test]
@@ -1889,7 +1919,8 @@ mod progress_unit_tests {
         scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
         scores.push_back((Symbol::new(&env, "quiz_2"), 90u32));
 
-        let submitted = client.batch_submit_quiz_score_for(&delegate, &learner, &course_id, &scores);
+        let submitted =
+            client.batch_submit_quiz_score_for(&delegate, &learner, &course_id, &scores);
         assert_eq!(submitted.len(), 2);
     }
 
@@ -1925,7 +1956,13 @@ mod progress_unit_tests {
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &40);
         client.delegate_progress(&learner, &delegate);
 
-        client.retake_quiz_for(&delegate, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+        client.retake_quiz_for(
+            &delegate,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &90,
+        );
 
         assert_eq!(
             client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
@@ -1947,7 +1984,13 @@ mod progress_unit_tests {
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &40);
 
-        client.retake_quiz_for(&stranger, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+        client.retake_quiz_for(
+            &stranger,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &90,
+        );
     }
 
     #[test]
@@ -1968,7 +2011,12 @@ mod progress_unit_tests {
         client.delegate_progress(&delegated_learner, &delegate);
 
         client.complete_module(&direct_learner, &course_id, &Symbol::new(&env, "mod_1"));
-        client.submit_quiz_score(&direct_learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(
+            &direct_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
 
         client.complete_module_for(
             &delegate,
@@ -2043,12 +2091,14 @@ mod progress_unit_tests {
 
         let new_learner = Address::generate(&env);
         let result = client.try_enroll(&new_learner, &course_id);
-        assert!(result.is_err(), "enrollment on an archived course should be rejected");
+        assert!(
+            result.is_err(),
+            "enrollment on an archived course should be rejected"
+        );
 
         let progress_after = client.get_progress(&existing_learner, &course_id);
         assert_eq!(
-            progress_after.overall_progress,
-            progress_before.overall_progress,
+            progress_after.overall_progress, progress_before.overall_progress,
             "existing progress must be preserved after archiving"
         );
     }

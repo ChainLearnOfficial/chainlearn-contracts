@@ -12,9 +12,7 @@
 use credential_nft::{CredentialNft, CredentialNftClient};
 use learn_token::LearnTokenClient;
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{
-    testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 
 struct BenchEnv {
     env: Env,
@@ -75,7 +73,9 @@ fn bench_create_course() {
     }
 
     env.budget().reset_default();
-    bench.progress_client.create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &3, &2, &module_ids, &quiz_ids);
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench create_course: {cost} CPU insns");
@@ -93,7 +93,9 @@ fn bench_enroll() {
     module_ids.push_back(Symbol::new(env, "mod_1"));
     let mut quiz_ids = Vec::new(env);
     quiz_ids.push_back(Symbol::new(env, "quiz_1"));
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
 
     let learner = Address::generate(env);
 
@@ -116,13 +118,17 @@ fn bench_complete_module() {
     module_ids.push_back(Symbol::new(env, "mod_1"));
     let mut quiz_ids = Vec::new(env);
     quiz_ids.push_back(Symbol::new(env, "quiz_1"));
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
 
     let learner = Address::generate(env);
     bench.progress_client.enroll(&learner, &course_id);
 
     env.budget().reset_default();
-    bench.progress_client.complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
+    bench
+        .progress_client
+        .complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench complete_module: {cost} CPU insns");
@@ -140,13 +146,17 @@ fn bench_submit_quiz_score() {
     module_ids.push_back(Symbol::new(env, "mod_1"));
     let mut quiz_ids = Vec::new(env);
     quiz_ids.push_back(Symbol::new(env, "quiz_1"));
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
 
     let learner = Address::generate(env);
     bench.progress_client.enroll(&learner, &course_id);
 
     env.budget().reset_default();
-    bench.progress_client.submit_quiz_score(&learner, &course_id, &Symbol::new(env, "quiz_1"), &80);
+    bench
+        .progress_client
+        .submit_quiz_score(&learner, &course_id, &Symbol::new(env, "quiz_1"), &80);
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench submit_quiz_score: {cost} CPU insns");
@@ -164,7 +174,9 @@ fn bench_get_progress() {
     module_ids.push_back(Symbol::new(env, "mod_1"));
     let mut quiz_ids = Vec::new(env);
     quiz_ids.push_back(Symbol::new(env, "quiz_1"));
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
 
     let learner = Address::generate(env);
     bench.progress_client.enroll(&learner, &course_id);
@@ -186,10 +198,16 @@ fn setup_completed_course(bench: &BenchEnv, learner: &Address) -> (Symbol, Symbo
     module_ids.push_back(Symbol::new(&bench.env, "mod_1"));
     let mut quiz_ids = Vec::new(&bench.env);
     quiz_ids.push_back(quiz_id.clone());
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
     bench.progress_client.enroll(learner, &course_id);
-    bench.progress_client.complete_module(learner, &course_id, &Symbol::new(&bench.env, "mod_1"));
-    bench.progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
+    bench
+        .progress_client
+        .complete_module(learner, &course_id, &Symbol::new(&bench.env, "mod_1"));
+    bench
+        .progress_client
+        .submit_quiz_score(learner, &course_id, &quiz_id, &80);
     (course_id, quiz_id)
 }
 
@@ -203,7 +221,9 @@ fn bench_claim_reward() {
     let (course_id, quiz_id) = setup_completed_course(&bench, &learner);
 
     env.budget().reset_default();
-    bench.token_client.claim_reward(&learner, &course_id, &quiz_id);
+    bench
+        .token_client
+        .claim_reward(&learner, &course_id, &quiz_id);
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench claim_reward: {cost} CPU insns");
@@ -245,7 +265,9 @@ fn bench_approve_and_transfer_from() {
     let approve_cost = env.budget().cpu_instruction_cost();
 
     env.budget().reset_default();
-    bench.token_client.transfer_from(&spender, &owner, &recipient, &3000);
+    bench
+        .token_client
+        .transfer_from(&spender, &owner, &recipient, &3000);
     let transfer_from_cost = env.budget().cpu_instruction_cost();
 
     println!("bench approve: {approve_cost} CPU insns");
@@ -301,10 +323,16 @@ fn setup_completed_course_for_credential(
     module_ids.push_back(Symbol::new(&bench.env, "mod_1"));
     let mut quiz_ids = Vec::new(&bench.env);
     quiz_ids.push_back(quiz_id.clone());
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
     bench.progress_client.enroll(learner, &course_id);
-    bench.progress_client.complete_module(learner, &course_id, &Symbol::new(&bench.env, "mod_1"));
-    bench.progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &score);
+    bench
+        .progress_client
+        .complete_module(learner, &course_id, &Symbol::new(&bench.env, "mod_1"));
+    bench
+        .progress_client
+        .submit_quiz_score(learner, &course_id, &quiz_id, &score);
     (course_id, quiz_id)
 }
 
@@ -319,7 +347,9 @@ fn bench_mint_credential() {
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
 
     env.budget().reset_default();
-    bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    bench
+        .credential_client
+        .mint_credential(&learner, &course_id, &85, &metadata_uri);
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench mint_credential: {cost} CPU insns");
@@ -335,7 +365,9 @@ fn bench_verify_credential() {
     let learner = Address::generate(env);
     let (course_id, _quiz_id) = setup_completed_course_for_credential(&bench, &learner, 85);
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
-    let cred_id = bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = bench
+        .credential_client
+        .mint_credential(&learner, &course_id, &85, &metadata_uri);
 
     env.budget().reset_default();
     let _info = bench.credential_client.verify_credential(&cred_id);
@@ -354,7 +386,9 @@ fn bench_revoke_credential() {
     let learner = Address::generate(env);
     let (course_id, _quiz_id) = setup_completed_course_for_credential(&bench, &learner, 85);
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
-    let cred_id = bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = bench
+        .credential_client
+        .mint_credential(&learner, &course_id, &85, &metadata_uri);
 
     env.budget().reset_default();
     bench.credential_client.revoke_credential(&cred_id);
@@ -387,12 +421,18 @@ fn bench_regression_batch_vs_individual_claim() {
         quiz_ids_src.push_back(Symbol::new(env, &format!("quiz_{}", i)));
     }
     let course_id = Symbol::new(env, "bench_regress");
-    bench.progress_client.create_course(&course_id, &(n as u32), &(n as u32), &module_ids, &quiz_ids_src);
+    bench
+        .progress_client
+        .create_course(&course_id, &1u32, &(n as u32), &module_ids, &quiz_ids_src);
     bench.progress_client.enroll(&learner, &course_id);
-    bench.progress_client.complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
+    bench
+        .progress_client
+        .complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
     for i in 0..n {
         let qid = Symbol::new(env, &format!("quiz_{}", i));
-        bench.progress_client.submit_quiz_score(&learner, &course_id, &qid, &80);
+        bench
+            .progress_client
+            .submit_quiz_score(&learner, &course_id, &qid, &80);
     }
 
     // Individual claims
@@ -415,19 +455,32 @@ fn bench_regression_batch_vs_individual_claim() {
         quiz_ids_src2.push_back(Symbol::new(env2, &format!("quiz_{}", i)));
     }
     let course_id2 = Symbol::new(env2, "bench_regress2");
-    bench2.progress_client.create_course(&course_id2, &(n as u32), &(n as u32), &module_ids2, &quiz_ids_src2);
+    bench2.progress_client.create_course(
+        &course_id2,
+        &1u32,
+        &(n as u32),
+        &module_ids2,
+        &quiz_ids_src2,
+    );
     bench2.progress_client.enroll(&learner2, &course_id2);
-    bench2.progress_client.complete_module(&learner2, &course_id2, &Symbol::new(env2, "mod_1"));
+    bench2
+        .progress_client
+        .complete_module(&learner2, &course_id2, &Symbol::new(env2, "mod_1"));
     for i in 0..n {
         let qid = Symbol::new(env2, &format!("quiz_{}", i));
-        bench2.progress_client.submit_quiz_score(&learner2, &course_id2, &qid, &80);
+        bench2
+            .progress_client
+            .submit_quiz_score(&learner2, &course_id2, &qid, &80);
     }
 
     env2.budget().reset_default();
-    let quiz_ids: Vec<Symbol> = (0..n)
-        .map(|i| Symbol::new(env2, &format!("quiz_{}", i)))
-        .collect();
-    let claimed = bench2.token_client.batch_claim_reward(&learner2, &course_id2, &quiz_ids);
+    let mut quiz_ids: Vec<Symbol> = Vec::new(env2);
+    for i in 0..n {
+        quiz_ids.push_back(Symbol::new(env2, &format!("quiz_{}", i)));
+    }
+    let claimed = bench2
+        .token_client
+        .batch_claim_reward(&learner2, &course_id2, &quiz_ids);
     let batch_cost = env2.budget().cpu_instruction_cost();
     assert_eq!(claimed.len(), n as u32);
 
@@ -469,14 +522,24 @@ fn bench_e2e_enroll_complete_claim_mint() {
 
     env.budget().reset_default();
 
-    bench.progress_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    bench
+        .progress_client
+        .create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
     bench.progress_client.enroll(&learner, &course_id);
-    bench.progress_client.complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
-    bench.progress_client.submit_quiz_score(&learner, &course_id, &quiz_id, &85);
-    bench.token_client.claim_reward(&learner, &course_id, &quiz_id);
+    bench
+        .progress_client
+        .complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
+    bench
+        .progress_client
+        .submit_quiz_score(&learner, &course_id, &quiz_id, &85);
+    bench
+        .token_client
+        .claim_reward(&learner, &course_id, &quiz_id);
 
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
-    bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    bench
+        .credential_client
+        .mint_credential(&learner, &course_id, &85, &metadata_uri);
 
     let total_cost = env.budget().cpu_instruction_cost();
 

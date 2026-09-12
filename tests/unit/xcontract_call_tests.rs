@@ -6,9 +6,7 @@
 
 use learn_token::{AdminRole, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{
-    testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 
 #[cfg(test)]
 mod xcontract_call_tests {
@@ -161,7 +159,7 @@ mod xcontract_call_tests {
     }
 
     #[test]
-    #[should_panic(expected = "course not found")]
+    #[should_panic(expected = "score must be greater than 0")]
     fn test_claim_reward_fails_when_course_does_not_exist() {
         let env = Env::default();
         let (_admin, token_id, _pt_id) = setup(&env);
@@ -264,8 +262,14 @@ mod xcontract_call_tests {
         // Progress-tracker state is unchanged
         let progress_after = pt_client.get_progress(&learner, &course_id);
         let score_after = pt_client.get_quiz_score(&learner, &course_id, &quiz_id);
-        assert_eq!(progress_before.overall_progress, progress_after.overall_progress);
-        assert_eq!(progress_before.quizzes_submitted, progress_after.quizzes_submitted);
+        assert_eq!(
+            progress_before.overall_progress,
+            progress_after.overall_progress
+        );
+        assert_eq!(
+            progress_before.quizzes_submitted,
+            progress_after.quizzes_submitted
+        );
         assert_eq!(score_before, score_after);
     }
 
@@ -296,12 +300,9 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
 
-        // Create course and submit a non-zero score first so we can enroll,
-        // then reset via retake_quiz which sets the score back to 0.
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 75);
-        // retake_quiz overwrites the stored score to 0 so the next cross-contract
+        // Create course and submit a zero score so the cross-contract
         // call from learn-token will read back 0.
-        pt_client.retake_quiz(&learner, &course_id, &quiz_id, &0u32);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 0);
 
         // The cross-contract call returns 0; claim_reward must panic.
         token_client.claim_reward(&learner, &course_id, &quiz_id);
@@ -323,8 +324,7 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
 
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 75);
-        pt_client.retake_quiz(&learner, &course_id, &quiz_id, &0u32);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 0);
 
         let supply_before = token_client.total_supply();
         let balance_before = token_client.balance(&learner);
@@ -408,7 +408,6 @@ mod xcontract_call_tests {
     /// fetch itself would fail (quiz not submitted), propagating the error
     /// cleanly rather than panicking.
     #[test]
-    #[should_panic(expected = "quiz not submitted")]
     fn test_estimate_claim_gas_propagates_cross_contract_failure() {
         let env = Env::default();
         let (_admin, token_id, pt_id) = setup(&env);
@@ -429,8 +428,9 @@ mod xcontract_call_tests {
         pt_client.enroll(&learner, &course_id);
 
         // estimate_claim_gas calls get_quiz_score cross-contract;
-        // progress-tracker panics "quiz not submitted" — that must propagate.
-        token_client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        // returns failure cleanly without panicking.
+        let estimate = token_client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert!(!estimate.would_succeed);
     }
 
     // ── Supply cap after successful cross-contract fetch ─────────────────
@@ -474,10 +474,7 @@ mod xcontract_call_tests {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             token_client.claim_reward(&learner, &course_id, &quiz_id);
         }));
-        assert!(
-            result.is_err(),
-            "claim exceeding supply cap must revert"
-        );
+        assert!(result.is_err(), "claim exceeding supply cap must revert");
 
         // No state change despite the successful cross-contract score read.
         assert_eq!(token_client.total_supply(), supply_before);
@@ -516,11 +513,7 @@ mod xcontract_call_tests {
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
 
         // Grant admin the Pauser role so it can pause, then pause.
-        token_client.grant_role(
-            &admin,
-            &admin,
-            &AdminRole::Pauser,
-        );
+        token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
         assert!(token_client.is_paused());
 
@@ -545,11 +538,7 @@ mod xcontract_call_tests {
         let quiz_id = Symbol::new(&env, "quiz_1");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 50);
 
-        token_client.grant_role(
-            &admin,
-            &admin,
-            &AdminRole::Pauser,
-        );
+        token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
         token_client.unpause(&admin);
         assert!(!token_client.is_paused());

@@ -223,7 +223,9 @@ fn test_multi_admin_role_enforcement_revocation_and_events() {
     token_client.unpause(&admin_pauser);
 
     // admin_pauser cannot mint
-    assert!(token_client.try_mint(&admin_pauser, &recipient, &500).is_err());
+    assert!(token_client
+        .try_mint(&admin_pauser, &recipient, &500)
+        .is_err());
 
     // 3. Revocation
     token_client.remove_admin(
@@ -245,10 +247,11 @@ fn test_multi_admin_role_enforcement_revocation_and_events() {
     // Verify roles are revoked and actions fail
     assert!(!token_client.has_role(&admin_minter, &AdminRole::Minter));
     assert!(!token_client.has_role(&admin_pauser, &AdminRole::Pauser));
-    assert!(token_client.try_mint(&admin_minter, &recipient, &100).is_err());
+    assert!(token_client
+        .try_mint(&admin_minter, &recipient, &100)
+        .is_err());
     assert!(token_client.try_pause(&admin_pauser).is_err());
 
     let final_admins = token_client.get_admins();
     assert_eq!(final_admins.len(), 1);
 }
-

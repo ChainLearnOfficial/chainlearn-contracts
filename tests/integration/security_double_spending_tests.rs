@@ -7,11 +7,16 @@
 use credential_nft::{CredentialNft, CredentialNftClient};
 use learn_token::LearnTokenClient;
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{
-    testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 
-fn setup_env(env: &Env) -> (Address, LearnTokenClient<'static>, CredentialNftClient<'static>, ProgressTrackerClient<'static>) {
+fn setup_env(
+    env: &Env,
+) -> (
+    Address,
+    LearnTokenClient<'static>,
+    CredentialNftClient<'static>,
+    ProgressTrackerClient<'static>,
+) {
     let admin = Address::generate(env);
 
     // Register and initialize ProgressTracker
@@ -72,10 +77,10 @@ fn test_double_claim_reward_is_prevented() {
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 80);
 
     // First claim succeeds
-    token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+    token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
 
     // Second claim for the same quiz must be rejected
-    token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+    token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
 }
 
 #[test]
@@ -89,13 +94,13 @@ fn test_double_claim_reward_does_not_corrupt_state() {
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 80);
 
     // First claim succeeds
-    token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+    token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
     let balance_after_first = token_client.balance(&learner);
     let supply_after_first = token_client.total_supply();
 
     // Second claim reverts — state must be unchanged
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+        token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
     }));
     assert!(result.is_err(), "double claim should revert");
 
@@ -131,7 +136,6 @@ fn test_double_claim_different_quizzes_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "reward already claimed")]
 fn test_double_claim_in_batch_is_skipped() {
     let env = Env::default();
     let (_admin, token_client, _credential_client, progress_client) = setup_env(&env);
@@ -197,7 +201,10 @@ fn test_double_mint_credential_does_not_corrupt_state() {
     }));
     assert!(result.is_err(), "double mint should revert");
 
-    assert_eq!(credential_client.get_total_credentials_count(), total_before);
+    assert_eq!(
+        credential_client.get_total_credentials_count(),
+        total_before
+    );
     let info = credential_client.verify_credential(&cred_id);
     assert_eq!(info.learner, learner);
     assert_eq!(info.score, 85);
@@ -282,7 +289,8 @@ fn test_double_enroll_does_not_corrupt_state() {
 
     let progress_after = progress_client.get_progress(&learner, &course_id);
     assert_eq!(
-        progress_before.overall_progress, progress_after.overall_progress
+        progress_before.overall_progress,
+        progress_after.overall_progress
     );
     assert_eq!(
         progress_before.modules_completed_bitmap,

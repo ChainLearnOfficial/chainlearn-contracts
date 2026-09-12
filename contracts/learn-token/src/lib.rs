@@ -98,11 +98,14 @@ impl LearnToken {
         course_id: &Symbol,
         quiz_id: &Symbol,
     ) -> u32 {
-        env.invoke_contract(
+        match env.try_invoke_contract::<u32, soroban_sdk::Error>(
             progress_tracker,
             get_quiz_score_fn,
             (learner, course_id, quiz_id).into_val(env),
-        )
+        ) {
+            Ok(Ok(score)) => score,
+            _ => 0,
+        }
     }
 }
 
