@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ChainLearn Discussions
+    url: https://github.com/ChainLearnOfficial/chainlearn-contracts/discussions
+    about: Please ask and discuss general questions in GitHub Discussions.
