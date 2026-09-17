@@ -162,6 +162,8 @@ cargo test -- --nocapture
 
 ## Deploy
 
+For a detailed walkthrough, manual CLI commands, on-chain verification, and troubleshooting steps, see the [Deployment Guide](docs/deployment-guide.md).
+
 ### Testnet
 
 1. Set your secret key:
