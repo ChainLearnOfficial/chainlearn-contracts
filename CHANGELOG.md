@@ -8,23 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Rustdoc examples on all public contract functions for easier integration
-- CHANGELOG.md for tracking version history and breaking changes
-- `transfer()` method on credential-nft contract that explicitly rejects transfers, enforcing soulbound credentials
-- Documentation improvements for soulbound credential enforcement
-- `contract_metadata()` on all three contracts, returning the contract's name and version, stored on `initialize()` (#107)
-- `course_exists()` on progress-tracker, letting other contracts validate a `course_id` cheaply (#108)
+- **Role-Based Admin Access Control**: Multi-admin architecture with granular `AdminRole` variants (SuperAdmin, Minter, CourseManager, Pauser) and delayed admin transfer mechanics (#369, #371).
+- **Governance & Token Vesting**: `VestingSchedule` data structures with cliff enforcement, linear distribution curves, and governance proposal voting (#366, #384).
+- **Contract Upgradeability**: Timelocked wasm upgrade entrypoint with hash verification and security checks (#362, #371).
+- **Emergency Pause Mechanism**: Contract-wide emergency pause and unpause controls with event telemetry (#363, #384).
+- **SEP-41 Token Burning & Supply Caps**: Added `burn()` and `burn_from()` entrypoints, configurable `set_max_supply()`, and `max_supply_updated` event (#368).
+- **Simulation & Gas Estimation**: Added `preview_claim_reward()` and `estimate_claim_gas()` for pre-flight off-chain simulation without gas waste (#362, #371).
+- **Batch Operations**: Added `submit_quiz_scores_batch()` in progress-tracker and batch claim reward processing (#371, #372).
+- **Content Integrity Verification**: `enroll_checked()` entrypoint verifying course content SHA-256 hashes on enrollment (#363, #384).
+- **Prerequisites & Course Versioning**: Module prerequisite chains, course versioning, quiz retake policies, and learner completion metrics (#364, #376).
+- **Soulbound Rejection Enforcement**: Explicit typed `ContractError::Soulbound (1)` on credential `transfer()` calls (#374, #378).
+- **Security & Invariant Test Suite**: End-to-end unit and integration suites covering arithmetic underflow/overflow, reentrancy guards, double-spending attacks, and authorization boundaries (#379, #383, #386).
+- **Developer Documentation**: Comprehensive guides covering deployment (`docs/deployment-guide.md`), troubleshooting (`docs/troubleshooting.md`), testing (`docs/testing-guide.md`), and contributions (`CONTRIBUTING.md`).
+
+### Changed
+- **Cross-Contract Optimization**: Reduced cross-contract call overhead when checking quiz scores and credential eligibility (#375).
+- **Storage Hygiene**: Moved token allowances from persistent to temporary storage with automated TTL extension (#110).
+- **Credential Minting Validation**: Enforced strict validation matching caller score against on-chain course average score (#108).
+- **Event Schemas**: Expanded event payloads in `module_completed`, `credential_minted`, and `claim_reward` with indexed topics for indexer efficiency (#123).
 
 ### Fixed
-- `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)
-- `is_credential_valid()` no longer deserializes the full `CredentialInfo` struct; it checks existence and a dedicated `revoked` flag instead (#109)
-- learn-token allowances now live in temporary storage instead of persistent storage, matching their short-lived, self-expiring nature (#110)
-- README progress formula documentation now accurately reflects integer division implementation (#130)
-- Credential transfer mechanism now enforces non-transferability (soulbound) (#127)
-- `module_completed` event now includes `overall_progress` so indexers don't have to follow up with a `get_progress` call (#123)
-- README now documents the actual `claim_reward(learner, course_id, quiz_id)` signature (#124)
-- README now documents the cross-contract dependency between `learn-token`/`credential-nft` and `progress-tracker` (#125)
-- README now documents that `initialize.sh` passes the `progress-tracker` address to `learn-token` (#126)
+- Fixed integer division documentation in `README.md` to clarify floor rounding behavior (#130).
+- Fixed signature documentation for `claim_reward(learner, course_id, quiz_id)` across README and examples (#124).
+- Prevented duplicate reward claims across batch invocations with idempotent execution semantics.
 
 ## [1.0.0] - Initial Release
 
