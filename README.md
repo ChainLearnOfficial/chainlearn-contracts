@@ -325,4 +325,4 @@ A learner is eligible for a credential when:
 
 ## License
 
-MIT
+This project is licensed under the [MIT License](LICENSE).
