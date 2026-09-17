@@ -323,6 +323,10 @@ A learner is eligible for a credential when:
 - **Soulbound enforcement**: Credential NFTs are permanently bound to the earner; `transfer()` is rejected
   to prevent trading or theft of credentials
 
+## Documentation
+
+- [Testing Guide](docs/testing-guide.md): Test architecture, running unit/integration/snapshot tests, security invariants, and best practices.
+
 ## License
 
 MIT
