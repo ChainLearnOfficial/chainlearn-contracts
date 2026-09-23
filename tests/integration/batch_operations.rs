@@ -139,3 +139,54 @@ fn test_batch_quiz_submission() {
     assert_eq!(progress.quizzes_submitted, 3);
     assert_eq!(progress.total_quiz_score, 70 + 85 + 95);
 }
+
+#[test]
+fn test_batch_claim_reward_with_invalid_quiz_succeeds_valid_claims() {
+    let setup = setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = Symbol::new(env, "course_partial");
+    let quiz1 = Symbol::new(env, "quiz_1");
+    let quiz2 = Symbol::new(env, "quiz_2");
+    let quiz3 = Symbol::new(env, "quiz_3");
+
+    let mut module_ids = Vec::new(env);
+    module_ids.push_back(Symbol::new(env, "mod_1"));
+    let mut quiz_ids = Vec::new(env);
+    quiz_ids.push_back(quiz1.clone());
+    quiz_ids.push_back(quiz2.clone());
+    quiz_ids.push_back(quiz3.clone());
+
+    progress_client.create_course(&course_id, &1, &3, &module_ids, &quiz_ids);
+    progress_client.enroll(learner, &course_id);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz1, &80);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz2, &70);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz3, &90);
+
+    // Pre-claim quiz2 so it will be skipped in the batch
+    token_client.claim_reward(learner, &course_id, &quiz2);
+    assert_eq!(token_client.balance(learner), 7000);
+
+    // Batch with two unclaimed and one already-claimed quiz
+    let mut batch_ids = Vec::new(env);
+    batch_ids.push_back(quiz1.clone());
+    batch_ids.push_back(quiz2.clone());
+    batch_ids.push_back(quiz3.clone());
+
+    let claimed = token_client.batch_claim_reward(learner, &course_id, &batch_ids);
+
+    // Only the two unclaimed quizzes are claimed; quiz2 is skipped
+    assert_eq!(claimed.len(), 2);
+    assert!(claimed.contains(quiz1.clone()));
+    assert!(claimed.contains(quiz3.clone()));
+    assert!(!claimed.contains(quiz2));
+
+    // 80*100 + 70*100 (individual) + 90*100 = 8000 + 7000 + 9000 = 24000
+    assert_eq!(token_client.balance(learner), 24000);
+    assert_eq!(token_client.total_supply(), 24000);
+}
