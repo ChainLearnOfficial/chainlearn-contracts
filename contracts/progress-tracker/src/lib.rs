@@ -201,6 +201,8 @@ impl ProgressTracker {
             version: 1,
             // Freshly created course is stamped with the current time (#265).
             updated_at: env.ledger().timestamp(),
+            // Default to beginner difficulty (0); configurable via `set_course_difficulty` (#259).
+            difficulty: 0,
         };
 
         types::write_entry(
@@ -1274,6 +1276,63 @@ impl ProgressTracker {
             (Symbol::new(&env, "content_hash_set"),),
             (&course_id, &content_hash),
         );
+    }
+
+    /// Set the difficulty level for a course. Admin only (#259).
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to update
+    /// * `difficulty` - Difficulty level (0=beginner, 1=intermediate, 2=advanced)
+    ///
+    /// # Panics
+    /// * If the course does not exist
+    /// * If difficulty is not 0, 1, or 2
+    pub fn set_course_difficulty(env: Env, course_id: Symbol, difficulty: u8) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        if difficulty > 2 {
+            panic!("difficulty must be 0 (beginner), 1 (intermediate), or 2 (advanced)");
+        }
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        course.difficulty = difficulty;
+        course.updated_at = env.ledger().timestamp();
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "course_difficulty_set"),),
+            (&course_id, difficulty),
+        );
+    }
+
+    /// Get the difficulty level for a course (#259).
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// Difficulty level (0=beginner, 1=intermediate, 2=advanced)
+    pub fn get_course_difficulty(env: Env, course_id: Symbol) -> u8 {
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id))
+            .expect("course not found");
+        course.difficulty
     }
 
     /// Update the version of a course. Admin only (#245).

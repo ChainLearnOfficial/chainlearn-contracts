@@ -37,6 +37,11 @@ pub struct Course {
     /// modification (archive, content-hash update, version bump,
     /// prerequisites). Lets learners judge how current the content is.
     pub updated_at: u64,
+    /// Difficulty level of the course (#259).
+    ///
+    /// 0 = beginner, 1 = intermediate, 2 = advanced.
+    /// Optional metadata for filtering and recommendations.
+    pub difficulty: u8,
 }
 
 /// Represents a quiz submission.
