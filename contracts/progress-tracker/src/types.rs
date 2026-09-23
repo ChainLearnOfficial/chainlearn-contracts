@@ -37,6 +37,22 @@ pub struct Course {
     /// modification (archive, content-hash update, version bump,
     /// prerequisites). Lets learners judge how current the content is.
     pub updated_at: u64,
+    /// Ledger timestamp when the course was first created (#264).
+    ///
+    /// Set once on creation and never modified. Lets learners and frontends
+    /// sort courses by newest without relying on `updated_at` which changes
+    /// on every admin action.
+    pub created_at: u64,
+    /// Difficulty level of the course (#259).
+    ///
+    /// 0 = beginner, 1 = intermediate, 2 = advanced.
+    /// Optional metadata for filtering and recommendations.
+    pub difficulty: u32,
+    /// Tags for categorization and filtering (#260).
+    ///
+    /// Used for course discovery and filtering by topic.
+    /// Optional metadata that enables tag-based queries.
+    pub tags: Vec<Symbol>,
 }
 
 /// Represents a quiz submission.

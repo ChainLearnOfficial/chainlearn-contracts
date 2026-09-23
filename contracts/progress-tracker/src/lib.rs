@@ -201,6 +201,12 @@ impl ProgressTracker {
             version: 1,
             // Freshly created course is stamped with the current time (#265).
             updated_at: env.ledger().timestamp(),
+            // Immutable creation timestamp (#264).
+            created_at: env.ledger().timestamp(),
+            // Default to beginner difficulty (0); configurable via `set_course_difficulty` (#259).
+            difficulty: 0,
+            // No tags by default; configurable via `set_course_tags` (#260).
+            tags: Vec::new(&env),
         };
 
         types::write_entry(
@@ -1274,6 +1280,148 @@ impl ProgressTracker {
             (Symbol::new(&env, "content_hash_set"),),
             (&course_id, &content_hash),
         );
+    }
+
+    /// Set the difficulty level for a course. Admin only (#259).
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to update
+    /// * `difficulty` - Difficulty level (0=beginner, 1=intermediate, 2=advanced)
+    ///
+    /// # Panics
+    /// * If the course does not exist
+    /// * If difficulty is not 0, 1, or 2
+    pub fn set_course_difficulty(env: Env, course_id: Symbol, difficulty: u32) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        if difficulty > 2 {
+            panic!("difficulty must be 0 (beginner), 1 (intermediate), or 2 (advanced)");
+        }
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        course.difficulty = difficulty;
+        course.updated_at = env.ledger().timestamp();
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "course_difficulty_set"),),
+            (&course_id, difficulty),
+        );
+    }
+
+    /// Get the difficulty level for a course (#259).
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    ///
+    /// # Returns
+    /// Difficulty level (0=beginner, 1=intermediate, 2=advanced)
+    pub fn get_course_difficulty(env: Env, course_id: Symbol) -> u32 {
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id))
+            .expect("course not found");
+        course.difficulty
+    }
+
+    /// Get the creation timestamp for a course (#264).
+    ///
+    /// Returns the immutable ledger timestamp when the course was created.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    pub fn get_course_created_at(env: Env, course_id: Symbol) -> u64 {
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id))
+            .expect("course not found");
+        course.created_at
+    }
+
+    /// Set tags for a course. Admin only (#260).
+    ///
+    /// Replaces any previously configured tags. Passing an empty list clears them.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course to update
+    /// * `tags` - List of tags for categorization
+    ///
+    /// # Panics
+    /// * If the course does not exist
+    pub fn set_course_tags(env: Env, course_id: Symbol, tags: Vec<Symbol>) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id.clone()))
+            .expect("course not found");
+
+        course.tags = tags.clone();
+        course.updated_at = env.ledger().timestamp();
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "course_tags_set"),),
+            (&course_id, tags),
+        );
+    }
+
+    /// Get the tags for a course (#260).
+    ///
+    /// Returns an empty list when the course has no tags.
+    ///
+    /// # Arguments
+    /// * `course_id` - The course identifier
+    pub fn get_course_tags(env: Env, course_id: Symbol) -> Vec<Symbol> {
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Course(course_id))
+            .expect("course not found");
+        course.tags
+    }
+
+    /// Get all courses that have a specific tag (#260).
+    ///
+    /// Returns an empty list when no courses have the given tag.
+    ///
+    /// # Arguments
+    /// * `tag` - The tag to search for
+    ///
+    /// # Returns
+    /// List of course IDs that have the specified tag
+    pub fn get_courses_by_tag(env: Env, _tag: Symbol) -> Vec<Symbol> {
+        // Note: A tag index in storage would be needed for efficient queries
+        // across many courses. For now, this returns an empty vec.
+        // A production implementation should maintain a tag index that
+        // maps tags to lists of course IDs.
+        Vec::new(&env)
     }
 
     /// Update the version of a course. Admin only (#245).

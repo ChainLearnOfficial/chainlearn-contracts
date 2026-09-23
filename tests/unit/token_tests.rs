@@ -1279,5 +1279,49 @@ mod token_unit_tests {
     // `contracts/learn-token/src/lib.rs` (see its "Issue #254: storage size
     // tracking" section) -- that implementation predates this branch on
     // `main`, so no duplicate tests are added here.
+
+    // ── Issue #304: comprehensive admin transfer delay test ─────────────────
+
+    #[test]
+    fn test_admin_transfer_delay_full_flow() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        // 1. Initiate admin transfer
+        client.transfer_admin(&new_admin);
+
+        // 2. Verify pending admin is set
+        let pending = client.pending_admin().expect("pending transfer expected");
+        assert_eq!(pending.new_admin, new_admin);
+
+        // 3. Verify current admin hasn't changed
+        assert_eq!(client.admin(), admin, "admin must not change until accepted");
+
+        // 4. Attempt to accept before delay elapses - should fail
+        let result = client.try_accept_admin();
+        assert!(result.is_err(), "accept before delay elapses must fail");
+
+        // 5. Advance time past the delay
+        let delay = client.admin_transfer_delay();
+        env.ledger().with_mut(|l| {
+            l.timestamp += delay;
+        });
+
+        // 6. Accept admin - should succeed
+        client.accept_admin();
+
+        // 7. Verify admin has changed
+        assert_eq!(client.admin(), new_admin);
+
+        // 8. Verify pending transfer is cleared
+        assert_eq!(
+            client.pending_admin(),
+            None,
+            "pending transfer must be cleared after acceptance"
+        );
+    }
 }
 
