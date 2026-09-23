@@ -3,3 +3,5 @@ test_snapshots/
 .mimo/
 *.mimo
 mimo/
+/coverage/
+deployments-*.prev.json

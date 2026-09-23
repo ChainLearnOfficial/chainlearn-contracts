@@ -4,6 +4,8 @@ A Soroban smart contract workspace for a Stellar-based learning platform. ChainL
 
 ## Architecture
 
+For a detailed architecture overview including diagrams and storage layout, see [docs/architecture.md](./docs/architecture.md).
+
 The workspace contains three interconnected contracts and a shared utilities package:
 
 ### learn-token (SEP-41 Fungible Token)
@@ -729,6 +731,12 @@ struct ContractMetadata {
 | `credential_metadata_updated` | — | `(credential_id, new_metadata_uri)` | Metadata URI updated. |
 | `credential_display_set` | — | `(credential_id,)` | Display properties set. |
 | `certificate_generated` | `[certificate_generated, learner, course_id]` | `(cert_uri,)` | Certificate URI generated. |
+## Documentation
+
+- [Architecture](./docs/architecture.md) - Contract relationships, data flow, and storage layout
+- [Security Model](./docs/security.md) - Authorization, trust boundaries, and threat mitigation
+- [Upgrade Guide](./docs/upgrade-guide.md) - Procedures for upgrading contracts
+- [Integration Guide](./docs/integration-guide.md) - SDK setup and contract interaction patterns
 
 ## License
 
