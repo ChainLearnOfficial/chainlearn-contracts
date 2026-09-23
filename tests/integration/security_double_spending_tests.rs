@@ -72,10 +72,10 @@ fn test_double_claim_reward_is_prevented() {
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 80);
 
     // First claim succeeds
-    token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+    token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
 
     // Second claim for the same quiz must be rejected
-    token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+    token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
 }
 
 #[test]
@@ -89,13 +89,13 @@ fn test_double_claim_reward_does_not_corrupt_state() {
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 80);
 
     // First claim succeeds
-    token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+    token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
     let balance_after_first = token_client.balance(&learner);
     let supply_after_first = token_client.total_supply();
 
     // Second claim reverts — state must be unchanged
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        token_client.claim_reward(&learner, &course_id, &Symbol::new(env, "quiz_1"));
+        token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
     }));
     assert!(result.is_err(), "double claim should revert");
 
@@ -131,7 +131,6 @@ fn test_double_claim_different_quizzes_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "reward already claimed")]
 fn test_double_claim_in_batch_is_skipped() {
     let env = Env::default();
     let (_admin, token_client, _credential_client, progress_client) = setup_env(&env);

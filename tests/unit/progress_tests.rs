@@ -288,6 +288,7 @@ mod progress_unit_tests {
             content_hash: Symbol::new(&env, "none"),
             prerequisites: Vec::new(&env),
             version: 1,
+            updated_at: env.ledger().timestamp(),
         };
         env.as_contract(&contract_id, || {
             env.storage().persistent().set(

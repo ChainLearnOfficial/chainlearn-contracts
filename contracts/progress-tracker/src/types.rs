@@ -31,6 +31,12 @@ pub struct Course {
     /// Incremented when off-chain content changes; learners track which
     /// version they completed.
     pub version: u32,
+    /// Ledger timestamp of the most recent course modification (#265).
+    ///
+    /// Set when the course is created and refreshed by every admin
+    /// modification (archive, content-hash update, version bump,
+    /// prerequisites). Lets learners judge how current the content is.
+    pub updated_at: u64,
 }
 
 /// Represents a quiz submission.

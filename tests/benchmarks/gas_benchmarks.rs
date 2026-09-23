@@ -378,18 +378,20 @@ fn bench_regression_batch_vs_individual_claim() {
     env.mock_all_auths();
 
     let learner = Address::generate(env);
+    let n: usize = 5;
     let mut module_ids = Vec::new(env);
-    module_ids.push_back(Symbol::new(env, "mod_1"));
+    for i in 0..n {
+        module_ids.push_back(Symbol::new(env, &format!("mod_{}", i)));
+    }
 
     let mut quiz_ids_src = Vec::new(env);
-    let n: usize = 5;
     for i in 0..n {
         quiz_ids_src.push_back(Symbol::new(env, &format!("quiz_{}", i)));
     }
     let course_id = Symbol::new(env, "bench_regress");
     bench.progress_client.create_course(&course_id, &(n as u32), &(n as u32), &module_ids, &quiz_ids_src);
     bench.progress_client.enroll(&learner, &course_id);
-    bench.progress_client.complete_module(&learner, &course_id, &Symbol::new(env, "mod_1"));
+    bench.progress_client.complete_module(&learner, &course_id, &Symbol::new(env, "mod_0"));
     for i in 0..n {
         let qid = Symbol::new(env, &format!("quiz_{}", i));
         bench.progress_client.submit_quiz_score(&learner, &course_id, &qid, &80);
@@ -409,7 +411,9 @@ fn bench_regression_batch_vs_individual_claim() {
     env2.mock_all_auths();
     let learner2 = Address::generate(env2);
     let mut module_ids2 = Vec::new(env2);
-    module_ids2.push_back(Symbol::new(env2, "mod_1"));
+    for i in 0..n {
+        module_ids2.push_back(Symbol::new(env2, &format!("mod_{}", i)));
+    }
     let mut quiz_ids_src2 = Vec::new(env2);
     for i in 0..n {
         quiz_ids_src2.push_back(Symbol::new(env2, &format!("quiz_{}", i)));
@@ -417,16 +421,17 @@ fn bench_regression_batch_vs_individual_claim() {
     let course_id2 = Symbol::new(env2, "bench_regress2");
     bench2.progress_client.create_course(&course_id2, &(n as u32), &(n as u32), &module_ids2, &quiz_ids_src2);
     bench2.progress_client.enroll(&learner2, &course_id2);
-    bench2.progress_client.complete_module(&learner2, &course_id2, &Symbol::new(env2, "mod_1"));
+    bench2.progress_client.complete_module(&learner2, &course_id2, &Symbol::new(env2, "mod_0"));
     for i in 0..n {
         let qid = Symbol::new(env2, &format!("quiz_{}", i));
         bench2.progress_client.submit_quiz_score(&learner2, &course_id2, &qid, &80);
     }
 
     env2.budget().reset_default();
-    let quiz_ids: Vec<Symbol> = (0..n)
-        .map(|i| Symbol::new(env2, &format!("quiz_{}", i)))
-        .collect();
+    let mut quiz_ids = Vec::new(env2);
+    for i in 0..n {
+        quiz_ids.push_back(Symbol::new(env2, &format!("quiz_{}", i)));
+    }
     let claimed = bench2.token_client.batch_claim_reward(&learner2, &course_id2, &quiz_ids);
     let batch_cost = env2.budget().cpu_instruction_cost();
     assert_eq!(claimed.len(), n as u32);

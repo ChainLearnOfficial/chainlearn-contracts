@@ -199,6 +199,8 @@ impl ProgressTracker {
             prerequisites: Vec::new(&env),
             // Start at version 1; updated via `update_course_version` (#245).
             version: 1,
+            // Freshly created course is stamped with the current time (#265).
+            updated_at: env.ledger().timestamp(),
         };
 
         types::write_entry(
@@ -1226,6 +1228,7 @@ impl ProgressTracker {
         }
 
         course.archived = true;
+        course.updated_at = env.ledger().timestamp();
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Course(course_id.clone()),
@@ -1260,6 +1263,7 @@ impl ProgressTracker {
             .expect("course not found");
 
         course.content_hash = content_hash.clone();
+        course.updated_at = env.ledger().timestamp();
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Course(course_id.clone()),
@@ -1292,6 +1296,7 @@ impl ProgressTracker {
             .expect("course not found");
 
         course.version = new_version;
+        course.updated_at = env.ledger().timestamp();
         env.storage()
             .persistent()
             .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
@@ -1380,6 +1385,7 @@ impl ProgressTracker {
         }
 
         course.prerequisites = prerequisites.clone();
+        course.updated_at = env.ledger().timestamp();
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::Course(course_id.clone()),
@@ -2271,6 +2277,75 @@ mod tests {
             client.get_progress(&learner, &course_id).overall_progress,
             0
         );
+    }
+
+    // ── Issue #265: course last updated timestamp ───────────────────────
+
+    #[test]
+    fn test_course_updated_at_defaults_to_creation_time() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 42_000);
+        let course_id = create_test_course(&env, &client);
+
+        // Fresh courses are stamped with the block time at creation (#265).
+        assert_eq!(client.get_course(&course_id).updated_at, 42_000);
+    }
+
+    #[test]
+    fn test_course_updated_at_changes_on_modification() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        let created_at = client.get_course(&course_id).updated_at;
+
+        // Version bump refreshes the timestamp (#245 + #265).
+        env.ledger().with_mut(|l| l.timestamp = created_at + 1000);
+        client.update_course_version(&course_id, &2);
+        let after_version = client.get_course(&course_id).updated_at;
+        assert_eq!(after_version, created_at + 1000);
+        assert!(after_version > created_at);
+
+        // Content hash update refreshes the timestamp (#235 + #265).
+        env.ledger()
+            .with_mut(|l| l.timestamp = after_version + 1000);
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "abc123"));
+        let after_hash = client.get_course(&course_id).updated_at;
+        assert!(after_hash > after_version);
+
+        // Prerequisite changes refresh the timestamp (#231 + #265).
+        env.ledger().with_mut(|l| l.timestamp = after_hash + 1000);
+        client.set_prerequisites(&course_id, &Vec::new(&env));
+        let after_prereqs = client.get_course(&course_id).updated_at;
+        assert!(after_prereqs > after_hash);
+
+        // Archiving refreshes the timestamp (#210 + #265).
+        env.ledger()
+            .with_mut(|l| l.timestamp = after_prereqs + 1000);
+        client.archive_course(&course_id);
+        let after_archive = client.get_course(&course_id).updated_at;
+        assert!(after_archive > after_prereqs);
+    }
+
+    #[test]
+    fn test_course_updated_at_is_queryable_via_get_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 77_000);
+        let course_id = create_test_course(&env, &client);
+
+        // Course queries surface the freshness signal (#265).
+        assert_eq!(client.get_course(&course_id).updated_at, 77_000);
     }
 
     // ── Issue #34: verified course score ─────────────────────────────────
