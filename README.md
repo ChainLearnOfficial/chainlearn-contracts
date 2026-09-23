@@ -4,6 +4,8 @@ A Soroban smart contract workspace for a Stellar-based learning platform. ChainL
 
 ## Architecture
 
+For a detailed architecture overview including diagrams and storage layout, see [docs/architecture.md](./docs/architecture.md).
+
 The workspace contains three interconnected contracts and a shared utilities package:
 
 ### learn-token (SEP-41 Fungible Token)
@@ -322,6 +324,13 @@ A learner is eligible for a credential when:
 - **Admin controls**: Only the admin can create courses, mint tokens, and revoke credentials
 - **Soulbound enforcement**: Credential NFTs are permanently bound to the earner; `transfer()` is rejected
   to prevent trading or theft of credentials
+
+## Documentation
+
+- [Architecture](./docs/architecture.md) - Contract relationships, data flow, and storage layout
+- [Security Model](./docs/security.md) - Authorization, trust boundaries, and threat mitigation
+- [Upgrade Guide](./docs/upgrade-guide.md) - Procedures for upgrading contracts
+- [Integration Guide](./docs/integration-guide.md) - SDK setup and contract interaction patterns
 
 ## License
 
