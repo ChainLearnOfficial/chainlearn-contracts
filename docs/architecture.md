@@ -56,63 +56,48 @@ ChainLearn is a Soroban smart contract workspace for a Stellar-based learning pl
 
 ### Learner Journey
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Enroll    │────►│  Complete   │────►│  Submit     │────►│   Claim     │
-│   in Course │     │  Modules    │     │  Quiz Scores│     │   Rewards   │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                                                              │
-                                                              ▼
-                                                     ┌─────────────┐
-                                                     │   Receive   │
-                                                     │  Credential │
-                                                     │     NFT     │
-                                                     └─────────────┘
+```mermaid
+sequenceDiagram
+    participant Learner
+    participant Tracker as progress-tracker
+    participant Token as learn-token
+    participant NFT as credential-nft
+
+    Learner->>Tracker: Enroll in Course
+    Learner->>Tracker: Complete Modules
+    Learner->>Tracker: Submit Quiz Scores
+    Learner->>Token: Claim Rewards
+    Learner->>NFT: Receive Credential NFT
 ```
 
 ### Reward Claim Flow
 
-```
-Learner                    learn-token                 progress-tracker
-  │                              │                              │
-  │  claim_reward(learner,       │                              │
-  │    course_id, quiz_id)       │                              │
-  │─────────────────────────────►│                              │
-  │                              │  get_quiz_score(learner,     │
-  │                              │    course_id, quiz_id)       │
-  │                              │─────────────────────────────►│
-  │                              │                              │
-  │                              │  return verified_score       │
-  │                              │◄─────────────────────────────│
-  │                              │                              │
-  │  mint(reward_amount)         │                              │
-  │◄─────────────────────────────│                              │
-  │                              │                              │
+```mermaid
+sequenceDiagram
+    participant Learner
+    participant Token as learn-token
+    participant Tracker as progress-tracker
+
+    Learner->>Token: claim_reward(learner, course_id, quiz_id)
+    Token->>Tracker: get_quiz_score(learner, course_id, quiz_id)
+    Tracker-->>Token: return verified_score
+    Token-->>Learner: mint(reward_amount)
 ```
 
 ### Credential Mint Flow
 
-```
-Admin/Caller              credential-nft              progress-tracker
-  │                              │                              │
-  │  mint_credential(to,         │                              │
-  │    course_id, score,         │                              │
-  │    metadata_uri)             │                              │
-  │─────────────────────────────►│                              │
-  │                              │  is_eligible_for_credential()│
-  │                              │─────────────────────────────►│
-  │                              │                              │
-  │                              │  return true/false           │
-  │                              │◄─────────────────────────────│
-  │                              │                              │
-  │                              │  get_course_score()          │
-  │                              │─────────────────────────────►│
-  │                              │                              │
-  │                              │  return verified_score       │
-  │                              │◄─────────────────────────────│
-  │                              │                              │
-  │  return credential_id        │                              │
-  │◄─────────────────────────────│                              │
+```mermaid
+sequenceDiagram
+    participant Admin as Admin/Caller
+    participant NFT as credential-nft
+    participant Tracker as progress-tracker
+
+    Admin->>NFT: mint_credential(to, course_id, score, metadata_uri)
+    NFT->>Tracker: is_eligible_for_credential()
+    Tracker-->>NFT: return true/false
+    NFT->>Tracker: get_course_score()
+    Tracker-->>NFT: return verified_score
+    NFT-->>Admin: return credential_id
 ```
 
 ## Storage Layout
