@@ -741,3 +741,16 @@ struct ContractMetadata {
 ## License
 
 MIT
+
+### Common Error Conditions
+- `AlreadyInitialized`: The contract has already been initialized.
+- `NotAuthorized`: The caller lacks the required administrative or ownership privileges.
+- `NotFound`: The requested resource (course, module, credential) does not exist.
+- `InvalidState`: The operation cannot be performed in the current state (e.g., course archived).
+- `InsufficientAllowance`: The spender is not approved for the required token amount.
+
+### Examples
+For comprehensive integration examples, see the `examples/` directory in the repository root, which includes:
+- Rust client (`examples/rust_client_example.rs`)
+- JavaScript client (`examples/javascript_client_example.js`)
+- CLI examples (`examples/cli_usage_examples.sh`)
