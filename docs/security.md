@@ -49,43 +49,35 @@ if caller == co_signer {
 
 ### External Trust Boundaries
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    External Trust Boundary                       │
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │   Stellar    │    │   External   │    │   Off-chain  │      │
-│  │   Network    │    │   Callers    │    │   Storage    │      │
-│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘      │
-│         │                   │                   │               │
-│         ▼                   ▼                   ▼               │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                  ChainLearn Contracts                    │   │
-│  │                                                          │   │
-│  │  • Auth checks on all state changes                     │   │
-│  │  • Input validation (bounds, duplicates)                 │   │
-│  │  • Cross-contract verification                           │   │
-│  │                                                          │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph External Trust Boundary
+        Stellar[Stellar Network]
+        Callers[External Callers]
+        Storage[Off-chain Storage]
+    end
+
+    subgraph ChainLearn Contracts
+        Checks[Auth checks on all state changes]
+        Validation[Input validation bounds, duplicates]
+        Verification[Cross-contract verification]
+    end
+
+    Stellar --> ChainLearn Contracts
+    Callers --> ChainLearn Contracts
+    Storage --> ChainLearn Contracts
 ```
 
 ### Internal Trust Boundaries
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   Internal Trust Boundary                       │
-│                                                                  │
-│  progress-tracker (Source of Truth)                            │
-│         ▲                         ▲                             │
-│         │                         │                             │
-│         │ verified reads          │ verified reads              │
-│         │                         │                             │
-│  learn-token                credential-nft                      │
-│  (Reward Minter)            (Credential Minter)                 │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Internal Trust Boundary
+        Tracker(progress-tracker <br> Source of Truth)
+        
+        Token(learn-token <br> Reward Minter) -->|verified reads| Tracker
+        NFT(credential-nft <br> Credential Minter) -->|verified reads| Tracker
+    end
 ```
 
 ## Threat Model
