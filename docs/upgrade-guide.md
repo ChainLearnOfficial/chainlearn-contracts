@@ -323,3 +323,7 @@ If rollback is not possible:
 - [Architecture](./architecture.md)
 - [Security Model](./security.md)
 - [Integration Guide](./integration-guide.md)
+
+## Support
+
+If you encounter persistent issues during an upgrade, please open an issue in the repository or contact the core team on Discord.
