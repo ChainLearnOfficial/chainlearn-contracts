@@ -192,3 +192,10 @@ This document provides a structured security audit checklist for reviewing the C
 2. **Integer division rounding**: Progress calculations use integer division, which floors results. This is by design and documented.
 3. **Sequential module ordering**: Modules must be completed in the order they appear in the course's `module_ids` list. This is enforced by checking the predecessor in the bitmap.
 4. **No automatic expiration**: Credentials and allowances do not expire by default unless explicitly set. Expired allowances must be pruned manually or by indexers.
+
+## 16. Audit Sign-off Form
+
+- [ ] Internal Review completed by: _________________ Date: __________
+- [ ] External Audit completed by: __________________ Date: __________
+- [ ] All critical and high issues resolved
+- [ ] Audit report published to repository
