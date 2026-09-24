@@ -117,15 +117,28 @@ transfer_and_verify() {
         --new_admin "$NEW_ADMIN"
 
     local stored_admin
-    stored_admin=$(read_contract_value "$contract_id" "admin")
 
-    if [ "$stored_admin" != "$NEW_ADMIN" ]; then
-        echo "Error: Failed to transfer admin for $label."
-        echo "  expected: $NEW_ADMIN"
-        echo "  stored:   ${stored_admin:-<unset>}"
-        exit 1
+    if [ "$label" = "learn-token" ]; then
+        # learn-token uses a two-step admin transfer, so we check pending_admin
+        stored_admin=$(read_contract_value "$contract_id" "pending_admin")
+        if [[ "$stored_admin" != *"$NEW_ADMIN"* ]]; then
+            echo "Error: Failed to initiate admin transfer for $label."
+            echo "  expected pending: $NEW_ADMIN"
+            echo "  stored pending:   ${stored_admin:-<unset>}"
+            exit 1
+        fi
+        echo "  verified: $label admin transfer initiated to $NEW_ADMIN"
+    else
+        stored_admin=$(read_contract_value "$contract_id" "admin")
+
+        if [ "$stored_admin" != "$NEW_ADMIN" ]; then
+            echo "Error: Failed to transfer admin for $label."
+            echo "  expected: $NEW_ADMIN"
+            echo "  stored:   ${stored_admin:-<unset>}"
+            exit 1
+        fi
+        echo "  verified: $label admin is now $NEW_ADMIN"
     fi
-    echo "  verified: $label admin is now $NEW_ADMIN"
 }
 
 transfer_and_verify "progress-tracker" "$PROGRESS_TRACKER_ID"

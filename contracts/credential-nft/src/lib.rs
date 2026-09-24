@@ -482,6 +482,11 @@ impl CredentialNft {
         env.storage()
             .persistent()
             .set(&CredentialDataKey::Admin, &new_admin);
+
+        env.events().publish(
+            (Symbol::new(&env, "admin_transferred"),),
+            (admin, new_admin),
+        );
     }
 
     /// Reject transfer of a credential.
