@@ -575,16 +575,16 @@ pub fn set_reward_claimed(
         quiz_id: quiz_id.clone(),
     };
     let data_key = TokenDataKey::RewardClaimed(key);
-    let is_new = !env.storage().persistent().has(&data_key);
+    // Caller guarantees this is a fresh claim (is_reward_claimed checked
+    // before calling), so the entry does not exist yet — skip the has()
+    // probe and write directly.
     env.storage().persistent().set(&data_key, &true);
     env.storage().persistent().extend_ttl(
         &data_key,
         PERSISTENT_TTL_THRESHOLD,
         PERSISTENT_TTL_EXTEND_TO,
     );
-    if is_new {
-        track_entry_created(env);
-    }
+    track_entry_created(env);
 }
 
 /// Store the progress-tracker contract address.
