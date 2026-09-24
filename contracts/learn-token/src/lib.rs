@@ -28,6 +28,18 @@ pub enum ContractError {
     AlreadyInitialized = 0,
     ZeroAddress = 1,
     RewardCapped = 2,
+    ContractPaused = 3,
+    NegativeAmount = 4,
+    InsufficientBalance = 5,
+    InsufficientAllowance = 6,
+    MaxSupplyExceeded = 7,
+    TransferToSelf = 8,
+    TransferToContract = 9,
+    ExpirationInPast = 10,
+    InvalidScore = 11,
+    RewardAlreadyClaimed = 12,
+    NotAuthorized = 13,
+    InvalidMaxSupply = 14,
 }
 
 /// Result of previewing a `claim_reward` call without executing it (#199, #214).
@@ -57,6 +69,14 @@ impl LearnToken {
         if storage::is_paused(env) {
             panic!("contract is paused");
         }
+    }
+
+    /// Check if the contract is paused and return an error if so.
+    fn ensure_not_paused(env: &Env) -> Result<(), ContractError> {
+        if storage::is_paused(env) {
+            return Err(ContractError::ContractPaused);
+        }
+        Ok(())
     }
 
     /// Fetch a verified quiz score from the progress-tracker in a single
@@ -111,7 +131,7 @@ impl LearnToken {
             return Err(ContractError::AlreadyInitialized);
         }
         if max_supply < 0 {
-            panic!("max supply cannot be negative");
+            return Err(ContractError::InvalidMaxSupply);
         }
         storage::set_admin(&env, &admin);
         storage::set_total_supply(&env, 0);
@@ -332,8 +352,6 @@ impl LearnToken {
         Self::require_not_paused(&env);
         from.require_auth();
 
-        Self::require_not_paused(&env);
-
         if from == to {
             return;
         }
@@ -346,6 +364,10 @@ impl LearnToken {
 
         if amount < 0 {
             panic!("negative amount");
+        }
+
+        if amount == 0 {
+            return;
         }
 
         let from_balance = storage::get_balance(&env, &from);
@@ -377,8 +399,6 @@ impl LearnToken {
         Self::require_not_paused(&env);
         spender.require_auth();
 
-        Self::require_not_paused(&env);
-
         if from == to {
             return;
         }
@@ -391,6 +411,10 @@ impl LearnToken {
 
         if amount < 0 {
             panic!("negative amount");
+        }
+
+        if amount == 0 {
+            return;
         }
 
         let (exists, is_expired, expiration_ledger) =
@@ -479,8 +503,6 @@ impl LearnToken {
         Self::require_not_paused(&env);
         from.require_auth();
 
-        Self::require_not_paused(&env);
-
         if amount < 0 {
             panic!("negative amount");
         }
@@ -517,8 +539,6 @@ impl LearnToken {
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
         Self::require_not_paused(&env);
         spender.require_auth();
-
-        Self::require_not_paused(&env);
 
         if amount < 0 {
             panic!("negative amount");
@@ -577,6 +597,10 @@ impl LearnToken {
             panic!("negative amount");
         }
 
+        if amount == 0 {
+            return;
+        }
+
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
         if current_supply.checked_add(amount).map_or(true, |s| s > max_supply) {
@@ -609,8 +633,6 @@ impl LearnToken {
     pub fn claim_reward(env: Env, learner: Address, course_id: Symbol, quiz_id: Symbol) {
         Self::require_not_paused(&env);
         learner.require_auth();
-
-        Self::require_not_paused(&env);
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
             panic!("reward already claimed");
@@ -1069,28 +1091,27 @@ impl LearnToken {
     /// To prevent arbitrary or unlimited supply inflation by a compromised admin key,
     /// the cap can never be increased by more than 2x (100% increase) in a single update.
     /// Decreasing the cap is allowed down to the circulating total supply.
-    pub fn set_max_supply(env: Env, new_max_supply: i128) {
-        Self::require_not_paused(&env);
+    pub fn set_max_supply(env: Env, new_max_supply: i128) -> Result<(), ContractError> {
+        Self::ensure_not_paused(&env)?;
         let admin = storage::get_admin(&env);
         admin.require_auth();
         if new_max_supply < 0 {
-            panic!("max supply cannot be negative");
+            return Err(ContractError::InvalidMaxSupply);
         }
         let current_supply = storage::get_total_supply(&env);
         if new_max_supply < current_supply {
-            panic!("new cap cannot be less than current total supply");
+            return Err(ContractError::InvalidMaxSupply);
         }
         let old_max_supply = storage::get_max_supply(&env);
         if old_max_supply > 0 && new_max_supply > old_max_supply {
-            let max_allowed = old_max_supply.checked_mul(2).expect("overflow");
+            let max_allowed = old_max_supply.checked_mul(2).ok_or(ContractError::MaxSupplyExceeded)?;
             if new_max_supply > max_allowed {
-                panic!(
-                    "max supply increase exceeds governance limit (maximum 2x increase per update)"
-                );
+                return Err(ContractError::MaxSupplyExceeded);
             }
         }
         storage::set_max_supply(&env, new_max_supply);
         events::max_supply_updated(&env, old_max_supply, new_max_supply);
+        Ok(())
     }
 
     /// Initiate a delayed transfer of admin rights to a new address (#241).
