@@ -4,7 +4,7 @@ mod rewards;
 pub mod types;
 
 use chainlearn_shared::ContractMetadata;
-use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec};
 pub use types::{
     Achievement, AchievementType, Course, LearnerStats, ProgressExport, ProgressInfo,
     ProgressTrackerDataKey, QuizResult, VersionedContractMetadata,
@@ -2194,6 +2194,55 @@ impl ProgressTracker {
     ) {
         Self::require_learner_or_delegate(&env, &caller, &learner);
         Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
+    }
+
+    // ── Upgradeability ────────────────────────────────────────────────────────
+
+    /// Upgrade the contract to a new Wasm code.
+    ///
+    /// # Arguments
+    /// * `new_wasm_hash` - Hash of the already-uploaded wasm to install
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::require_not_paused(&env);
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        
+        types::write_entry(&env, &ProgressTrackerDataKey::WasmHash, &new_wasm_hash);
+        
+        let mut version: u32 = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Version)
+            .unwrap_or(0);
+        version += 1;
+        types::write_entry(&env, &ProgressTrackerDataKey::Version, &version);
+
+        env.events().publish(
+            (Symbol::new(&env, "upgraded"),),
+            (new_wasm_hash, version),
+        );
+    }
+
+    /// Wasm hash the contract was most recently upgraded to, or `None` if
+    /// it has never been upgraded.
+    pub fn wasm_hash(env: Env) -> Option<BytesN<32>> {
+        env.storage().persistent().get(&ProgressTrackerDataKey::WasmHash)
+    }
+
+    /// Number of times the contract has been upgraded via `upgrade()`.
+    /// Starts at `0` for a never-upgraded contract.
+    pub fn upgrade_version(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Version)
+            .unwrap_or(0)
     }
 }
 

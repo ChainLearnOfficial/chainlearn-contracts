@@ -48,6 +48,10 @@ pub enum CredentialDataKey {
     /// Running count of persistent storage entries this contract has
     /// written, excluding this counter entry itself (#239).
     StorageSize,
+    /// Wasm hash of the code currently installed via `upgrade()`.
+    WasmHash,
+    /// Number of times `upgrade()` has been called. Starts at 0.
+    UpgradeVersion,
 }
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
