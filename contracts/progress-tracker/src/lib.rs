@@ -1820,6 +1820,11 @@ impl ProgressTracker {
         env.storage()
             .persistent()
             .set(&ProgressTrackerDataKey::Admin, &new_admin);
+
+        env.events().publish(
+            (Symbol::new(&env, "admin_transferred"),),
+            (admin, new_admin),
+        );
     }
 
     // ── Progress Delegation (#222) ───────────────────────────────────────
