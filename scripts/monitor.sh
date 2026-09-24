@@ -114,6 +114,24 @@ else
     echo "  [OK] learn-token total_supply: $TOTAL_SUPPLY"
 fi
 
+# Check learn-token admin balance
+ADMIN_ADDR=$(read_contract_value "$LEARN_TOKEN_ID" "admin")
+if [ -n "$ADMIN_ADDR" ]; then
+    ADMIN_BALANCE=$(soroban contract invoke \
+        --id "$LEARN_TOKEN_ID" \
+        --rpc-url "$RPC_URL" \
+        --network-passphrase "$NETWORK_PASSPHRASE" \
+        -- \
+        balance --id "$ADMIN_ADDR" 2>/dev/null | tr -d '"')
+    
+    if [ -z "$ADMIN_BALANCE" ]; then
+        echo "  [ERROR] admin balance is unreachable!"
+        HEALTHY=false
+    else
+        echo "  [OK] admin balance: $ADMIN_BALANCE"
+    fi
+fi
+
 echo ""
 if [ "$HEALTHY" = true ]; then
     echo "=== Status: HEALTHY ==="
