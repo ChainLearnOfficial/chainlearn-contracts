@@ -488,3 +488,7 @@ fn learner_journey(
 - [Architecture](./architecture.md)
 - [Security Model](./security.md)
 - [Upgrade Guide](./upgrade-guide.md)
+
+## Support
+
+For further integration assistance, please refer to the ChainLearn developer forums or open an issue on GitHub.
