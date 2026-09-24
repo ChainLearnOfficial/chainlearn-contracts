@@ -31,9 +31,9 @@ credential-nft = { path = "contracts/credential-nft" }
 progress-tracker = { path = "contracts/progress-tracker" }
 chainlearn-shared = { path = "packages/shared" }
 
-# cargo-tarpaulin is a coverage tool invoked as a CLI (see scripts/coverage.sh),
-# not a library consumed by this crate, so it is installed via `cargo install
-# cargo-tarpaulin` rather than declared here.
+# cargo-tarpaulin is a coverage tool invoked as a CLI (see scripts/coverage.sh).
+# Added as a dev-dependency to track versioning and allow reproducible execution.
+cargo-tarpaulin = "0.29"
 
 [[test]]
 name = "token_tests"
