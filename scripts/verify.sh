@@ -70,6 +70,8 @@ cargo build --release --target wasm32-unknown-unknown
 # that. Use the same STRIP_SPEC_DOCS setting that was used when deploying.
 "$(dirname "$0")/optimize-wasm.sh"
 
+MISMATCH_FOUND=0
+
 verify_contract() {
     local label="$1"
     local contract_id="$2"
@@ -87,7 +89,8 @@ verify_contract() {
 
     if [ ! -f "$fetched_wasm" ]; then
         echo "Error: Failed to fetch WASM for $label."
-        exit 1
+        MISMATCH_FOUND=1
+        return
     fi
 
     # Compute hashes
@@ -104,7 +107,7 @@ verify_contract() {
         echo "  Mismatch!"
         echo "  Expected (local): $local_hash"
         echo "  Deployed:         $fetched_hash"
-        exit 1
+        MISMATCH_FOUND=1
     fi
 }
 
@@ -113,5 +116,12 @@ verify_contract "credential-nft" "$CREDENTIAL_NFT_ID" "target/wasm32-unknown-unk
 verify_contract "progress-tracker" "$PROGRESS_TRACKER_ID" "target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm"
 
 echo ""
-echo "=== Verification Successful ==="
-echo "All deployed contracts match the local builds."
+if [ "$MISMATCH_FOUND" -eq 0 ]; then
+    echo "=== Verification Successful ==="
+    echo "All deployed contracts match the local builds."
+    exit 0
+else
+    echo "=== Verification Failed ==="
+    echo "One or more deployed contracts do not match the local builds."
+    exit 1
+fi

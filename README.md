@@ -116,7 +116,7 @@ chainlearn-contracts/
 
 ## Prerequisites
 
-- **Rust** 1.70+ with `wasm32-unknown-unknown` target
+- **Rust** 1.81.0+ with `wasm32-unknown-unknown` target
 - **Soroban CLI** v21+
 - **Stellar account** with XLM for deployment fees
 
