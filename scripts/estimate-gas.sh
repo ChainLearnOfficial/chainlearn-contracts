@@ -26,7 +26,7 @@ trap 'rm -f "$RAW_OUTPUT"' EXIT
 echo "=== ChainLearn Gas Estimation ==="
 echo "Per-operation CPU instruction limit: $LIMIT"
 echo ""
-echo "Running gas benchmarks..."
+echo "Running gas benchmarks (via cargo test)..."
 cargo test --test gas_benchmarks -- --nocapture --test-threads=1 2>&1 | tee "$RAW_OUTPUT" >/dev/null
 
 echo ""
