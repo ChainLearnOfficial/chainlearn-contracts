@@ -64,7 +64,7 @@ echo ""
 
 # Build all contracts to get local WASMs
 echo "Building contracts locally..."
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown --workspace
 
 # deploy.sh/upgrade.sh upload the optimized WASM (#344), so compare against
 # that. Use the same STRIP_SPEC_DOCS setting that was used when deploying.
