@@ -8,7 +8,7 @@ ChainLearn contracts support in-place upgrades via Soroban's wasm replacement me
 
 ## Prerequisites
 
-- **Rust** 1.70+ with `wasm32-unknown-unknown` target
+- **Rust** 1.81.0+ with `wasm32-unknown-unknown` target
 - **Soroban CLI** v21+
 - **Admin access** to the contracts being upgraded
 - **Multi-sig partner** (for `learn-token` upgrades)
