@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "On-chain learning progress tracker for ChainLearn"
 publish = false
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]

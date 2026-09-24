@@ -486,31 +486,6 @@ pub fn check_allowance_expired(env: &Env, owner: &Address, spender: &Address) ->
     }
 }
 
-/// Read-only version of check_allowance_expired that does not perform storage side-effects.
-#[allow(dead_code)]
-pub fn check_allowance_expired_readonly(
-    env: &Env,
-    owner: &Address,
-    spender: &Address,
-) -> (bool, bool, u32) {
-    let key = AllowanceKey {
-        owner: owner.clone(),
-        spender: spender.clone(),
-    };
-    let data_key = TokenDataKey::Allowance(key);
-    match env
-        .storage()
-        .temporary()
-        .get::<TokenDataKey, AllowanceData>(&data_key)
-    {
-        Some(data) => {
-            let is_expired = env.ledger().sequence() > data.expiration_ledger;
-            (true, is_expired, data.expiration_ledger)
-        }
-        None => (false, false, 0),
-    }
-}
-
 /// Set the allowance for an owner-spender pair with an expiration ledger.
 ///
 /// Allowances are short-lived by nature -- every entry already carries its own

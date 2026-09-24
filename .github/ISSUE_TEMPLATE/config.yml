@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Code of Conduct
+    url: https://github.com/ChainLearnOfficial/chainlearn-contracts/blob/main/CODE_OF_CONDUCT.md
+    about: Please read our community standards before opening an issue.
+  - name: Documentation
+    url: https://github.com/ChainLearnOfficial/chainlearn-contracts/tree/main/docs
+    about: Architecture, integration, deployment and upgrade guides.

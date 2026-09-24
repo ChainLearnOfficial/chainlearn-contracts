@@ -153,16 +153,14 @@ pub fn is_credential_valid(env: &Env, credential_id: u64) -> bool {
     true
 }
 
-/// Revoke a credential. Admin only.
+/// Shared revocation path for [`revoke_credential`] and
+/// [`revoke_credential_with_reason`]: authorizes the admin, marks the
+/// credential revoked and prunes it from the learner and course indexes.
 ///
-/// # Arguments
-/// * `env` - Soroban environment
-/// * `credential_id` - The credential to revoke
-///
-/// On revocation the credential ID is pruned from both the learner's
-/// credential list and the course's credential index (#104). This keeps
-/// those lists free of stale revoked entries.
-pub fn revoke_credential(env: &Env, credential_id: u64) {
+/// Kept as a single non-inlined helper so both entry points share one copy
+/// of this logic in the compiled WASM instead of duplicating it.
+#[inline(never)]
+fn revoke_and_prune(env: &Env, credential_id: u64) -> (Address, CredentialInfo) {
     let admin: Address = env
         .storage()
         .persistent()
@@ -186,41 +184,43 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     // revocation without deserializing the full `CredentialInfo` (#109).
     crate::metadata::write_entry(env, &CredentialDataKey::Revoked(credential_id), &true);
 
-    // #104 — prune from learner's credential list
-    let mut learner_list: Vec<u64> = env
-        .storage()
-        .persistent()
-        .get(&CredentialDataKey::LearnerCredentials(info.learner.clone()))
-        .unwrap_or(Vec::new(env));
-    if let Some(pos) =
-        (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
-    {
-        learner_list.remove(pos);
-        crate::metadata::write_entry(
-            env,
-            &CredentialDataKey::LearnerCredentials(info.learner.clone()),
-            &learner_list,
-        );
-    }
+    // #104 — prune from learner's credential list and course credential index
+    remove_id_from_list(
+        env,
+        &CredentialDataKey::LearnerCredentials(info.learner.clone()),
+        credential_id,
+    );
+    remove_id_from_list(
+        env,
+        &CredentialDataKey::CourseCredentials(info.course_id.clone()),
+        credential_id,
+    );
 
-    // #104 — prune from course credential index
-    let mut course_list: Vec<u64> = env
-        .storage()
-        .persistent()
-        .get(&CredentialDataKey::CourseCredentials(
-            info.course_id.clone(),
-        ))
-        .unwrap_or(Vec::new(env));
-    if let Some(pos) =
-        (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
-    {
-        course_list.remove(pos);
-        crate::metadata::write_entry(
-            env,
-            &CredentialDataKey::CourseCredentials(info.course_id.clone()),
-            &course_list,
-        );
+    (admin, info)
+}
+
+/// Remove `credential_id` from the `Vec<u64>` stored under `key`, writing the
+/// list back only if the ID was present. Uses the host-side
+/// `first_index_of` lookup rather than iterating element by element in WASM.
+fn remove_id_from_list(env: &Env, key: &CredentialDataKey, credential_id: u64) {
+    let mut list: Vec<u64> = env.storage().persistent().get(key).unwrap_or(Vec::new(env));
+    if let Some(pos) = list.first_index_of(credential_id) {
+        list.remove(pos);
+        crate::metadata::write_entry(env, key, &list);
     }
+}
+
+/// Revoke a credential. Admin only.
+///
+/// # Arguments
+/// * `env` - Soroban environment
+/// * `credential_id` - The credential to revoke
+///
+/// On revocation the credential ID is pruned from both the learner's
+/// credential list and the course's credential index (#104). This keeps
+/// those lists free of stale revoked entries.
+pub fn revoke_credential(env: &Env, credential_id: u64) {
+    let (admin, info) = revoke_and_prune(env, credential_id);
 
     // Emit the learner, course and revoking admin alongside the ID so revocations
     // can be audited without a follow-up state read (#100).
@@ -237,68 +237,13 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
 /// * `credential_id` - The credential to revoke
 /// * `reason` - The reason for revocation
 pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symbol) {
-    let admin: Address = env
-        .storage()
-        .persistent()
-        .get(&CredentialDataKey::Admin)
-        .expect("not initialized");
-    admin.require_auth();
-
-    let mut info: CredentialInfo = env
-        .storage()
-        .persistent()
-        .get(&CredentialDataKey::Credential(credential_id))
-        .expect("credential not found");
-
-    if info.revoked {
-        panic!("credential already revoked");
-    }
-
-    info.revoked = true;
-    crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
-    crate::metadata::write_entry(env, &CredentialDataKey::Revoked(credential_id), &true);
+    let (admin, info) = revoke_and_prune(env, credential_id);
     // Store the revocation reason (#194)
     crate::metadata::write_entry(
         env,
         &CredentialDataKey::RevocationReason(credential_id),
         &reason,
     );
-
-    // #104 — prune from learner's credential list
-    let mut learner_list: Vec<u64> = env
-        .storage()
-        .persistent()
-        .get(&CredentialDataKey::LearnerCredentials(info.learner.clone()))
-        .unwrap_or(Vec::new(env));
-    if let Some(pos) =
-        (0..learner_list.len()).find(|&i| learner_list.get(i).unwrap() == credential_id)
-    {
-        learner_list.remove(pos);
-        crate::metadata::write_entry(
-            env,
-            &CredentialDataKey::LearnerCredentials(info.learner.clone()),
-            &learner_list,
-        );
-    }
-
-    // #104 — prune from course credential index
-    let mut course_list: Vec<u64> = env
-        .storage()
-        .persistent()
-        .get(&CredentialDataKey::CourseCredentials(
-            info.course_id.clone(),
-        ))
-        .unwrap_or(Vec::new(env));
-    if let Some(pos) =
-        (0..course_list.len()).find(|&i| course_list.get(i).unwrap() == credential_id)
-    {
-        course_list.remove(pos);
-        crate::metadata::write_entry(
-            env,
-            &CredentialDataKey::CourseCredentials(info.course_id.clone()),
-            &course_list,
-        );
-    }
 
     env.events().publish(
         (Symbol::new(env, "credential_revoked"),),

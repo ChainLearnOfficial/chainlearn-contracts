@@ -3,6 +3,7 @@ name = "chainlearn-contracts"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license.workspace = true
 
 [workspace]
 resolver = "2"
@@ -23,6 +24,7 @@ soroban-token-sdk = "21.0.0"
 
 [workspace.package]
 rust-version = "1.70"
+license = "MIT"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
