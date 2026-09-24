@@ -76,9 +76,13 @@ cat deployments-testnet.json
 ### Option A: Single Admin Upgrade (progress-tracker, credential-nft)
 
 ```bash
+# 0. Build and optimize (see docs/wasm-size-audit.md)
+cargo build --release --target wasm32-unknown-unknown
+./scripts/optimize-wasm.sh
+
 # 1. Install new wasm
 NEW_WASM_HASH=$(soroban contract install \
-    --wasm target/wasm32-unknown-unknown/release/<contract_name>.wasm \
+    --wasm target/wasm32-unknown-unknown/release/<contract_name>.optimized.wasm \
     --rpc-url https://soroban-testnet.stellar.org:443 \
     --network-passphrase "Test SDF Network ; September 2015" \
     --source "$STELLAR_SECRET_KEY")
@@ -99,9 +103,13 @@ soroban contract invoke \
 ### Option B: Multi-Sig Upgrade (learn-token)
 
 ```bash
+# 0. Build and optimize (see docs/wasm-size-audit.md)
+cargo build --release --target wasm32-unknown-unknown
+./scripts/optimize-wasm.sh
+
 # 1. Install new wasm
 NEW_WASM_HASH=$(soroban contract install \
-    --wasm target/wasm32-unknown-unknown/release/learn_token.wasm \
+    --wasm target/wasm32-unknown-unknown/release/learn_token.optimized.wasm \
     --rpc-url https://soroban-testnet.stellar.org:443 \
     --network-passphrase "Test SDF Network ; September 2015" \
     --source "$ADMIN_1_SECRET_KEY")
@@ -261,14 +269,15 @@ soroban contract invoke \
 # Checkout the previous version
 git checkout <previous-tag-or-commit>
 
-# Build the previous wasm
+# Build and optimize the previous wasm
 cargo build --release --target wasm32-unknown-unknown
+./scripts/optimize-wasm.sh
 ```
 
 3. **Install and Upgrade to Previous Version**:
 ```bash
 OLD_WASM_HASH=$(soroban contract install \
-    --wasm target/wasm32-unknown-unknown/release/<contract_name>.wasm \
+    --wasm target/wasm32-unknown-unknown/release/<contract_name>.optimized.wasm \
     --rpc-url https://soroban-testnet.stellar.org:443 \
     --network-passphrase "Test SDF Network ; September 2015" \
     --source "$STELLAR_SECRET_KEY")

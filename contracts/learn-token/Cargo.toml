@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "SEP-41 fungible token for ChainLearn rewards"
 publish = false
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]

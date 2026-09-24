@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Shared types and utilities for ChainLearn contracts"
 publish = false
+license.workspace = true
 
 [dependencies]
 soroban-sdk = { workspace = true }

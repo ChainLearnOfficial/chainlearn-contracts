@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- MIT `LICENSE` file, referenced from the README and declared in Cargo metadata (#341)
+- `CODE_OF_CONDUCT.md` with community standards, reporting and enforcement guidelines (#342)
+- GitHub issue templates for bug reports and feature requests, linked from the README (#343)
+- `scripts/optimize-wasm.sh` and `docs/wasm-size-audit.md`: deploy/upgrade/verify now use wasm-opt optimized WASM (−17% to −24%), with optional spec doc stripping (up to −48%) (#344)
 - `CONTRIBUTING.md` with development setup, code style, testing requirements,
   pull request process, and security-reporting guidance (#340)
 - Troubleshooting guide covering setup, build/test, deployment, invocation,
@@ -20,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation improvements for soulbound credential enforcement
 - `contract_metadata()` on all three contracts, returning the contract's name and version, stored on `initialize()` (#107)
 - `course_exists()` on progress-tracker, letting other contracts validate a `course_id` cheaply (#108)
+
+### Changed
+- credential-nft: `revoke_credential` and `revoke_credential_with_reason` share a single implementation and prune indexes with host-side `first_index_of` (#344)
+
+### Removed
+- Unused `check_allowance_expired_readonly` helper in learn-token storage (#344)
 
 ### Fixed
 - `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)

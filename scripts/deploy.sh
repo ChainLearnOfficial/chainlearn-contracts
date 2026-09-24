@@ -12,6 +12,7 @@ set -euo pipefail
 # Prerequisites:
 #   - soroban CLI installed (v21+)
 #   - jq installed
+#   - python3 installed (only when STRIP_SPEC_DOCS=1, see optimize-wasm.sh)
 #   - STELLAR_SECRET_KEY environment variable set
 #   - Sufficient XLM for deployment fees
 # ──────────────────────────────────────────────────────────────────────────────
@@ -68,6 +69,10 @@ fi
 echo "[1/4] Building contracts..."
 cargo build --release --target wasm32-unknown-unknown
 
+# Shrink WASM before upload: install fees and code rent scale with size (#344).
+# Set STRIP_SPEC_DOCS=1 to also strip doc comments from the embedded spec.
+"$(dirname "$0")/optimize-wasm.sh"
+
 # On mainnet, perform safety checks. On testnet, skip for faster iteration (#61).
 DEPLOY_FLAGS=()
 if [ "$NETWORK" = "mainnet" ]; then
@@ -79,7 +84,7 @@ fi
 # Deploy learn-token
 echo "[2/4] Deploying learn-token..."
 LEARN_TOKEN_ID=$(soroban contract deploy \
-    --wasm target/wasm32-unknown-unknown/release/learn_token.wasm \
+    --wasm target/wasm32-unknown-unknown/release/learn_token.optimized.wasm \
     --source "$STELLAR_SECRET_KEY" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
@@ -89,7 +94,7 @@ echo "  learn-token deployed: $LEARN_TOKEN_ID"
 # Deploy credential-nft
 echo "[3/4] Deploying credential-nft..."
 CREDENTIAL_NFT_ID=$(soroban contract deploy \
-    --wasm target/wasm32-unknown-unknown/release/credential_nft.wasm \
+    --wasm target/wasm32-unknown-unknown/release/credential_nft.optimized.wasm \
     --source "$STELLAR_SECRET_KEY" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
@@ -99,7 +104,7 @@ echo "  credential-nft deployed: $CREDENTIAL_NFT_ID"
 # Deploy progress-tracker
 echo "[4/4] Deploying progress-tracker..."
 PROGRESS_TRACKER_ID=$(soroban contract deploy \
-    --wasm target/wasm32-unknown-unknown/release/progress_tracker.wasm \
+    --wasm target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm \
     --source "$STELLAR_SECRET_KEY" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \

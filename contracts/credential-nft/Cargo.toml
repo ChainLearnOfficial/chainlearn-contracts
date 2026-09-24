@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "NFT credential contract for ChainLearn course certificates"
 publish = false
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]

@@ -66,6 +66,10 @@ echo ""
 echo "Building contracts locally..."
 cargo build --release --target wasm32-unknown-unknown
 
+# deploy.sh/upgrade.sh upload the optimized WASM (#344), so compare against
+# that. Use the same STRIP_SPEC_DOCS setting that was used when deploying.
+"$(dirname "$0")/optimize-wasm.sh"
+
 verify_contract() {
     local label="$1"
     local contract_id="$2"
@@ -104,9 +108,9 @@ verify_contract() {
     fi
 }
 
-verify_contract "learn-token" "$LEARN_TOKEN_ID" "target/wasm32-unknown-unknown/release/learn_token.wasm"
-verify_contract "credential-nft" "$CREDENTIAL_NFT_ID" "target/wasm32-unknown-unknown/release/credential_nft.wasm"
-verify_contract "progress-tracker" "$PROGRESS_TRACKER_ID" "target/wasm32-unknown-unknown/release/progress_tracker.wasm"
+verify_contract "learn-token" "$LEARN_TOKEN_ID" "target/wasm32-unknown-unknown/release/learn_token.optimized.wasm"
+verify_contract "credential-nft" "$CREDENTIAL_NFT_ID" "target/wasm32-unknown-unknown/release/credential_nft.optimized.wasm"
+verify_contract "progress-tracker" "$PROGRESS_TRACKER_ID" "target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm"
 
 echo ""
 echo "=== Verification Successful ==="

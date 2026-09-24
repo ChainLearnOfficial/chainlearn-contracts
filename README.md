@@ -103,8 +103,14 @@ chainlearn-contracts/
 │   └── unit/                 # Contract unit tests
 ├── scripts/
 │   ├── deploy.sh             # Deployment script
-│   └── initialize.sh         # Post-deploy initialization
+│   ├── initialize.sh         # Post-deploy initialization
+│   └── optimize-wasm.sh      # WASM size optimization
+├── .github/
+│   ├── ISSUE_TEMPLATE/       # Bug report & feature request templates
+│   └── workflows/            # CI and deploy pipelines
 ├── Cargo.toml                # Workspace root
+├── CODE_OF_CONDUCT.md        # Community standards
+├── LICENSE                   # MIT license
 └── README.md
 ```
 
@@ -132,6 +138,16 @@ Build all contracts for release:
 
 ```bash
 cargo build --release --target wasm32-unknown-unknown
+```
+
+Shrink the release WASM before deploying (the deploy, upgrade and verify
+scripts do this automatically). Add `--strip-docs` to also remove doc comments
+from the embedded contract spec. See the
+[WASM size audit](./docs/wasm-size-audit.md) for the numbers and trade-offs.
+
+```bash
+./scripts/optimize-wasm.sh
+./scripts/measure-size.sh   # raw vs optimized sizes
 ```
 
 Build in development mode (faster, includes debug info):
@@ -737,10 +753,22 @@ struct ContractMetadata {
 - [Security Model](./docs/security.md) - Authorization, trust boundaries, and threat mitigation
 - [Upgrade Guide](./docs/upgrade-guide.md) - Procedures for upgrading contracts
 - [Integration Guide](./docs/integration-guide.md) - SDK setup and contract interaction patterns
+- [WASM Size Audit](./docs/wasm-size-audit.md) - Contract sizes, optimizations applied, and remaining opportunities
+
+## Contributing
+
+Contributions are welcome! Before you start:
+
+- Read and follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
+- Found a bug? Open a [bug report](https://github.com/ChainLearnOfficial/chainlearn-contracts/issues/new?template=bug_report.md).
+- Have an idea? Open a [feature request](https://github.com/ChainLearnOfficial/chainlearn-contracts/issues/new?template=feature_request.md).
+- Please report security vulnerabilities privately to the maintainers instead of opening a public issue.
+
+Templates live in [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLATE). Keep them up to date when components, tooling, or required environment details change.
 
 ## License
 
-MIT
+This project is licensed under the [MIT License](./LICENSE). Copyright (c) 2026 ChainLearn.
 
 ### Common Error Conditions
 - `AlreadyInitialized`: The contract has already been initialized.

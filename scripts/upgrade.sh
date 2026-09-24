@@ -14,6 +14,7 @@ set -euo pipefail
 # Prerequisites:
 #   - soroban CLI installed (v21+)
 #   - jq installed
+#   - python3 installed (only when STRIP_SPEC_DOCS=1, see optimize-wasm.sh)
 #   - STELLAR_SECRET_KEY environment variable set
 #   - Contracts must be deployed and initialized (run deploy.sh + initialize.sh)
 #   - New WASM targets must be built (cargo build --release --target wasm32-unknown-unknown)
@@ -91,6 +92,10 @@ echo ""
 
 echo "[1/5] Building contracts..."
 cargo build --release --target wasm32-unknown-unknown
+
+# Shrink WASM before upload: install fees and code rent scale with size (#344).
+# Set STRIP_SPEC_DOCS=1 to also strip doc comments from the embedded spec.
+"$(dirname "$0")/optimize-wasm.sh"
 echo "  Build complete."
 echo ""
 
@@ -183,7 +188,7 @@ PROGRESS_TRACKER_HASH=""
 
 # Install and upgrade learn-token
 if [ "$CONTRACT_FILTER" = "all" ] || [ "$CONTRACT_FILTER" = "learn-token" ]; then
-    LEARN_TOKEN_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/learn_token.wasm" "learn-token")
+    LEARN_TOKEN_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/learn_token.optimized.wasm" "learn-token")
     upgrade_contract "$LEARN_TOKEN_ID" "$LEARN_TOKEN_HASH" "learn-token"
     echo ""
 else
@@ -192,7 +197,7 @@ fi
 
 # Install and upgrade credential-nft
 if [ "$CONTRACT_FILTER" = "all" ] || [ "$CONTRACT_FILTER" = "credential-nft" ]; then
-    CREDENTIAL_NFT_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/credential_nft.wasm" "credential-nft")
+    CREDENTIAL_NFT_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/credential_nft.optimized.wasm" "credential-nft")
     upgrade_contract "$CREDENTIAL_NFT_ID" "$CREDENTIAL_NFT_HASH" "credential-nft"
     echo ""
 else
@@ -201,7 +206,7 @@ fi
 
 # Install and upgrade progress-tracker
 if [ "$CONTRACT_FILTER" = "all" ] || [ "$CONTRACT_FILTER" = "progress-tracker" ]; then
-    PROGRESS_TRACKER_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/progress_tracker.wasm" "progress-tracker")
+    PROGRESS_TRACKER_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm" "progress-tracker")
     upgrade_contract "$PROGRESS_TRACKER_ID" "$PROGRESS_TRACKER_HASH" "progress-tracker"
     echo ""
 else
