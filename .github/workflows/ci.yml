@@ -33,7 +33,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build contracts
-        run: cargo build --release --target wasm32-unknown-unknown
+        run: cargo build --release --target wasm32-unknown-unknown --workspace
 
       - name: Verify wasm build output
         run: |

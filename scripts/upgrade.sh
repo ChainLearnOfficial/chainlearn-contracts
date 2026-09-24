@@ -91,7 +91,7 @@ echo ""
 # ── Step 1: Build new WASM ────────────────────────────────────────────
 
 echo "[1/5] Building contracts..."
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown --workspace
 
 # Shrink WASM before upload: install fees and code rent scale with size (#344).
 # Set STRIP_SPEC_DOCS=1 to also strip doc comments from the embedded spec.

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "Building contracts for size measurement..."
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32-unknown-unknown --release --workspace
 
 WASM_DIR="target/wasm32-unknown-unknown/release"
 TARGET_LIMIT_KB=500
