@@ -8,7 +8,7 @@ mod xcall;
 use chainlearn_shared::ContractMetadata;
 use metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
 use mint::validate_metadata_uri;
-use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
 
 /// Subset of the progress-tracker interface used to verify course completion
 /// and the score a credential claims.
@@ -582,6 +582,55 @@ impl CredentialNft {
     pub fn get_certificate_uri(env: Env, learner: Address, course_id: Symbol) -> Option<Symbol> {
         let cert_key = CredentialDataKey::CertificateURI(learner, course_id);
         env.storage().persistent().get(&cert_key)
+    }
+
+    // ── Upgradeability ────────────────────────────────────────────────────────
+
+    /// Upgrade the contract to a new Wasm code.
+    ///
+    /// # Arguments
+    /// * `new_wasm_hash` - Hash of the already-uploaded wasm to install
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::require_not_paused(&env);
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        
+        metadata::write_entry(&env, &CredentialDataKey::WasmHash, &new_wasm_hash);
+        
+        let mut version: u32 = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::UpgradeVersion)
+            .unwrap_or(0);
+        version += 1;
+        metadata::write_entry(&env, &CredentialDataKey::UpgradeVersion, &version);
+
+        env.events().publish(
+            (Symbol::new(&env, "upgraded"),),
+            (new_wasm_hash, version),
+        );
+    }
+
+    /// Wasm hash the contract was most recently upgraded to, or `None` if
+    /// it has never been upgraded.
+    pub fn wasm_hash(env: Env) -> Option<BytesN<32>> {
+        env.storage().persistent().get(&CredentialDataKey::WasmHash)
+    }
+
+    /// Number of times the contract has been upgraded via `upgrade()`.
+    /// Starts at `0` for a never-upgraded contract.
+    pub fn upgrade_version(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::UpgradeVersion)
+            .unwrap_or(0)
     }
 }
 

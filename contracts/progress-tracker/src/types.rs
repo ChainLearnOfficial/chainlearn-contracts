@@ -218,6 +218,8 @@ pub enum ProgressTrackerDataKey {
     Achievements(Address),
     /// Achievement earned by a specific learner and achievement type (for deduplication).
     AchievementEarned(Address, AchievementType),
+    /// Wasm hash of the code currently installed via `upgrade()`.
+    WasmHash,
 }
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
