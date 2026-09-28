@@ -7,7 +7,7 @@ mod verify;
 mod xcall;
 
 use chainlearn_shared::ContractMetadata;
-use metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
+use metadata::{remove_entry, CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
@@ -551,9 +551,7 @@ impl CredentialNft {
         env.storage()
             .persistent()
             .set(&CredentialDataKey::Admin, &pending.new_admin);
-        env.storage()
-            .persistent()
-            .remove(&CredentialDataKey::PendingAdmin);
+        remove_entry(&env, &CredentialDataKey::PendingAdmin);
 
         events::admin_transfer_accepted(&env, &previous_admin, &pending.new_admin);
     }
@@ -580,9 +578,7 @@ impl CredentialNft {
             .persistent()
             .get(&CredentialDataKey::PendingAdmin)
             .expect("no pending admin transfer");
-        env.storage()
-            .persistent()
-            .remove(&CredentialDataKey::PendingAdmin);
+        remove_entry(&env, &CredentialDataKey::PendingAdmin);
 
         events::admin_transfer_cancelled(&env, &admin, &pending.new_admin);
     }
