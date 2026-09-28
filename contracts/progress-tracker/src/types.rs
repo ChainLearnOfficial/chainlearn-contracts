@@ -224,6 +224,8 @@ pub enum ProgressTrackerDataKey {
     PendingAdmin,
     /// Configurable admin-transfer delay in seconds, absent until set (#423).
     AdminTransferDelay,
+    /// Reverse index mapping a tag symbol to course IDs with that tag (#419).
+    TagIndex(Symbol),
 }
 
 /// An admin transfer that has been initiated but not yet accepted (#423).

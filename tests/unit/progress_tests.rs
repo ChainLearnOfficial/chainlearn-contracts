@@ -289,6 +289,9 @@ mod progress_unit_tests {
             prerequisites: Vec::new(&env),
             version: 1,
             updated_at: env.ledger().timestamp(),
+            created_at: env.ledger().timestamp(),
+            difficulty: 0,
+            tags: Vec::new(&env),
         };
         env.as_contract(&contract_id, || {
             env.storage().persistent().set(
@@ -1481,8 +1484,18 @@ mod progress_unit_tests {
         scores.push_back((Symbol::new(&env, "quiz_2"), 95u32));
         client.batch_submit_quiz_score(&batch_learner, &course_id, &scores);
 
-        client.submit_quiz_score(&single_learner, &course_id, &Symbol::new(&env, "quiz_1"), &65);
-        client.submit_quiz_score(&single_learner, &course_id, &Symbol::new(&env, "quiz_2"), &95);
+        client.submit_quiz_score(
+            &single_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &65,
+        );
+        client.submit_quiz_score(
+            &single_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_2"),
+            &95,
+        );
 
         let batch_progress = client.get_progress(&batch_learner, &course_id);
         let single_progress = client.get_progress(&single_learner, &course_id);
@@ -1526,14 +1539,22 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
-        assert!(!client.get_progress(&learner, &course_id).eligible_for_credential);
+        assert!(
+            !client
+                .get_progress(&learner, &course_id)
+                .eligible_for_credential
+        );
 
         let mut scores = Vec::new(&env);
         scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
         scores.push_back((Symbol::new(&env, "quiz_2"), 70u32));
         client.batch_submit_quiz_score(&learner, &course_id, &scores);
 
-        assert!(client.get_progress(&learner, &course_id).eligible_for_credential);
+        assert!(
+            client
+                .get_progress(&learner, &course_id)
+                .eligible_for_credential
+        );
     }
 
     // ── Issue #222: progress delegation ──────────────────────────────────
@@ -1850,7 +1871,13 @@ mod progress_unit_tests {
         client.enroll(&learner, &course_id);
         client.delegate_progress(&learner, &delegate);
 
-        client.submit_quiz_score_for(&delegate, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score_for(
+            &delegate,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
 
         let progress = client.get_progress(&learner, &course_id);
         assert_eq!(progress.quizzes_submitted, 1);
@@ -1870,7 +1897,13 @@ mod progress_unit_tests {
         let stranger = Address::generate(&env);
         client.enroll(&learner, &course_id);
 
-        client.submit_quiz_score_for(&stranger, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score_for(
+            &stranger,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
     }
 
     #[test]
@@ -1890,7 +1923,8 @@ mod progress_unit_tests {
         scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
         scores.push_back((Symbol::new(&env, "quiz_2"), 90u32));
 
-        let submitted = client.batch_submit_quiz_score_for(&delegate, &learner, &course_id, &scores);
+        let submitted =
+            client.batch_submit_quiz_score_for(&delegate, &learner, &course_id, &scores);
         assert_eq!(submitted.len(), 2);
     }
 
@@ -1926,7 +1960,13 @@ mod progress_unit_tests {
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &40);
         client.delegate_progress(&learner, &delegate);
 
-        client.retake_quiz_for(&delegate, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+        client.retake_quiz_for(
+            &delegate,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &90,
+        );
 
         assert_eq!(
             client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
@@ -1948,7 +1988,13 @@ mod progress_unit_tests {
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &40);
 
-        client.retake_quiz_for(&stranger, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &90);
+        client.retake_quiz_for(
+            &stranger,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &90,
+        );
     }
 
     #[test]
@@ -1969,7 +2015,12 @@ mod progress_unit_tests {
         client.delegate_progress(&delegated_learner, &delegate);
 
         client.complete_module(&direct_learner, &course_id, &Symbol::new(&env, "mod_1"));
-        client.submit_quiz_score(&direct_learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        client.submit_quiz_score(
+            &direct_learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &80,
+        );
 
         client.complete_module_for(
             &delegate,
@@ -2044,12 +2095,14 @@ mod progress_unit_tests {
 
         let new_learner = Address::generate(&env);
         let result = client.try_enroll(&new_learner, &course_id);
-        assert!(result.is_err(), "enrollment on an archived course should be rejected");
+        assert!(
+            result.is_err(),
+            "enrollment on an archived course should be rejected"
+        );
 
         let progress_after = client.get_progress(&existing_learner, &course_id);
         assert_eq!(
-            progress_after.overall_progress,
-            progress_before.overall_progress,
+            progress_after.overall_progress, progress_before.overall_progress,
             "existing progress must be preserved after archiving"
         );
     }
@@ -2159,5 +2212,133 @@ mod progress_unit_tests {
         // enroll() writes Progress(learner, course_id) and
         // LearnerCourses(learner) -- 2 new entries for a first-time learner.
         assert_eq!(client.get_storage_size(), before + 2);
+    }
+
+    // ── Issue #419: tag-to-course reverse index for get_courses_by_tag ────────
+
+    #[test]
+    fn test_get_courses_by_tag_empty_when_no_courses() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let tag = Symbol::new(&env, "rust");
+        let courses = client.get_courses_by_tag(&tag);
+        assert_eq!(courses.len(), 0);
+    }
+
+    #[test]
+    fn test_tag_reverse_index_single_tag() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let tag = Symbol::new(&env, "rust");
+
+        let mut tags = Vec::new(&env);
+        tags.push_back(tag.clone());
+        client.set_course_tags(&course_id, &tags);
+
+        let indexed_courses = client.get_courses_by_tag(&tag);
+        assert_eq!(indexed_courses.len(), 1);
+        assert_eq!(indexed_courses.get(0).unwrap(), course_id);
+    }
+
+    #[test]
+    fn test_tag_reverse_index_multiple_tags_per_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let tag_rust = Symbol::new(&env, "rust");
+        let tag_soroban = Symbol::new(&env, "soroban");
+        let tag_crypto = Symbol::new(&env, "crypto");
+
+        let mut tags = Vec::new(&env);
+        tags.push_back(tag_rust.clone());
+        tags.push_back(tag_soroban.clone());
+        tags.push_back(tag_crypto.clone());
+        client.set_course_tags(&course_id, &tags);
+
+        assert_eq!(client.get_courses_by_tag(&tag_rust).len(), 1);
+        assert_eq!(client.get_courses_by_tag(&tag_soroban).len(), 1);
+        assert_eq!(client.get_courses_by_tag(&tag_crypto).len(), 1);
+        assert_eq!(
+            client.get_courses_by_tag(&tag_rust).get(0).unwrap(),
+            course_id
+        );
+    }
+
+    #[test]
+    fn test_tag_reverse_index_multiple_courses_per_tag() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course1 = create_test_course(&env, &client);
+
+        // Create course 2
+        let course2 = Symbol::new(&env, "course_two");
+        let mut modules = Vec::new(&env);
+        modules.push_back(Symbol::new(&env, "mod_a"));
+        let mut quizzes = Vec::new(&env);
+        quizzes.push_back(Symbol::new(&env, "quiz_a"));
+        client.create_course(&course2, &1, &1, &modules, &quizzes);
+
+        let shared_tag = Symbol::new(&env, "blockchain");
+
+        let mut tags1 = Vec::new(&env);
+        tags1.push_back(shared_tag.clone());
+        client.set_course_tags(&course1, &tags1);
+
+        let mut tags2 = Vec::new(&env);
+        tags2.push_back(shared_tag.clone());
+        client.set_course_tags(&course2, &tags2);
+
+        let courses = client.get_courses_by_tag(&shared_tag);
+        assert_eq!(courses.len(), 2);
+        assert_eq!(courses.get(0).unwrap(), course1);
+        assert_eq!(courses.get(1).unwrap(), course2);
+    }
+
+    #[test]
+    fn test_tag_reverse_index_tag_removal_and_update() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let tag_old = Symbol::new(&env, "old_tag");
+        let tag_new = Symbol::new(&env, "new_tag");
+
+        let mut initial_tags = Vec::new(&env);
+        initial_tags.push_back(tag_old.clone());
+        client.set_course_tags(&course_id, &initial_tags);
+
+        assert_eq!(client.get_courses_by_tag(&tag_old).len(), 1);
+        assert_eq!(client.get_courses_by_tag(&tag_new).len(), 0);
+
+        // Update tags: replace tag_old with tag_new
+        let mut updated_tags = Vec::new(&env);
+        updated_tags.push_back(tag_new.clone());
+        client.set_course_tags(&course_id, &updated_tags);
+
+        assert_eq!(client.get_courses_by_tag(&tag_old).len(), 0);
+        assert_eq!(client.get_courses_by_tag(&tag_new).len(), 1);
+        assert_eq!(
+            client.get_courses_by_tag(&tag_new).get(0).unwrap(),
+            course_id
+        );
+
+        // Clear all tags
+        client.set_course_tags(&course_id, &Vec::new(&env));
+        assert_eq!(client.get_courses_by_tag(&tag_new).len(), 0);
     }
 }

@@ -90,6 +90,10 @@ name = "security_double_spending_tests"
 path = "tests/integration/security_double_spending_tests.rs"
 
 [[test]]
+name = "pause_event_consistency"
+path = "tests/integration/pause_event_consistency.rs"
+
+[[test]]
 name = "emergency_pause_flow"
 path = "tests/integration/emergency_pause_flow.rs"
 
