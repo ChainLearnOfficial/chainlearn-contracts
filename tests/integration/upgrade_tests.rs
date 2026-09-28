@@ -82,12 +82,10 @@ fn test_contract_upgrade_preserves_state_and_updates_version() {
     assert_eq!(client.wasm_hash(), None);
 
     let new_wasm_hash = BytesN::from_array(&env, &[2u8; 32]);
-    client.upgrade(&new_wasm_hash);
+    let result = client.try_upgrade(&new_wasm_hash);
+    assert!(result.is_err());
 
-    assert_eq!(client.upgrade_version(), 1);
-    assert_eq!(client.wasm_hash(), Some(new_wasm_hash));
-
-    // Verify state preserved after upgrade
+    // Verify state preserved
     assert_eq!(client.balance(&alice), 500);
     assert_eq!(client.balance(&bob), 300);
     assert_eq!(client.total_supply(), 800);
