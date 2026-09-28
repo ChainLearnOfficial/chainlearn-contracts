@@ -22,6 +22,16 @@ impl MaliciousContract {
         // Attempt reentrant mint call during state change execution
         client.mint(&Address::generate(&env), &recipient, &5000);
     }
+
+    pub fn attack_claim_reward(
+        env: Env,
+        token_id: Address,
+        course_id: soroban_sdk::Symbol,
+        quiz_id: soroban_sdk::Symbol,
+    ) {
+        let client = LearnTokenClient::new(&env, &token_id);
+        client.claim_reward(&Address::generate(&env), &course_id, &quiz_id);
+    }
 }
 
 #[test]
@@ -32,7 +42,7 @@ fn test_reentrancy_during_transfer() {
     let pt_contract_id = env.register_contract(None, ProgressTracker);
     let token_id = env.register_contract(None, LearnToken);
     let client = LearnTokenClient::new(&env, &token_id);
-    
+
     client.initialize(
         &admin,
         &SorobanString::from_str(&env, "ChainLearn"),
@@ -41,13 +51,13 @@ fn test_reentrancy_during_transfer() {
         &pt_contract_id,
         &1_000_000,
     );
-    
+
     let malicious_id = env.register_contract(None, MaliciousContract);
     let malicious_client = MaliciousContractClient::new(&env, &malicious_id);
-    
+
     env.mock_all_auths();
     client.mint(&admin, &malicious_id, &1000);
-    
+
     // Call the malicious contract which will attempt a reentrant call to the token contract.
     // The environment naturally protects against state corruption, often panicking if a re-entrant lock is triggered.
     malicious_client.attack(&token_id);
@@ -99,3 +109,32 @@ fn test_reentrancy_prevented_state_consistent_and_no_funds_lost() {
     assert_eq!(client.total_supply(), supply_before);
 }
 
+#[test]
+fn test_reentrant_claim_reward_attack_rejected() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let pt_contract_id = env.register_contract(None, ProgressTracker);
+    let token_id = env.register_contract(None, LearnToken);
+    let client = LearnTokenClient::new(&env, &token_id);
+
+    client.initialize(
+        &admin,
+        &SorobanString::from_str(&env, "ChainLearn"),
+        &SorobanString::from_str(&env, "CLRN"),
+        &7,
+        &pt_contract_id,
+        &1_000_000,
+    );
+
+    let malicious_id = env.register_contract(None, MaliciousContract);
+    let malicious_client = MaliciousContractClient::new(&env, &malicious_id);
+    env.mock_all_auths();
+
+    let course = soroban_sdk::Symbol::new(&env, "course1");
+    let quiz = soroban_sdk::Symbol::new(&env, "quiz1");
+
+    let attack_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        malicious_client.attack_claim_reward(&token_id, &course, &quiz);
+    }));
+    assert!(attack_result.is_err(), "reentrant reward claim must fail");
+}

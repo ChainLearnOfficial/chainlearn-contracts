@@ -4,7 +4,9 @@ mod rewards;
 pub mod types;
 
 use chainlearn_shared::ContractMetadata;
-use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec,
+};
 pub use types::{
     Achievement, AchievementType, Course, LearnerStats, ProgressExport, ProgressInfo,
     ProgressTrackerDataKey, QuizResult, VersionedContractMetadata,
@@ -214,6 +216,10 @@ impl ProgressTracker {
             &ProgressTrackerDataKey::Course(course_id.clone()),
             &course,
         );
+
+        for tag in course.tags.iter() {
+            Self::add_course_to_tag_index(&env, &tag, &course_id);
+        }
 
         env.events().publish(
             (Symbol::new(&env, "course_created"),),
@@ -540,7 +546,7 @@ impl ProgressTracker {
                 (Symbol::new(env, "credential_eligible"),),
                 (learner, course_id),
             );
-            
+
             // Award FirstCourse achievement when learner becomes eligible for credential
             Self::earn_achievement(
                 env,
@@ -548,16 +554,11 @@ impl ProgressTracker {
                 AchievementType::FirstCourse,
                 Some(course_id.clone()),
             );
-            
+
             // Check for CourseMaster achievement (5 courses completed)
             let stats = Self::get_learner_stats(env.clone(), learner.clone());
             if stats.courses_completed >= 5 {
-                Self::earn_achievement(
-                    env,
-                    learner,
-                    AchievementType::CourseMaster,
-                    None,
-                );
+                Self::earn_achievement(env, learner, AchievementType::CourseMaster, None);
             }
         }
     }
@@ -1364,6 +1365,39 @@ impl ProgressTracker {
     ///
     /// # Panics
     /// * If the course does not exist
+    fn add_course_to_tag_index(env: &Env, tag: &Symbol, course_id: &Symbol) {
+        let key = ProgressTrackerDataKey::TagIndex(tag.clone());
+        let mut courses: Vec<Symbol> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        let mut exists = false;
+        for c in courses.iter() {
+            if c == *course_id {
+                exists = true;
+                break;
+            }
+        }
+        if !exists {
+            courses.push_back(course_id.clone());
+            types::write_entry(env, &key, &courses);
+        }
+    }
+
+    fn remove_course_from_tag_index(env: &Env, tag: &Symbol, course_id: &Symbol) {
+        let key = ProgressTrackerDataKey::TagIndex(tag.clone());
+        if let Some(courses) = env.storage().persistent().get::<_, Vec<Symbol>>(&key) {
+            let mut new_courses = Vec::new(env);
+            for c in courses.iter() {
+                if c != *course_id {
+                    new_courses.push_back(c);
+                }
+            }
+            types::write_entry(env, &key, &new_courses);
+        }
+    }
+
     pub fn set_course_tags(env: Env, course_id: Symbol, tags: Vec<Symbol>) {
         let admin: Address = env
             .storage()
@@ -1378,6 +1412,36 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Course(course_id.clone()))
             .expect("course not found");
 
+        let old_tags = course.tags.clone();
+
+        // Remove course from tags that are no longer in the new tags list
+        for old_tag in old_tags.iter() {
+            let mut still_present = false;
+            for new_tag in tags.iter() {
+                if old_tag == new_tag {
+                    still_present = true;
+                    break;
+                }
+            }
+            if !still_present {
+                Self::remove_course_from_tag_index(&env, &old_tag, &course_id);
+            }
+        }
+
+        // Add course to new tags that were not in the old tags list
+        for new_tag in tags.iter() {
+            let mut was_present = false;
+            for old_tag in old_tags.iter() {
+                if new_tag == old_tag {
+                    was_present = true;
+                    break;
+                }
+            }
+            if !was_present {
+                Self::add_course_to_tag_index(&env, &new_tag, &course_id);
+            }
+        }
+
         course.tags = tags.clone();
         course.updated_at = env.ledger().timestamp();
         types::write_entry(
@@ -1386,10 +1450,8 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "course_tags_set"),),
-            (&course_id, tags),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "course_tags_set"),), (&course_id, tags));
     }
 
     /// Get the tags for a course (#260).
@@ -1407,7 +1469,7 @@ impl ProgressTracker {
         course.tags
     }
 
-    /// Get all courses that have a specific tag (#260).
+    /// Get all courses that have a specific tag (#260, #419).
     ///
     /// Returns an empty list when no courses have the given tag.
     ///
@@ -1416,12 +1478,12 @@ impl ProgressTracker {
     ///
     /// # Returns
     /// List of course IDs that have the specified tag
-    pub fn get_courses_by_tag(env: Env, _tag: Symbol) -> Vec<Symbol> {
-        // Note: A tag index in storage would be needed for efficient queries
-        // across many courses. For now, this returns an empty vec.
-        // A production implementation should maintain a tag index that
-        // maps tags to lists of course IDs.
-        Vec::new(&env)
+    pub fn get_courses_by_tag(env: Env, tag: Symbol) -> Vec<Symbol> {
+        let key = ProgressTrackerDataKey::TagIndex(tag);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Update the version of a course. Admin only (#245).
@@ -1668,10 +1730,8 @@ impl ProgressTracker {
         course_id: Option<Symbol>,
     ) {
         // Check if achievement already earned
-        let achievement_key = ProgressTrackerDataKey::AchievementEarned(
-            learner.clone(),
-            achievement_type.clone(),
-        );
+        let achievement_key =
+            ProgressTrackerDataKey::AchievementEarned(learner.clone(), achievement_type.clone());
         if env.storage().persistent().has(&achievement_key) {
             return; // Already earned, skip
         }
@@ -1684,9 +1744,7 @@ impl ProgressTracker {
         };
 
         // Store that this achievement type has been earned
-        env.storage()
-            .persistent()
-            .set(&achievement_key, &true);
+        env.storage().persistent().set(&achievement_key, &true);
 
         // Add to learner's achievements list
         let achievements_key = ProgressTrackerDataKey::Achievements(learner.clone());
@@ -1734,7 +1792,10 @@ impl ProgressTracker {
     pub fn has_achievement(env: Env, learner: Address, achievement_type: AchievementType) -> bool {
         env.storage()
             .persistent()
-            .has(&ProgressTrackerDataKey::AchievementEarned(learner, achievement_type))
+            .has(&ProgressTrackerDataKey::AchievementEarned(
+                learner,
+                achievement_type,
+            ))
     }
 
     /// Check whether a course has been registered via `create_course` (#108).
@@ -2218,9 +2279,9 @@ impl ProgressTracker {
 
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        
+
         types::write_entry(&env, &ProgressTrackerDataKey::WasmHash, &new_wasm_hash);
-        
+
         let mut version: u32 = env
             .storage()
             .persistent()
@@ -2229,16 +2290,16 @@ impl ProgressTracker {
         version += 1;
         types::write_entry(&env, &ProgressTrackerDataKey::Version, &version);
 
-        env.events().publish(
-            (Symbol::new(&env, "upgraded"),),
-            (new_wasm_hash, version),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "upgraded"),), (new_wasm_hash, version));
     }
 
     /// Wasm hash the contract was most recently upgraded to, or `None` if
     /// it has never been upgraded.
     pub fn wasm_hash(env: Env) -> Option<BytesN<32>> {
-        env.storage().persistent().get(&ProgressTrackerDataKey::WasmHash)
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::WasmHash)
     }
 
     /// Number of times the contract has been upgraded via `upgrade()`.
