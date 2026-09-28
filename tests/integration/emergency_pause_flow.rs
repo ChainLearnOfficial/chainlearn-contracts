@@ -208,8 +208,21 @@ fn test_credential_nft_emergency_pause() {
     credential_client.unpause();
 
     // ── Operations resume ──
-    let new_cred_id = credential_client.mint_credential(learner, &course_id, &85, &uri);
+    let course_id2 = Symbol::new(env, "rust_102");
+    let mut module_ids2 = Vec::new(env);
+    module_ids2.push_back(Symbol::new(env, "mod_3"));
+    let mut quiz_ids2 = Vec::new(env);
+    quiz_ids2.push_back(Symbol::new(env, "quiz_2"));
+    progress_client.create_course(&course_id2, &1, &1, &module_ids2, &quiz_ids2);
+    progress_client.enroll(learner, &course_id2);
+    progress_client.complete_module(learner, &course_id2, &Symbol::new(env, "mod_3"));
+    progress_client.submit_quiz_score(learner, &course_id2, &Symbol::new(env, "quiz_2"), &85);
+
+    let new_cred_id = credential_client.mint_credential(learner, &course_id2, &85, &uri);
     assert_eq!(new_cred_id, cred_id + 1);
+
+    credential_client.revoke_credential(&cred_id);
+    assert!(!credential_client.is_credential_valid(&cred_id));
 }
 
 // ── Issue #281: Pauser role enforcement ──────────────────────────────────

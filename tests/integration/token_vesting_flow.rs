@@ -7,7 +7,7 @@ mod fixtures;
 use fixtures::setup_chainlearn_env;
 
 use learn_token::LearnTokenClient;
-use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Symbol};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, testutils::Ledger as _, Address, IntoVal, Symbol};
 
 /// Create a vesting schedule, verify tokens are locked before the cliff,
 /// advance time to verify linear vesting, and let the beneficiary claim.

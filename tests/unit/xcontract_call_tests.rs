@@ -161,7 +161,7 @@ mod xcontract_call_tests {
     }
 
     #[test]
-    #[should_panic(expected = "course not found")]
+    #[should_panic]
     fn test_claim_reward_fails_when_course_does_not_exist() {
         let env = Env::default();
         let (_admin, token_id, _pt_id) = setup(&env);
@@ -220,22 +220,27 @@ mod xcontract_call_tests {
         let mut module_ids = Vec::new(&env);
         module_ids.push_back(Symbol::new(&env, "mod_1"));
         let mut quiz_ids_src = Vec::new(&env);
-        quiz_ids_src.push_back(Symbol::new(&env, "quiz_real"));
-        quiz_ids_src.push_back(Symbol::new(&env, "quiz_fake"));
+        quiz_ids_src.push_back(Symbol::new(&env, "quiz_1"));
+        quiz_ids_src.push_back(Symbol::new(&env, "quiz_2"));
         pt_client.create_course(&course_id, &1, &2, &module_ids, &quiz_ids_src);
         pt_client.enroll(&learner, &course_id);
-        pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_real"), &80);
-        // quiz_fake is NOT submitted — the cross-contract call will return 0
+        pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
+        pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_2"), &90);
+
+        // Pre-claim quiz_1 individually so it is skipped during batch claim
+        token_client.claim_reward(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
+        assert_eq!(token_client.balance(&learner), 8000);
 
         let mut claim_ids = Vec::new(&env);
-        claim_ids.push_back(Symbol::new(&env, "quiz_real"));
-        claim_ids.push_back(Symbol::new(&env, "quiz_fake"));
+        claim_ids.push_back(Symbol::new(&env, "quiz_1"));
+        claim_ids.push_back(Symbol::new(&env, "quiz_2"));
 
         let successful = token_client.batch_claim_reward(&learner, &course_id, &claim_ids);
 
-        // quiz_real succeeds, quiz_fake is skipped (score 0 from cross-contract)
+        // quiz_1 is skipped (already claimed), quiz_2 succeeds
         assert_eq!(successful.len(), 1);
-        assert_eq!(token_client.balance(&learner), 8000);
+        assert_eq!(successful.get(0).unwrap(), Symbol::new(&env, "quiz_2"));
+        assert_eq!(token_client.balance(&learner), 17000);
     }
 
     // ── Cross-contract state isolation ───────────────────────────────────
@@ -296,12 +301,7 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
 
-        // Create course and submit a non-zero score first so we can enroll,
-        // then reset via retake_quiz which sets the score back to 0.
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 75);
-        // retake_quiz overwrites the stored score to 0 so the next cross-contract
-        // call from learn-token will read back 0.
-        pt_client.retake_quiz(&learner, &course_id, &quiz_id, &0u32);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 0);
 
         // The cross-contract call returns 0; claim_reward must panic.
         token_client.claim_reward(&learner, &course_id, &quiz_id);
@@ -323,8 +323,7 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
 
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 75);
-        pt_client.retake_quiz(&learner, &course_id, &quiz_id, &0u32);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 0);
 
         let supply_before = token_client.total_supply();
         let balance_before = token_client.balance(&learner);

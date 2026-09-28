@@ -342,6 +342,7 @@ mod token_unit_tests {
     }
 
     #[test]
+    #[should_panic]
     fn test_admin_cannot_set_max_supply_below_current_supply() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -406,6 +407,7 @@ mod token_unit_tests {
     }
 
     #[test]
+    #[should_panic]
     fn test_set_max_supply_rejects_exceeding_2x_increase() {
         let env = Env::default();
         let admin = Address::generate(&env);

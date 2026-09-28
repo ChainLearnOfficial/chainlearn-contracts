@@ -578,4 +578,41 @@ mod credential_unit_tests {
             "read-only calls (including the rejected transfer) must not change storage size"
         );
     }
+
+    #[test]
+    fn test_generate_certificate_deterministic_and_unique() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner1 = Address::generate(&env);
+        let learner2 = Address::generate(&env);
+        let course1 = Symbol::new(&env, "rust_101");
+        let course2 = Symbol::new(&env, "solidity_101");
+
+        create_course(&env, &tracker_id, &course1);
+        complete_course_with_score(&env, &tracker_id, &learner1, &course1, 90);
+        complete_course_with_score(&env, &tracker_id, &learner2, &course1, 90);
+
+        create_course(&env, &tracker_id, &course2);
+        complete_course_with_score(&env, &tracker_id, &learner1, &course2, 90);
+
+        let cert1 = client.generate_certificate(&learner1, &course1);
+        let cert1_again = client.generate_certificate(&learner1, &course1);
+        let cert2 = client.generate_certificate(&learner2, &course1);
+        let cert3 = client.generate_certificate(&learner1, &course2);
+
+        // Deterministic: same inputs give same output
+        assert_eq!(cert1, cert1_again);
+
+        // Unique: different learner gives different output
+        assert_ne!(cert1, cert2);
+
+        // Unique: different course gives different output
+        assert_ne!(cert1, cert3);
+
+        // Valid credential metadata URI format
+        assert!(client.try_mint_credential(&learner1, &course1, &90, &cert1).is_ok());
+    }
 }
