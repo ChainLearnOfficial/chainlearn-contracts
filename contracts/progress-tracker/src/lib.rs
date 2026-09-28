@@ -1,5 +1,6 @@
 #![no_std]
 
+mod events;
 mod rewards;
 pub mod types;
 
@@ -1836,7 +1837,7 @@ impl ProgressTracker {
             .expect("not initialized");
         admin.require_auth();
         types::write_entry(&env, &ProgressTrackerDataKey::Paused, &true);
-        // We omit events here to avoid adding it to events.rs
+        events::paused(&env, &admin, env.ledger().timestamp());
     }
 
     /// Unpause state-changing operations. Admin only.
@@ -1848,6 +1849,7 @@ impl ProgressTracker {
             .expect("not initialized");
         admin.require_auth();
         types::write_entry(&env, &ProgressTrackerDataKey::Paused, &false);
+        events::unpaused(&env, &admin, env.ledger().timestamp());
     }
 
     /// Returns the admin address.

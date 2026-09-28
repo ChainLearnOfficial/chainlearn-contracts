@@ -1,5 +1,6 @@
 #![no_std]
 
+mod events;
 mod metadata;
 mod mint;
 mod verify;
@@ -429,7 +430,7 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
         metadata::write_entry(&env, &CredentialDataKey::Paused, &true);
-        // Event would ideally be emitted here, but we will omit it for simplicity if it wasn't added to events.rs
+        events::paused(&env, &admin, env.ledger().timestamp());
     }
 
     /// Unpause state-changing operations. Admin only.
@@ -441,6 +442,7 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
         metadata::write_entry(&env, &CredentialDataKey::Paused, &false);
+        events::unpaused(&env, &admin, env.ledger().timestamp());
     }
 
     /// Returns the admin address.

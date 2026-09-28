@@ -1323,5 +1323,281 @@ mod token_unit_tests {
             "pending transfer must be cleared after acceptance"
         );
     }
-}
 
+    // ── Snapshots (#429) ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_snapshot_record_balance_at_round_trip() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let holder = Address::generate(&env);
+        client.mint(&admin, &holder, &500);
+        client.snapshot(&10);
+        client.record_balance_snapshot(&holder, &10);
+
+        // Later balance changes do not affect the recorded snapshot.
+        client.mint(&admin, &holder, &250);
+        client.snapshot(&20);
+        client.record_balance_snapshot(&holder, &20);
+
+        assert_eq!(client.balance_at(&holder, &10), 500);
+        assert_eq!(client.balance_at(&holder, &20), 750);
+        assert_eq!(client.balance(&holder), 750);
+    }
+
+    #[test]
+    fn test_balance_at_unknown_snapshot_is_zero() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let holder = Address::generate(&env);
+        client.mint(&admin, &holder, &500);
+        assert_eq!(client.balance_at(&holder, &99), 0);
+        assert_eq!(client.balance_at(&Address::generate(&env), &99), 0);
+    }
+
+    #[test]
+    fn test_snapshot_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let holder = Address::generate(&env);
+
+        assert!(client.try_snapshot(&10).is_err());
+        assert!(client.try_record_balance_snapshot(&holder, &10).is_err());
+        assert_eq!(client.balance_at(&holder, &10), 0);
+    }
+
+    // ── Permit (#429) ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_permit_sets_allowance_and_increments_nonce() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        assert_eq!(client.permit_nonce(&owner), 0);
+
+        client.permit(&owner, &spender, &300, &1_000, &0);
+        assert_eq!(client.allowance(&owner, &spender), 300);
+        assert_eq!(client.permit_nonce(&owner), 1);
+    }
+
+    #[test]
+    fn test_permit_expired_is_rejected() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 500);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        assert!(client.try_permit(&owner, &spender, &300, &500, &0).is_err());
+        assert!(client.try_permit(&owner, &spender, &300, &100, &0).is_err());
+        assert_eq!(client.permit_nonce(&owner), 0);
+    }
+
+    #[test]
+    fn test_permit_nonce_replay_is_rejected() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        client.permit(&owner, &spender, &300, &1_000, &0);
+
+        // Replaying nonce 0 fails; a future nonce fails too.
+        assert!(client
+            .try_permit(&owner, &spender, &900, &1_000, &0)
+            .is_err());
+        assert!(client
+            .try_permit(&owner, &spender, &900, &1_000, &5)
+            .is_err());
+        assert_eq!(client.allowance(&owner, &spender), 300);
+        assert_eq!(client.permit_nonce(&owner), 1);
+    }
+
+    #[test]
+    fn test_permit_wrong_signer_is_rejected() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        // Only the spender signs; the owner's authorization is missing.
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &spender,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "permit",
+                args: (&owner, &spender, 300_i128, 1_000_u32, 0_u64).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(client
+            .try_permit(&owner, &spender, &300, &1_000, &0)
+            .is_err());
+        assert_eq!(client.permit_nonce(&owner), 0);
+    }
+
+    // ── estimate_claim_gas (#429) ─────────────────────────────────────────
+
+    #[test]
+    fn test_estimate_claim_gas_normal() {
+        let env = Env::default();
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+
+        let est = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert!(est.would_succeed);
+        assert_eq!(est.estimated_reward, 8000);
+        assert!(est.estimated_gas > 0);
+        assert_eq!(est.failure_reason, SorobanString::from_str(&env, ""));
+        // Preview only: nothing is minted.
+        assert_eq!(client.total_supply(), 0);
+    }
+
+    #[test]
+    fn test_estimate_claim_gas_already_claimed() {
+        let env = Env::default();
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+
+        let est = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert!(!est.would_succeed);
+        assert_eq!(est.estimated_reward, 0);
+        assert_eq!(
+            est.failure_reason,
+            SorobanString::from_str(&env, "reward already claimed")
+        );
+    }
+
+    #[test]
+    fn test_estimate_claim_gas_is_side_effect_free_and_matches_claim() {
+        let env = Env::default();
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 55);
+
+        let first = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        let second = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert_eq!(first, second);
+
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        assert_eq!(client.balance(&learner), first.estimated_reward);
+    }
+
+    #[test]
+    fn test_estimate_claim_gas_supply_cap() {
+        let env = Env::default();
+        let (admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+        client.mint(&admin, &admin, &(1_000_000_000_000_000 - 100));
+
+        let est = client.estimate_claim_gas(&learner, &course_id, &quiz_id);
+        assert!(!est.would_succeed);
+        assert_eq!(
+            est.failure_reason,
+            SorobanString::from_str(&env, "maximum supply cap exceeded")
+        );
+    }
+
+    // ── claim_vested supply cap (#431) ────────────────────────────────────
+
+    fn setup_vesting(env: &Env, max_supply: i128) -> (Address, LearnTokenClient<'_>) {
+        let admin = Address::generate(env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        ProgressTrackerClient::new(env, &pt_contract_id).initialize(&admin);
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(env, "CLearn"),
+            &SorobanString::from_str(env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &max_supply,
+        );
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 0);
+        (admin, client)
+    }
+
+    #[test]
+    fn test_claim_vested_at_exact_supply_cap_succeeds() {
+        let env = Env::default();
+        let (_admin, client) = setup_vesting(&env, 10_000);
+        let beneficiary = Address::generate(&env);
+        client.create_vesting(&beneficiary, &10_000, &0, &100);
+        env.ledger().with_mut(|l| l.timestamp = 100);
+
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.total_supply(), 10_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "maximum supply cap exceeded")]
+    fn test_claim_vested_over_supply_cap_panics() {
+        let env = Env::default();
+        let (_admin, client) = setup_vesting(&env, 9_999);
+        let beneficiary = Address::generate(&env);
+        client.create_vesting(&beneficiary, &10_000, &0, &100);
+        env.ledger().with_mut(|l| l.timestamp = 100);
+
+        client.claim_vested(&beneficiary);
+    }
+
+    #[test]
+    #[should_panic(expected = "maximum supply cap exceeded")]
+    fn test_claim_vested_supply_overflow_is_capped_not_wrapped() {
+        let env = Env::default();
+        let (admin, client) = setup_vesting(&env, i128::MAX);
+        client.mint(&admin, &admin, &(i128::MAX - 10));
+        let beneficiary = Address::generate(&env);
+        client.create_vesting(&beneficiary, &10_000, &0, &100);
+        env.ledger().with_mut(|l| l.timestamp = 100);
+
+        // current_supply + claimable overflows i128; checked_add reports the cap.
+        client.claim_vested(&beneficiary);
+    }
+}
