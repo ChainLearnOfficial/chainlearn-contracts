@@ -20,6 +20,8 @@ pub enum TokenDataKey {
     Metadata,
     /// Current transfer restriction configuration (#191).
     TransferRestriction,
+    /// Whitelist-only restriction staged until its safety delay elapses.
+    PendingTransferRestriction,
     /// Whitelist of addresses allowed to receive tokens when WhitelistOnly (#191).
     Whitelist(Address),
     /// Snapshot of all balances at a given ledger height (#192).
@@ -178,6 +180,14 @@ pub struct PendingAdminTransfer {
     pub initiated_at: u64,
 }
 
+/// A transfer restriction change awaiting its safety delay (#447).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingTransferRestriction {
+    pub restriction: TransferRestriction,
+    pub initiated_at: u64,
+}
+
 /// A governance proposal (#226).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -241,7 +251,9 @@ pub fn get_admins(env: &Env) -> Vec<AdminInfo> {
 
 /// Set list of registered admins (#212).
 pub fn set_admins(env: &Env, admins: &Vec<AdminInfo>) {
-    env.storage().persistent().set(&TokenDataKey::Admins, admins);
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::Admins, admins);
 }
 
 /// Add an admin to the admin list and grant the role (#212).
@@ -277,6 +289,11 @@ pub fn remove_admin(env: &Env, address: &Address, role: &AdminRole) {
 /// can be accepted, until the admin sets a different value via
 /// `set_admin_transfer_delay`. 172_800s = 48 hours.
 pub const DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS: u64 = 172_800;
+/// Smallest configurable admin-transfer delay; zero would defeat the handoff guard (#445).
+pub const MIN_ADMIN_TRANSFER_DELAY_SECONDS: u64 = 3_600;
+/// Whitelist-only restrictions wait 48 hours so current holders can be
+/// whitelisted before transfers become restricted.
+pub const TRANSFER_RESTRICTION_DELAY_SECONDS: u64 = 172_800;
 
 /// Store the in-flight pending admin transfer.
 pub fn set_pending_admin(env: &Env, pending: &PendingAdminTransfer) {
@@ -311,6 +328,7 @@ pub fn get_admin_transfer_delay(env: &Env) -> u64 {
         .persistent()
         .get(&TokenDataKey::AdminTransferDelay)
         .unwrap_or(DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS)
+        .max(MIN_ADMIN_TRANSFER_DELAY_SECONDS)
 }
 
 // ── Role Management (#190) ───────────────────────────────────────────────────
@@ -650,6 +668,30 @@ pub fn set_transfer_restriction(env: &Env, restriction: &TransferRestriction) {
         .set(&TokenDataKey::TransferRestriction, restriction);
 }
 
+pub fn set_pending_transfer_restriction(env: &Env, pending: &PendingTransferRestriction) {
+    let key = TokenDataKey::PendingTransferRestriction;
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, pending);
+    if is_new {
+        track_entry_created(env);
+    }
+}
+
+pub fn get_pending_transfer_restriction(env: &Env) -> Option<PendingTransferRestriction> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::PendingTransferRestriction)
+}
+
+pub fn clear_pending_transfer_restriction(env: &Env) {
+    let key = TokenDataKey::PendingTransferRestriction;
+    let existed = env.storage().persistent().has(&key);
+    env.storage().persistent().remove(&key);
+    if existed {
+        track_entry_removed(env);
+    }
+}
+
 /// Check if an address is on the whitelist.
 pub fn is_whitelisted(env: &Env, address: &Address) -> bool {
     env.storage()
@@ -743,7 +785,11 @@ pub fn get_snapshot_balance(env: &Env, address: &Address, ledger_height: u32) ->
 pub fn track_allowance_spender(env: &Env, owner: &Address, spender: &Address) {
     let key = TokenDataKey::AllowanceSpenders(owner.clone());
     let is_new = !env.storage().persistent().has(&key);
-    let mut spenders: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    let mut spenders: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
     if !spenders.contains(spender) {
         spenders.push_back(spender.clone());
         env.storage().persistent().set(&key, &spenders);
