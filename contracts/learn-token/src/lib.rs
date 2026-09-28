@@ -669,7 +669,10 @@ impl LearnToken {
         // Check max_supply cap before minting (#178)
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply + reward_amount > max_supply {
+        if current_supply
+            .checked_add(reward_amount)
+            .map_or(true, |s| s > max_supply)
+        {
             panic!("maximum supply cap exceeded");
         }
 
@@ -1553,7 +1556,10 @@ impl LearnToken {
         // Check max_supply before minting
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply + claimable > max_supply {
+        if current_supply
+            .checked_add(claimable)
+            .map_or(true, |s| s > max_supply)
+        {
             panic!("maximum supply cap exceeded");
         }
 
