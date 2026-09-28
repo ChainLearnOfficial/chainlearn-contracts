@@ -120,7 +120,7 @@ impl ProgressTracker {
     /// * `total_modules` - Number of modules in the course
     /// * `total_quizzes` - Number of quizzes in the course
     /// * `module_ids` - List of module identifiers (must not contain duplicates)
-    /// * `quiz_ids` - List of valid quiz identifiers
+    /// * `quiz_ids` - List of valid quiz identifiers (must not contain duplicates)
     ///
     /// # Examples
     ///
@@ -186,6 +186,14 @@ impl ProgressTracker {
             for j in (i + 1)..module_ids.len() {
                 if module_ids.get(i) == module_ids.get(j) {
                     panic!("duplicate module_id found");
+                }
+            }
+        }
+
+        for i in 0..quiz_ids.len() {
+            for j in (i + 1)..quiz_ids.len() {
+                if quiz_ids.get(i) == quiz_ids.get(j) {
+                    panic!("duplicate quiz_id found");
                 }
             }
         }
@@ -1895,10 +1903,7 @@ impl ProgressTracker {
             .expect("not initialized");
         admin.require_auth();
 
-        let zero_address = Address::from_string(&soroban_sdk::String::from_str(
-            &env,
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        ));
+        let zero_address = chainlearn_shared::zero_address(&env);
         if new_admin == zero_address {
             panic!("cannot transfer admin to zero address");
         }
@@ -3047,6 +3052,41 @@ mod tests {
         let mut quiz_ids = Vec::new(&env);
         quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
         client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
+    }
+
+    /// #425: the same quiz ID listed twice makes score submission ambiguous.
+    #[test]
+    #[should_panic(expected = "duplicate quiz_id found")]
+    fn test_create_course_rejects_duplicate_quiz_ids() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        quiz_ids.push_back(Symbol::new(&env, "quiz_b"));
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        client.create_course(&Symbol::new(&env, "dup_quiz"), &1, &3, &module_ids, &quiz_ids);
+    }
+
+    #[test]
+    fn test_create_course_accepts_distinct_quiz_ids() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_a"));
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
+        quiz_ids.push_back(Symbol::new(&env, "quiz_b"));
+        let course_id = Symbol::new(&env, "distinct");
+        client.create_course(&course_id, &1, &2, &module_ids, &quiz_ids);
+        assert_eq!(client.get_course(&course_id).quiz_ids, quiz_ids);
     }
 
     /// #83: a quiz result is written once, under its own key. ProgressInfo
