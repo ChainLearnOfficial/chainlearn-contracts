@@ -125,7 +125,6 @@ where
 /// iff `key` existed. Use this (instead of
 /// `env.storage().persistent().remove` directly) for every persistent
 /// removal so the counter stays accurate.
-#[allow(dead_code)]
 pub fn remove_entry<K>(env: &Env, key: &K)
 where
     K: IntoVal<Env, Val>,

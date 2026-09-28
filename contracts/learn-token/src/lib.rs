@@ -1303,7 +1303,9 @@ impl LearnToken {
         }
 
         let current = storage::get_allowance(&env, &owner, &spender);
-        let new_amount = current + additional_amount;
+        let new_amount = current
+            .checked_add(additional_amount)
+            .expect("allowance overflow");
         storage::set_allowance(&env, &owner, &spender, new_amount, expiration_ledger);
         storage::track_allowance_spender(&env, &owner, &spender);
         events::approve(&env, &owner, &spender, new_amount, expiration_ledger);
@@ -1332,6 +1334,11 @@ impl LearnToken {
             storage::check_allowance_expired(&env, &owner, &spender);
         if exists && is_expired {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
+            let mut spenders = storage::get_allowance_spenders(&env, &owner);
+            if let Some(pos) = spenders.iter().position(|s| s == &spender) {
+                spenders.remove(pos);
+                storage::set_allowance_spenders(&env, &owner, &spenders);
+            }
         }
         exists && is_expired
     }
@@ -1359,15 +1366,14 @@ impl LearnToken {
         for spender in spenders.iter() {
             let (exists, is_expired, expiration_ledger) =
                 storage::check_allowance_expired(&env, &owner, &spender);
-            if !exists || is_expired {
-                if exists {
-                    events::allowance_expired(&env, &owner, &spender, expiration_ledger);
-                }
+            if exists && is_expired {
+                events::allowance_expired(&env, &owner, &spender, expiration_ledger);
                 removed_count += 1;
-            } else {
+            } else if exists {
                 // Still active — stays in the registry for a future sweep.
                 remaining.push_back(spender.clone());
             }
+            // If !exists, the allowance has already been removed; don't add to remaining
         }
 
         storage::set_allowance_spenders(&env, &owner, &remaining);
