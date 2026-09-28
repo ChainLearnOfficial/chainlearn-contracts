@@ -318,6 +318,10 @@ impl LearnToken {
 
     // ── Token Snapshots (#192) ────────────────────────────────────────────
 
+    /// Emit a snapshot marker for a ledger height. Admin only.
+    ///
+    /// Balances are stored per address with [`Self::record_balance_snapshot`];
+    /// this contract cannot enumerate all token holders to snapshot them here.
     /// Announce a snapshot at `ledger_height` by emitting `snapshot_created`.
     /// Admin only.
     ///
@@ -337,6 +341,9 @@ impl LearnToken {
     pub fn snapshot(env: Env, ledger_height: u32) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        if ledger_height != env.ledger().sequence() {
+            panic!("snapshot ledger must match the current ledger");
+        }
         events::snapshot_created(&env, ledger_height);
     }
 
@@ -354,6 +361,9 @@ impl LearnToken {
         storage::get_snapshot_balance(&env, &address, ledger_height).unwrap_or(0)
     }
 
+    /// Record an address's balance for a snapshot at the current ledger.
+    /// Admin only; call this for each address whose voting power should be
+    /// available to proposals using this snapshot.
     /// Record `address`'s current balance under `ledger_height`. Admin only.
     ///
     /// This is the primary snapshot API: it must be called once per address
@@ -363,6 +373,9 @@ impl LearnToken {
     pub fn record_balance_snapshot(env: Env, address: Address, ledger_height: u32) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        if ledger_height != env.ledger().sequence() {
+            panic!("snapshot ledger must match the current ledger");
+        }
         let balance = storage::get_balance(&env, &address);
         storage::set_snapshot_balance(&env, &address, ledger_height, balance);
     }
@@ -1597,6 +1610,12 @@ impl LearnToken {
         if duration_seconds == 0 {
             panic!("duration_seconds must be positive");
         }
+        let remaining_supply = storage::get_max_supply(&env)
+            .checked_sub(storage::get_total_supply(&env))
+            .expect("current supply exceeds maximum supply");
+        if total_amount > remaining_supply {
+            panic!("vesting amount exceeds remaining supply capacity");
+        }
         if storage::get_vesting_schedule(&env, &beneficiary).is_some() {
             panic!("vesting schedule already exists for beneficiary");
         }
@@ -1710,7 +1729,7 @@ impl LearnToken {
     /// * `choices` - Number of choices (minimum 2)
     /// * `start_time` - Unix timestamp when voting opens
     /// * `end_time` - Unix timestamp when voting closes (must be > start_time)
-    /// * `snapshot_ledger` - Ledger height whose balances determine voting power
+    /// * `snapshot_ledger` - Past ledger height with recorded voting balances
     ///
     /// # Returns
     /// The new proposal ID.
@@ -1731,6 +1750,9 @@ impl LearnToken {
         }
         if end_time <= start_time {
             panic!("end_time must be after start_time");
+        }
+        if snapshot_ledger >= env.ledger().sequence() {
+            panic!("snapshot_ledger must be earlier than the current ledger");
         }
 
         let mut vote_totals = Vec::new(&env);
@@ -1784,7 +1806,7 @@ impl LearnToken {
         }
 
         let voting_power = storage::get_snapshot_balance(&env, &voter, proposal.snapshot_ledger)
-            .unwrap_or_else(|| storage::get_balance(&env, &voter));
+            .expect("no snapshot available at specified ledger");
 
         if voting_power == 0 {
             panic!("no voting power");
@@ -3346,7 +3368,12 @@ mod tests {
         client.mint(&admin, &voter1, &100);
         client.mint(&admin, &voter2, &200);
 
-        client.snapshot(&10);
+        env.ledger().with_mut(|li| li.sequence_number = 99);
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        client.record_balance_snapshot(&voter1, &snapshot_ledger);
+        client.record_balance_snapshot(&voter2, &snapshot_ledger);
+        env.ledger().with_mut(|li| li.sequence_number = 100);
 
         let start = 1_000u64;
         let end = 2_000u64;
@@ -3355,7 +3382,7 @@ mod tests {
             &2,
             &start,
             &end,
-            &10,
+            &snapshot_ledger,
         );
 
         assert_eq!(prop_id, 1);
@@ -3562,7 +3589,12 @@ mod tests {
         let voter2 = Address::generate(&env);
         client.mint(&admin, &voter1, &100);
         client.mint(&admin, &voter2, &200);
-        client.snapshot(&10);
+        env.ledger().with_mut(|li| li.sequence_number = 99);
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        client.record_balance_snapshot(&voter1, &snapshot_ledger);
+        client.record_balance_snapshot(&voter2, &snapshot_ledger);
+        env.ledger().with_mut(|li| li.sequence_number = 100);
 
         let before = client.get_storage_size();
         let prop_id = client.create_proposal(
@@ -3570,7 +3602,7 @@ mod tests {
             &2,
             &1_000,
             &2_000,
-            &10,
+            &snapshot_ledger,
         );
         // Proposal(prop_id) is the only entry created by create_proposal.
         assert_eq!(client.get_storage_size(), before + 1);

@@ -860,7 +860,7 @@ mod progress_unit_tests {
         assert_eq!(stats.total_quizzes_submitted, 0);
         assert_eq!(stats.total_quiz_score, 0);
         assert_eq!(stats.average_score, 0);
-        assert_eq!(stats.total_rewards_earned, 0);
+        assert_eq!(stats.potential_rewards, 0);
     }
 
     #[test]
@@ -908,7 +908,7 @@ mod progress_unit_tests {
         assert_eq!(stats.total_quizzes_submitted, 3);
         assert_eq!(stats.total_quiz_score, 210);
         assert_eq!(stats.average_score, 70);
-        assert_eq!(stats.total_rewards_earned, 21_000);
+        assert_eq!(stats.potential_rewards, 21_000);
     }
 
     #[test]

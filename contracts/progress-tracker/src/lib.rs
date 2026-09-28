@@ -1657,8 +1657,8 @@ impl ProgressTracker {
     /// Get a learner's aggregate statistics across every enrolled course (#232).
     ///
     /// Dashboards need totals -- courses enrolled, courses completed, average
-    /// score, rewards earned -- that otherwise require one `get_progress` call
-    /// per course. This walks the learner's course index once and returns
+    /// score, and potential reward value -- that otherwise require one
+    /// `get_progress` call per course. This walks the learner's course index once and returns
     /// everything in a single [`LearnerStats`], so no pagination or repeated
     /// round trips are needed.
     ///
@@ -1721,8 +1721,7 @@ impl ProgressTracker {
             total_quizzes_submitted,
             total_quiz_score,
             average_score,
-            total_rewards_earned: total_quiz_score as i128
-                * chainlearn_shared::BASE_REWARD_PER_POINT,
+            potential_rewards: total_quiz_score as i128 * chainlearn_shared::BASE_REWARD_PER_POINT,
         }
     }
 
@@ -3666,7 +3665,7 @@ mod tests {
         assert_eq!(stats.total_quizzes_submitted, 0);
         assert_eq!(stats.total_quiz_score, 0);
         assert_eq!(stats.average_score, 0);
-        assert_eq!(stats.total_rewards_earned, 0);
+        assert_eq!(stats.potential_rewards, 0);
     }
 
     #[test]
@@ -3713,7 +3712,7 @@ mod tests {
         // (80 + 90 + 70) / 3 = 80
         assert_eq!(stats.average_score, 80);
         // 240 points * BASE_REWARD_PER_POINT (100)
-        assert_eq!(stats.total_rewards_earned, 24_000);
+        assert_eq!(stats.potential_rewards, 24_000);
     }
 
     #[test]
@@ -4487,6 +4486,6 @@ mod tests {
         assert_eq!(stats.total_quizzes_submitted, 1);
         assert_eq!(stats.total_quiz_score, 90);
         assert_eq!(stats.average_score, 90);
-        assert_eq!(stats.total_rewards_earned, 9_000);
+        assert_eq!(stats.potential_rewards, 9_000);
     }
 }

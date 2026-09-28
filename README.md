@@ -485,8 +485,8 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `create_proposal` | Admin | `description: String, choices: u32, start_time: u64, end_time: u64` | `u64` | Create a governance proposal. |
-| `vote` | Token Holder | `proposal_id: u64, choice: u32` | — | Cast a vote (voting power = token balance). |
+| `create_proposal` | Admin | `description: String, choices: u32, start_time: u64, end_time: u64, snapshot_ledger: u32` | `u64` | Create a proposal using a past ledger for voting power. |
+| `vote` | Token Holder | `proposal_id: u64, choice: u32` | — | Cast a vote using the voter's recorded balance at the proposal snapshot. |
 | `execute_proposal` | — | `proposal_id: u64` | — | Execute a passed proposal. |
 | `get_proposal` | — | `proposal_id: u64` | `Option<Proposal>` | Proposal details. |
 
@@ -638,7 +638,7 @@ struct LearnerStats {
     total_quizzes_submitted: u32,        // Quizzes submitted across all courses
     total_quiz_score: u64,               // Sum of all quiz scores
     average_score: u32,                  // Average quiz score (floored)
-    total_rewards_earned: i128,          // Reward tokens at BASE_REWARD_PER_POINT per point
+    potential_rewards: i128,              // Reward value of submitted scores; not necessarily claimed
 }
 ```
 

@@ -141,10 +141,10 @@ pub struct LearnerStats {
     /// Average quiz score across every enrolled course, floored to a whole
     /// number. Zero when no quiz has been submitted.
     pub average_score: u32,
-    /// Reward tokens the learner's submitted quiz scores are worth, at
-    /// `BASE_REWARD_PER_POINT` per score point -- the same rate the token
-    /// contract mints at in `claim_reward`.
-    pub total_rewards_earned: i128,
+    /// Potential reward tokens for all submitted quiz scores, at
+    /// `BASE_REWARD_PER_POINT` per score point. This is not the amount actually
+    /// claimed from the token contract.
+    pub potential_rewards: i128,
 }
 
 /// Contract metadata (#107) plus the on-chain upgrade counter (#219),
