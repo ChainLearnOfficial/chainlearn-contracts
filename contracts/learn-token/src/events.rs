@@ -157,6 +157,18 @@ pub fn restriction_updated(env: &Env, restriction: &super::storage::TransferRest
         .publish(topics, (Symbol::new(env, restriction_str),));
 }
 
+/// Emitted when an admin stages a delayed whitelist-only restriction (#447).
+pub fn restriction_proposed(
+    env: &Env,
+    restriction: &super::storage::TransferRestriction,
+    initiated_at: u64,
+    effective_at: u64,
+) {
+    let topics = (Symbol::new(env, "restriction_proposed"),);
+    env.events()
+        .publish(topics, (restriction.clone(), initiated_at, effective_at));
+}
+
 /// Emitted when an address is added to or removed from the whitelist (#191).
 ///
 /// Topics: ["whitelist_updated", address] — indexed so "is/was address X
@@ -270,9 +282,8 @@ pub fn vesting_claimed(
 /// Topics: ["proposal_created"]
 /// Data: (proposal_id, start_time, end_time)
 pub fn proposal_created(env: &Env, proposal_id: u64, start_time: u64, end_time: u64) {
-    let topics = (Symbol::new(env, "proposal_created"),);
-    env.events()
-        .publish(topics, (proposal_id, start_time, end_time));
+    let topics = (Symbol::new(env, "proposal_created"), proposal_id);
+    env.events().publish(topics, (start_time, end_time));
 }
 
 /// Emitted when a vote is cast on a proposal (#226).
@@ -280,9 +291,8 @@ pub fn proposal_created(env: &Env, proposal_id: u64, start_time: u64, end_time: 
 /// Topics: ["vote_cast", voter]
 /// Data: (proposal_id, choice, voting_power)
 pub fn vote_cast(env: &Env, proposal_id: u64, voter: &Address, choice: u32, voting_power: i128) {
-    let topics = (Symbol::new(env, "vote_cast"), voter.clone());
-    env.events()
-        .publish(topics, (proposal_id, choice, voting_power));
+    let topics = (Symbol::new(env, "vote_cast"), proposal_id, voter.clone());
+    env.events().publish(topics, (choice, voting_power));
 }
 
 /// Emitted when a governance proposal is executed (#226).
@@ -290,9 +300,9 @@ pub fn vote_cast(env: &Env, proposal_id: u64, voter: &Address, choice: u32, voti
 /// Topics: ["proposal_executed"]
 /// Data: (proposal_id, winning_choice, winning_votes)
 pub fn proposal_executed(env: &Env, proposal_id: u64, winning_choice: u32, winning_votes: i128) {
-    let topics = (Symbol::new(env, "proposal_executed"),);
+    let topics = (Symbol::new(env, "proposal_executed"), proposal_id);
     env.events()
-        .publish(topics, (proposal_id, winning_choice, winning_votes));
+        .publish(topics, (winning_choice, winning_votes));
 }
 
 /// Emitted when the maximum supply cap is updated.

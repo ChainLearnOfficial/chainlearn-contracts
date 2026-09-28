@@ -263,6 +263,7 @@ impl ProgressTracker {
         course_id: Symbol,
         expected_content_hash: Option<Symbol>,
     ) {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         // Verify course exists
@@ -887,6 +888,9 @@ impl ProgressTracker {
         quiz_id: Symbol,
         new_score: u32,
     ) {
+        if new_score == 0 {
+            panic!("score must be greater than 0");
+        }
         if new_score > chainlearn_shared::MAX_QUIZ_SCORE {
             panic!("score exceeds maximum");
         }
@@ -1598,7 +1602,7 @@ impl ProgressTracker {
             }
 
             for j in (i + 1)..prerequisites.len() {
-                if prerequisites.get(j) == Some(prerequisite.clone()) {
+                if prerequisites.get(i) == prerequisites.get(j) {
                     panic!("duplicate prerequisite found");
                 }
             }
@@ -4365,6 +4369,23 @@ mod tests {
             client.get_progress(&learner, &course_id).total_quiz_score,
             70
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "score must be greater than 0")]
+    fn test_retake_quiz_rejects_zero_score() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_1, &80);
+        client.retake_quiz(&learner, &course_id, &quiz_1, &0);
     }
 
     #[test]

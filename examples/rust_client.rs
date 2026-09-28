@@ -14,21 +14,16 @@
 //! Run with:
 //!   cargo run --example rust_client
 
-use soroban_sdk::{Address, Env, Symbol};
-
-// Replace with your deployed contract IDs
-const PROGRESS_TRACKER_ID: &str = "C...";
-const LEARN_TOKEN_ID: &str = "C...";
-const CREDENTIAL_NFT_ID: &str = "C...";
+use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
 
 fn main() {
     let env = Env::default();
-    let admin = Address::from_str(&env, "S...");
-    let learner = Address::from_str(&env, "G...");
+    let _admin = Address::generate(&env);
+    let _learner = Address::generate(&env);
 
-    let progress_tracker = Address::from_str(&env, PROGRESS_TRACKER_ID);
-    let learn_token = Address::from_str(&env, LEARN_TOKEN_ID);
-    let credential_nft = Address::from_str(&env, CREDENTIAL_NFT_ID);
+    let _progress_tracker = Address::generate(&env);
+    let _learn_token = Address::generate(&env);
+    let _credential_nft = Address::generate(&env);
 
     // ── Admin: Create a course ─────────────────────────────────────────
     let course_id = Symbol::new(&env, "rust_101");

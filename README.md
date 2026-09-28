@@ -401,7 +401,11 @@ A learner is eligible for a credential when:
 
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `set_transfer_restriction` | Admin | `restriction: TransferRestriction` | — | Set transfer restriction (None/WhitelistOnly/Cooldown/MaxAmount). |
+| `set_transfer_restriction` | Admin | `restriction: TransferRestriction` | — | Apply other restrictions immediately; stage `WhitelistOnly` for a 48-hour grace period. |
+| `propose_transfer_restriction` | Admin | `restriction: TransferRestriction` | — | Explicitly stage `WhitelistOnly` for delayed activation. |
+| `accept_transfer_restriction` | Admin | — | — | Activate a pending restriction after 48 hours. |
+| `cancel_transfer_restriction` | Admin | — | — | Cancel a pending restriction. |
+| `pending_transfer_restriction` | — | — | `Option<PendingTransferRestriction>` | Read the pending restriction and its proposal time. |
 | `get_transfer_restriction` | — | — | `TransferRestriction` | Current transfer restriction. |
 | `add_to_whitelist` | Admin | `address: Address` | — | Add address to whitelist. |
 | `remove_from_whitelist` | Admin | `address: Address` | — | Remove address from whitelist. |
@@ -447,7 +451,7 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 | `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
 | `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
 | `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
-| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the delay. |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the delay (minimum 3,600 seconds). |
 
 #### Configuration
 

@@ -2341,4 +2341,108 @@ mod progress_unit_tests {
         client.set_course_tags(&course_id, &Vec::new(&env));
         assert_eq!(client.get_courses_by_tag(&tag_new).len(), 0);
     }
+
+    #[test]
+    #[should_panic(expected = "duplicate prerequisite found")]
+    fn test_set_prerequisites_rejects_duplicates() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_main = create_test_course(&env, &client);
+
+        let prereq_course = Symbol::new(&env, "prereq_1");
+        let mut modules = Vec::new(&env);
+        modules.push_back(Symbol::new(&env, "mod_p1"));
+        let mut quizzes = Vec::new(&env);
+        quizzes.push_back(Symbol::new(&env, "quiz_p1"));
+        client.create_course(&prereq_course, &1, &1, &modules, &quizzes);
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(prereq_course.clone());
+        prereqs.push_back(prereq_course.clone());
+
+        client.set_prerequisites(&course_main, &prereqs);
+    }
+
+    #[test]
+    fn test_set_prerequisites_success() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_main = create_test_course(&env, &client);
+
+        let prereq1 = Symbol::new(&env, "prereq_1");
+        let mut modules1 = Vec::new(&env);
+        modules1.push_back(Symbol::new(&env, "mod_p1"));
+        let mut quizzes1 = Vec::new(&env);
+        quizzes1.push_back(Symbol::new(&env, "quiz_p1"));
+        client.create_course(&prereq1, &1, &1, &modules1, &quizzes1);
+
+        let prereq2 = Symbol::new(&env, "prereq_2");
+        let mut modules2 = Vec::new(&env);
+        modules2.push_back(Symbol::new(&env, "mod_p2"));
+        let mut quizzes2 = Vec::new(&env);
+        quizzes2.push_back(Symbol::new(&env, "quiz_p2"));
+        client.create_course(&prereq2, &1, &1, &modules2, &quizzes2);
+
+        let mut prereqs = Vec::new(&env);
+        prereqs.push_back(prereq1.clone());
+        prereqs.push_back(prereq2.clone());
+
+        client.set_prerequisites(&course_main, &prereqs);
+
+        let stored = client.get_prerequisites(&course_main);
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored.get(0).unwrap(), prereq1);
+        assert_eq!(stored.get(1).unwrap(), prereq2);
+    }
+
+    #[test]
+    fn test_enroll_checked_paused_reverts() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.emergency_pause();
+
+        // enroll_checked must fail when paused
+        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
+
+        // Unpause and verify enroll_checked succeeds
+        client.unpause();
+        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
+    }
+
+    #[test]
+    fn test_retake_quiz_for_paused_reverts() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &50);
+
+        client.emergency_pause();
+
+        let caller = learner.clone();
+        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
+
+        client.unpause();
+        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
+    }
 }
