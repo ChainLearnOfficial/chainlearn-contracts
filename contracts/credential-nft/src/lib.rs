@@ -9,6 +9,7 @@ mod xcall;
 use chainlearn_shared::ContractMetadata;
 use metadata::{CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
 use mint::validate_metadata_uri;
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
 
 /// Subset of the progress-tracker interface used to verify course completion
@@ -687,7 +688,24 @@ impl CredentialNft {
             }
         }
 
-        let cert_uri = Symbol::new(&env, "cert_uri");
+        let mut payload = soroban_sdk::Bytes::new(&env);
+        payload.append(&learner.clone().to_xdr(&env));
+        payload.append(&course_id.clone().to_xdr(&env));
+        let hash_bytes = env.crypto().sha256(&payload).to_array();
+
+        const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+        let mut uri_buf = [0u8; 29];
+        uri_buf[0..5].copy_from_slice(b"cert_");
+        for i in 0..12 {
+            let byte = hash_bytes[i];
+            uri_buf[5 + i * 2] = HEX_CHARS[(byte >> 4) as usize];
+            uri_buf[5 + i * 2 + 1] = HEX_CHARS[(byte & 0x0f) as usize];
+        }
+        let uri_str = match core::str::from_utf8(&uri_buf) {
+            Ok(s) => s,
+            Err(_) => panic!("failed to format certificate uri"),
+        };
+        let cert_uri = Symbol::new(&env, uri_str);
         metadata::write_entry(&env, &cert_key, &cert_uri);
 
         // If credential already minted, update metadata_uri in CredentialInfo

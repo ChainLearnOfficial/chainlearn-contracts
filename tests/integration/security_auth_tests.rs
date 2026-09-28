@@ -95,7 +95,7 @@ fn test_unauthorized_execute_multisig() {
     let (_, client) = setup_env(&env);
     let malicious = Address::generate(&env);
     let co_signer = Address::generate(&env);
-    client.execute_multisig_op(&malicious, &co_signer, &Symbol::new(env, "test"));
+    client.execute_multisig_op(&malicious, &co_signer, &Symbol::new(&env, "test"));
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn test_unauthorized_upgrade_multisig() {
     let (_, client) = setup_env(&env);
     let malicious = Address::generate(&env);
     let co_signer = Address::generate(&env);
-    client.upgrade_multisig(&malicious, &co_signer, &BytesN::from_array(env, &[0; 32]));
+    client.upgrade_multisig(&malicious, &co_signer, &BytesN::from_array(&env, &[0; 32]));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn test_unauthorized_upgrade() {
     let env = Env::default();
     let (_, client) = setup_env(&env);
     let malicious = Address::generate(&env);
-    client.upgrade(&BytesN::from_array(env, &[0; 32]));
+    client.upgrade(&BytesN::from_array(&env, &[0; 32]));
 }
 
 #[test]

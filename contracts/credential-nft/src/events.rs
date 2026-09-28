@@ -18,7 +18,6 @@ pub fn paused(env: &Env, admin: &Address, timestamp: u64) {
 }
 
 /// Emitted when the contract is unpaused by an admin (#422).
-/// Emitted when the contract is unpaused by an admin.
 ///
 /// Topics: ["unpaused"]
 /// Data: (admin, timestamp)
