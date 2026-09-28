@@ -12,14 +12,12 @@ The workspace contains three interconnected contracts and a shared utilities pac
 
 The reward token for the platform. Implements the SEP-41 fungible token standard with additional reward logic:
 
-- **Standard interface**: `initialize`, `mint`, `transfer`, `balance`, `total_supply`, `approve`, `allowance`
-- **Reward system**: `claim_reward(learner, course_id, quiz_id)` looks up the learner's score for
-  that quiz from progress-tracker and mints tokens proportional to it
 - **Standard interface**: `initialize`, `mint`, `transfer`, `transfer_from`, `burn`, `burn_from`,
   `balance`, `total_supply`, `approve`, `allowance`
 - **Burning**: `burn(from, amount)` and `burn_from(spender, from, amount)` destroy tokens and
   reduce `total_supply`; `burn_from` spends the caller's approved allowance
-- **Reward system**: `claim_reward(learner, quiz_id, score)` mints tokens proportional to quiz score
+- **Reward system**: `claim_reward(learner, course_id, quiz_id)` looks up the learner's score for
+  that quiz from progress-tracker and mints tokens proportional to it
 - **Anti-fraud**: Each quiz reward can only be claimed once per learner
 - **Reward formula**: `score * BASE_REWARD_PER_POINT` (100 tokens per point)
 
@@ -67,9 +65,12 @@ Common types and constants used across all contracts:
 
 - `MIN_CREDENTIAL_SCORE` (50): Minimum score to mint a credential
 - `MAX_QUIZ_SCORE` (100): Maximum possible quiz score
-- `TOKEN_DECIMALS` (7): Token decimal places
 - `BASE_REWARD_PER_POINT` (100): Tokens minted per quiz point
 - `MAX_CREDENTIALS_PAGE_SIZE` (50): Maximum credentials returned by one paginated read
+- `zero_address(env)` / `ZERO_ADDRESS_STR`: The all-zero account, rejected as a mint recipient or new admin
+
+Token decimals are not a shared constant: `learn-token` takes them as the `decimal` argument of
+`initialize` (the deployment scripts use 7).
 
 ### Cross-Contract Dependencies
 
@@ -268,49 +269,6 @@ soroban contract invoke --id <CREDENTIAL_ID> -- get_credentials_for \
     --learner <ADDRESS> --start 0 --limit 50
 ```
 
-## Data Types
-
-### ProgressInfo
-
-```rust
-struct ProgressInfo {
-    enrolled_at: u64,           // Timestamp of enrollment
-    quizzes_submitted: u32,     // Number of quizzes submitted
-    total_quiz_score: u64,      // Sum of submitted scores (average is derived)
-    overall_progress: u32,      // Progress percentage (0-100)
-    eligible_for_credential: bool,   // Qualifies for credential
-}
-```
-
-Module completion and individual quiz submissions are not duplicated here:
-they are stored once, under the `ModuleCompleted` and `QuizResult` storage
-keys. Use `get_quiz_score(learner, course_id, quiz_id)` to read a single
-result.
-
-### CredentialInfo
-
-```rust
-struct CredentialInfo {
-    learner: Address,           // Credential holder
-    course_id: Symbol,          // Course identifier
-    score: u32,                 // Final score (0-100)
-    issued_at: u64,             // Issuance timestamp
-    revoked: bool,              // Revocation status
-    metadata_uri: Symbol,       // Off-chain metadata URI
-}
-```
-
-### QuizResult
-
-```rust
-struct QuizResult {
-    quiz_id: Symbol,            // Quiz identifier
-    course_id: Symbol,          // Parent course
-    score: u32,                 // Score achieved
-    submitted_at: u64,          // Submission timestamp
-}
-```
-
 ## Progress Calculation
 
 Overall progress is calculated as a weighted average using integer division:
@@ -355,7 +313,7 @@ A learner is eligible for a credential when:
 
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `create_course` | Admin | `course_id: Symbol, total_modules: u32, total_quizzes: u32, module_ids: Vec<Symbol>, quiz_ids: Vec<Symbol>` | — | Register a new course with modules and quizzes. |
+| `create_course` | Admin | `course_id: Symbol, total_modules: u32, total_quizzes: u32, module_ids: Vec<Symbol>, quiz_ids: Vec<Symbol>` | — | Register a new course with modules and quizzes. Module IDs and quiz IDs must each be unique. |
 | `archive_course` | Admin | `course_id: Symbol` | — | Archive a course, preventing new enrollments. |
 | `set_course_content_hash` | Admin | `course_id: Symbol, content_hash: Symbol` | — | Set or update the content integrity hash. |
 | `set_course_difficulty` | Admin | `course_id: Symbol, difficulty: u32` | — | Set difficulty (0=beginner, 1=intermediate, 2=advanced). |
@@ -451,10 +409,17 @@ A learner is eligible for a credential when:
 
 #### Snapshots
 
+`snapshot` does **not** capture balances; it only emits `snapshot_created`. Balances are recorded
+per address with `record_balance_snapshot`, because a contract cannot enumerate all holders.
+Workflow: (1) `snapshot(h)` to announce, (2) `record_balance_snapshot(addr, h)` for each address
+that matters (e.g. each voter) before its balance changes, (3) read with `balance_at(addr, h)`.
+`balance_at` returns 0 for any address that was not recorded at that height.
+
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `snapshot` | Admin | `ledger_height: u32` | — | Create a balance snapshot. |
-| `balance_at` | — | `address: Address, ledger_height: u32` | `i128` | Balance at a specific snapshot. |
+| `snapshot` | Admin | `ledger_height: u32` | — | Marker only: emits `snapshot_created`, stores no balances. |
+| `record_balance_snapshot` | Admin | `address: Address, ledger_height: u32` | — | Store the address's current balance under `ledger_height`. |
+| `balance_at` | — | `address: Address, ledger_height: u32` | `i128` | Balance recorded for the address at that height (0 if none). |
 
 #### Admin
 
@@ -724,7 +689,7 @@ struct ContractMetadata {
 | `allowance_expired` | `[allowance_expired, owner, spender]` | `(expiration_ledger,)` | Expired allowance accessed. |
 | `restriction_updated` | `[restriction_updated]` | `(restriction,)` | Transfer restriction changed. |
 | `whitelist_updated` | `[whitelist_updated, address]` | `(added,)` | Whitelist changed. |
-| `snapshot_created` | `[snapshot_created]` | `(ledger_height,)` | Balance snapshot created. |
+| `snapshot_created` | `[snapshot_created]` | `(ledger_height,)` | Snapshot announced (marker; balances are recorded separately). |
 | `upgraded` | `[upgraded]` | `(new_wasm_hash, upgrade_version)` | Contract upgraded. |
 | `role_granted` | `[role_granted, address]` | `(role,)` | Admin role granted. |
 | `role_revoked` | `[role_revoked, address]` | `(role,)` | Admin role revoked. |

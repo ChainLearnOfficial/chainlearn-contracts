@@ -249,29 +249,48 @@ impl LearnToken {
 
     // ── Token Snapshots (#192) ────────────────────────────────────────────
 
-    /// Create a snapshot of all token balances at the current ledger height.
-    /// Admin only. Stores the current balance for every address that has a
-    /// non-zero balance.
+    /// Announce a snapshot at `ledger_height` by emitting `snapshot_created`.
+    /// Admin only.
+    ///
+    /// This is a **marker only**: it does not read or store any balance.
+    /// Soroban cannot enumerate every token holder on-chain, so balances are
+    /// captured per address with [`Self::record_balance_snapshot`]. The
+    /// intended workflow is:
+    ///
+    /// 1. Call `snapshot(ledger_height)` to announce the snapshot.
+    /// 2. Call `record_balance_snapshot(address, ledger_height)` once for each
+    ///    address whose balance must be preserved (e.g. every voter).
+    /// 3. Read the result back with [`Self::balance_at`].
+    ///
+    /// Use the same `ledger_height` in all three steps, and record balances
+    /// before they change: the value stored is the balance at the time of the
+    /// `record_balance_snapshot` call, not at `ledger_height`.
     pub fn snapshot(env: Env, ledger_height: u32) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
         events::snapshot_created(&env, ledger_height);
     }
 
-    /// Get the balance of an address at a specific snapshot ledger height.
+    /// Get the balance of an address recorded under a snapshot ledger height.
     ///
     /// # Arguments
     /// * `address` - The address to query
-    /// * `ledger_height` - The ledger height of the snapshot
+    /// * `ledger_height` - The ledger height the balance was recorded under
     ///
     /// # Returns
-    /// The balance at that snapshot, or 0 if no snapshot exists.
+    /// The balance stored by [`Self::record_balance_snapshot`] for this
+    /// address and height, or 0 if none was recorded (calling
+    /// [`Self::snapshot`] alone records nothing).
     pub fn balance_at(env: Env, address: Address, ledger_height: u32) -> i128 {
         storage::get_snapshot_balance(&env, &address, ledger_height).unwrap_or(0)
     }
 
-    /// Record a balance snapshot for an address at the current ledger.
-    /// This is called internally when a snapshot is created.
+    /// Record `address`'s current balance under `ledger_height`. Admin only.
+    ///
+    /// This is the primary snapshot API: it must be called once per address
+    /// to be able to read that address's balance back with
+    /// [`Self::balance_at`]. Calling it again for the same address and height
+    /// overwrites the stored value with the then-current balance.
     pub fn record_balance_snapshot(env: Env, address: Address, ledger_height: u32) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
@@ -585,10 +604,7 @@ impl LearnToken {
             panic!("not authorized");
         }
 
-        let zero_address = Address::from_string(&SorobanString::from_str(
-            &env,
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        ));
+        let zero_address = chainlearn_shared::zero_address(&env);
         if to == zero_address {
             panic!("cannot mint to zero address");
         }
@@ -1158,10 +1174,7 @@ impl LearnToken {
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
-        let zero_address = Address::from_string(&SorobanString::from_str(
-            &env,
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        ));
+        let zero_address = chainlearn_shared::zero_address(&env);
         if new_admin == zero_address {
             panic!("cannot transfer admin to zero address");
         }

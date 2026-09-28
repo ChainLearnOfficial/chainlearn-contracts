@@ -492,10 +492,7 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
 
-        let zero_address = Address::from_string(&soroban_sdk::String::from_str(
-            &env,
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        ));
+        let zero_address = chainlearn_shared::zero_address(&env);
         if new_admin == zero_address {
             panic!("cannot transfer admin to zero address");
         }
