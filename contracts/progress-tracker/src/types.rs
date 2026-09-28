@@ -220,6 +220,8 @@ pub enum ProgressTrackerDataKey {
     AchievementEarned(Address, AchievementType),
     /// Wasm hash of the code currently installed via `upgrade()`.
     WasmHash,
+    /// Reverse index mapping a tag symbol to course IDs with that tag (#419).
+    TagIndex(Symbol),
 }
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
