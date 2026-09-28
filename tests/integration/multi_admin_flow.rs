@@ -7,7 +7,7 @@ mod fixtures;
 use fixtures::setup_chainlearn_env;
 
 use learn_token::{AdminRole, LearnTokenClient, AdminInfo};
-use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Symbol};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, IntoVal, Symbol};
 
 /// Add multiple admins with Minter, Pauser, and Admin roles.
 /// Verify each role is enforced, then revoke and verify access is lost.

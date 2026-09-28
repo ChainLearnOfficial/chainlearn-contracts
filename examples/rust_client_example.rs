@@ -13,7 +13,10 @@ impl ChainLearnClient {
         learner.require_auth();
         
         // Invoke the enroll function on the progress-tracker contract
-        let mut args = soroban_sdk::vec![&env, learner.into_val(&env), course_id.into_val(&env)];
+        let args = soroban_sdk::vec![&env, learner.into_val(&env), course_id.into_val(&env)];
         env.invoke_contract::<()>(&tracker_id, &Symbol::new(&env, "enroll"), args);
     }
 }
+
+fn main() {}
+

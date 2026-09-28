@@ -255,6 +255,7 @@ impl ProgressTracker {
         course_id: Symbol,
         expected_content_hash: Option<Symbol>,
     ) {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         // Verify course exists
@@ -1590,7 +1591,7 @@ impl ProgressTracker {
             }
 
             for j in (i + 1)..prerequisites.len() {
-                if prerequisites.get(j) == Some(prerequisite.clone()) {
+                if prerequisites.get(i) == prerequisites.get(j) {
                     panic!("duplicate prerequisite found");
                 }
             }
