@@ -27,11 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - credential-nft: `revoke_credential` and `revoke_credential_with_reason` share a single implementation and prune indexes with host-side `first_index_of` (#344)
+- learn-token: whitelist-only restrictions now require a 48-hour proposal period, and the configurable admin-transfer delay cannot be set below one hour (#445, #447)
 
 ### Removed
 - Unused `check_allowance_expired_readonly` helper in learn-token storage (#344)
 
 ### Fixed
+- learn-token governance proposal creation, voting, and execution now respect the emergency pause (#446)
+- progress-tracker rejects zero-score quiz retakes before comparing them with the stored score (#444)
 - `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)
 - `is_credential_valid()` no longer deserializes the full `CredentialInfo` struct; it checks existence and a dedicated `revoked` flag instead (#109)
 - learn-token allowances now live in temporary storage instead of persistent storage, matching their short-lived, self-expiring nature (#110)

@@ -157,6 +157,18 @@ pub fn restriction_updated(env: &Env, restriction: &super::storage::TransferRest
         .publish(topics, (Symbol::new(env, restriction_str),));
 }
 
+/// Emitted when an admin stages a delayed whitelist-only restriction (#447).
+pub fn restriction_proposed(
+    env: &Env,
+    restriction: &super::storage::TransferRestriction,
+    initiated_at: u64,
+    effective_at: u64,
+) {
+    let topics = (Symbol::new(env, "restriction_proposed"),);
+    env.events()
+        .publish(topics, (restriction.clone(), initiated_at, effective_at));
+}
+
 /// Emitted when an address is added to or removed from the whitelist (#191).
 ///
 /// Topics: ["whitelist_updated", address] — indexed so "is/was address X

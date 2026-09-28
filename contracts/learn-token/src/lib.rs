@@ -10,7 +10,10 @@ use soroban_sdk::{
 };
 
 // Re-export governance/vesting/admin types so tests can use them.
-pub use storage::{AdminInfo, AdminRole, Proposal, VestingSchedule};
+pub use storage::{
+    AdminInfo, AdminRole, PendingTransferRestriction, Proposal, TransferRestriction,
+    VestingSchedule,
+};
 
 /// Maximum reward tokens that can be minted in a single claim (#78).
 /// Caps at MAX_QUIZ_SCORE * BASE_REWARD_PER_POINT (100 * 100 = 10_000).
@@ -206,13 +209,79 @@ impl LearnToken {
 
     /// Set the transfer restriction. Admin only.
     ///
+    /// Selecting `WhitelistOnly` stages the change for
+    /// [`storage::TRANSFER_RESTRICTION_DELAY_SECONDS`] instead of applying it
+    /// immediately, giving existing holders time to be added to the whitelist.
+    /// Other restrictions continue to apply immediately.
+    ///
     /// # Arguments
     /// * `restriction` - The new restriction to apply
     pub fn set_transfer_restriction(env: Env, restriction: storage::TransferRestriction) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        if restriction == storage::TransferRestriction::WhitelistOnly {
+            Self::stage_whitelist_restriction(&env, &restriction);
+            return;
+        }
+        storage::clear_pending_transfer_restriction(&env);
         storage::set_transfer_restriction(&env, &restriction);
         events::restriction_updated(&env, &restriction);
+    }
+
+    /// Explicitly propose the whitelist-only restriction. It becomes active
+    /// only after the fixed 48-hour safety delay and a second admin action.
+    pub fn propose_transfer_restriction(env: Env, restriction: storage::TransferRestriction) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        if restriction != storage::TransferRestriction::WhitelistOnly {
+            panic!("only whitelist restriction requires a proposal");
+        }
+        Self::stage_whitelist_restriction(&env, &restriction);
+    }
+
+    fn stage_whitelist_restriction(env: &Env, restriction: &storage::TransferRestriction) {
+        let initiated_at = env.ledger().timestamp();
+        let effective_at = initiated_at.saturating_add(storage::TRANSFER_RESTRICTION_DELAY_SECONDS);
+        storage::set_pending_transfer_restriction(
+            env,
+            &storage::PendingTransferRestriction {
+                restriction: restriction.clone(),
+                initiated_at,
+            },
+        );
+        events::restriction_proposed(env, restriction, initiated_at, effective_at);
+    }
+
+    /// Apply a proposed whitelist-only restriction after its safety delay.
+    pub fn accept_transfer_restriction(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        let pending = storage::get_pending_transfer_restriction(&env)
+            .expect("no pending transfer restriction");
+        let effective_at = pending
+            .initiated_at
+            .saturating_add(storage::TRANSFER_RESTRICTION_DELAY_SECONDS);
+        if env.ledger().timestamp() < effective_at {
+            panic!("transfer restriction delay has not elapsed");
+        }
+        storage::set_transfer_restriction(&env, &pending.restriction);
+        storage::clear_pending_transfer_restriction(&env);
+        events::restriction_updated(&env, &pending.restriction);
+    }
+
+    /// Cancel a staged whitelist-only restriction before it becomes active.
+    pub fn cancel_transfer_restriction(env: Env) {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        if storage::get_pending_transfer_restriction(&env).is_none() {
+            panic!("no pending transfer restriction");
+        }
+        storage::clear_pending_transfer_restriction(&env);
+    }
+
+    /// Return a staged whitelist-only restriction, if any.
+    pub fn pending_transfer_restriction(env: Env) -> Option<storage::PendingTransferRestriction> {
+        storage::get_pending_transfer_restriction(&env)
     }
 
     /// Get the current transfer restriction.
@@ -1252,6 +1321,9 @@ impl LearnToken {
     pub fn set_admin_transfer_delay(env: Env, delay_seconds: u64) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        if delay_seconds < storage::MIN_ADMIN_TRANSFER_DELAY_SECONDS {
+            panic!("admin transfer delay is below the minimum");
+        }
 
         let old_delay = storage::get_admin_transfer_delay(&env);
         storage::set_admin_transfer_delay(&env, delay_seconds);
@@ -1631,6 +1703,7 @@ impl LearnToken {
         end_time: u64,
         snapshot_ledger: u32,
     ) -> u64 {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
@@ -1672,6 +1745,7 @@ impl LearnToken {
     /// * `proposal_id` - The proposal to vote on
     /// * `choice` - Zero-based choice index (0 = first choice, etc.)
     pub fn vote(env: Env, voter: Address, proposal_id: u64, choice: u32) {
+        Self::require_not_paused(&env);
         voter.require_auth();
 
         let mut proposal = storage::get_proposal(&env, proposal_id).expect("proposal not found");
@@ -1716,6 +1790,7 @@ impl LearnToken {
     /// # Returns
     /// The winning choice index.
     pub fn execute_proposal(env: Env, proposal_id: u64) -> u32 {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
 

@@ -8,6 +8,7 @@
 use soroban_sdk::{Address, Env, Symbol};
 
 /// Emitted when the contract is paused by an admin (#422).
+/// Emitted when the contract is paused by an admin.
 ///
 /// Topics: ["paused"]
 /// Data: (admin, timestamp)

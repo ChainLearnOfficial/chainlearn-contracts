@@ -364,7 +364,7 @@ mod token_unit_tests {
         env.mock_all_auths();
 
         client.mint(&admin, &Address::generate(&env), &3000);
-        client.set_max_supply(&2000);
+        assert!(client.try_set_max_supply(&2000).is_err());
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod token_unit_tests {
         env.mock_all_auths();
 
         // 5000 -> 15000 is 3x increase, exceeding the 2x limit (max 10000)
-        client.set_max_supply(&15000);
+        assert!(client.try_set_max_supply(&15000).is_err());
     }
 
     #[test]
@@ -885,9 +885,127 @@ mod token_unit_tests {
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        client.pause(&admin);
+        client.create_proposal(
+            &SorobanString::from_str(&env, "Paused proposal"),
+            &2,
+            &0,
+            &100,
+            &env.ledger().sequence(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_vote_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let voter = Address::generate(&env);
+        env.mock_all_auths();
+        client.mint(&admin, &voter, &100);
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Paused vote"),
+            &2,
+            &0,
+            &100,
+            &env.ledger().sequence(),
+        );
+        client.pause(&admin);
+        client.vote(&voter, &proposal_id, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_execute_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Paused execution"),
+            &2,
+            &0,
+            &100,
+            &env.ledger().sequence(),
+        );
+        env.ledger().with_mut(|ledger| ledger.timestamp = 100);
+        client.pause(&admin);
+        client.execute_proposal(&proposal_id);
+    }
+
+    #[test]
+    fn test_whitelist_restriction_waits_before_activation() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        env.mock_all_auths();
+        client.mint(&admin, &alice, &100);
+        client.mint(&admin, &bob, &100);
+
+        client.set_transfer_restriction(&learn_token::TransferRestriction::WhitelistOnly);
+        assert_eq!(
+            client.get_transfer_restriction(),
+            learn_token::TransferRestriction::None
+        );
+        assert!(client.pending_transfer_restriction().is_some());
+        assert!(client.try_accept_transfer_restriction().is_err());
+
+        // Existing holders can be whitelisted throughout the grace period.
+        client.add_to_whitelist(&alice);
+        client.add_to_whitelist(&bob);
+        env.ledger().with_mut(|ledger| ledger.timestamp += 172_800);
+        client.accept_transfer_restriction();
+
+        assert_eq!(
+            client.get_transfer_restriction(),
+            learn_token::TransferRestriction::WhitelistOnly
+        );
+        assert!(client.pending_transfer_restriction().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay is below the minimum")]
+    fn test_admin_transfer_delay_rejects_zero() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&0);
+    }
+
+    #[test]
+    fn test_admin_transfer_delay_accepts_one_hour_minimum() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_600);
+        assert_eq!(client.admin_transfer_delay(), 3_600);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay is below the minimum")]
+    fn test_admin_transfer_delay_rejects_below_one_hour() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_599);
+    }
+
+    #[test]
+    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let beneficiary = Address::generate(&env);
 
@@ -901,9 +1019,16 @@ mod token_unit_tests {
             l.timestamp = 0;
         });
 
-        client.create_vesting(&beneficiary, &total_amount, &cliff_timestamp, &duration_seconds);
+        client.create_vesting(
+            &beneficiary,
+            &total_amount,
+            &cliff_timestamp,
+            &duration_seconds,
+        );
 
-        let schedule = client.get_vesting_schedule(&beneficiary).expect("schedule should exist");
+        let schedule = client
+            .get_vesting_schedule(&beneficiary)
+            .expect("schedule should exist");
         assert_eq!(schedule.total_amount, 10_000);
         assert_eq!(schedule.cliff_timestamp, 100);
         assert_eq!(schedule.duration_seconds, 1_000);
@@ -941,7 +1066,7 @@ mod token_unit_tests {
     #[should_panic(expected = "cliff not reached")]
     fn test_vesting_cliff_enforced() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let beneficiary = Address::generate(&env);
 
@@ -965,7 +1090,7 @@ mod token_unit_tests {
     #[should_panic(expected = "vesting schedule fully claimed")]
     fn test_vesting_claiming_after_exhausted_panics() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup_token(&env);
+        let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let beneficiary = Address::generate(&env);
 
@@ -1298,7 +1423,11 @@ mod token_unit_tests {
         assert_eq!(pending.new_admin, new_admin);
 
         // 3. Verify current admin hasn't changed
-        assert_eq!(client.admin(), admin, "admin must not change until accepted");
+        assert_eq!(
+            client.admin(),
+            admin,
+            "admin must not change until accepted"
+        );
 
         // 4. Attempt to accept before delay elapses - should fail
         let result = client.try_accept_admin();
