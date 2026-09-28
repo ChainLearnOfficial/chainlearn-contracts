@@ -220,7 +220,25 @@ pub enum ProgressTrackerDataKey {
     AchievementEarned(Address, AchievementType),
     /// Wasm hash of the code currently installed via `upgrade()`.
     WasmHash,
+    /// In-flight delayed admin transfer, absent when none is pending (#423).
+    PendingAdmin,
+    /// Configurable admin-transfer delay in seconds, absent until set (#423).
+    AdminTransferDelay,
 }
+
+/// An admin transfer that has been initiated but not yet accepted (#423).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingAdminTransfer {
+    /// The address the admin role is being transferred to.
+    pub new_admin: Address,
+    /// Ledger timestamp `transfer_admin` was called.
+    pub initiated_at: u64,
+}
+
+/// Default delay (in seconds) a pending admin transfer must wait before it can
+/// be accepted, matching `learn-token`. 172_800s = 48 hours (#423).
+pub const DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS: u64 = 172_800;
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
 //

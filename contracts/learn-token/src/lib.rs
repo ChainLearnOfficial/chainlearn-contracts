@@ -603,7 +603,10 @@ impl LearnToken {
 
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply.checked_add(amount).map_or(true, |s| s > max_supply) {
+        if current_supply
+            .checked_add(amount)
+            .map_or(true, |s| s > max_supply)
+        {
             panic!("maximum supply cap exceeded");
         }
 
@@ -732,6 +735,12 @@ impl LearnToken {
 
         let mut current_supply = storage::get_total_supply(&env);
         let mut current_balance = storage::get_balance(&env, &learner);
+        // Minting through a batch is still minting, so the cumulative
+        // per-address total has to move with the balance (#420). Accumulate
+        // locally and apply once, for the same reason balance and supply are
+        // accumulated above: `add_total_minted_to` is a read-modify-write with
+        // a TTL bump on every call, and this loop is the hot path (#217).
+        let mut total_minted = 0i128;
 
         for quiz_id in quiz_ids.iter() {
             if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
@@ -765,6 +774,7 @@ impl LearnToken {
 
             current_supply += reward_amount;
             current_balance += reward_amount;
+            total_minted += reward_amount;
 
             storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
             events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
@@ -774,6 +784,7 @@ impl LearnToken {
         if !successful.is_empty() {
             storage::set_balance(&env, &learner, current_balance);
             storage::set_total_supply(&env, current_supply);
+            storage::add_total_minted_to(&env, &learner, total_minted);
         }
 
         successful
@@ -838,7 +849,10 @@ impl LearnToken {
 
         let current_supply = storage::get_total_supply(&env);
         let max_supply = storage::get_max_supply(&env);
-        if current_supply.checked_add(reward_amount).map_or(true, |s| s > max_supply) {
+        if current_supply
+            .checked_add(reward_amount)
+            .map_or(true, |s| s > max_supply)
+        {
             return fail("maximum supply cap exceeded");
         }
 
@@ -906,12 +920,7 @@ impl LearnToken {
     }
 
     /// Perform a critical operation requiring multi-sig authorization from two admins (#212).
-    pub fn execute_multisig_op(
-        env: Env,
-        caller: Address,
-        co_signer: Address,
-        operation: Symbol,
-    ) {
+    pub fn execute_multisig_op(env: Env, caller: Address, co_signer: Address, operation: Symbol) {
         caller.require_auth();
         co_signer.require_auth();
 
@@ -1104,7 +1113,9 @@ impl LearnToken {
         }
         let old_max_supply = storage::get_max_supply(&env);
         if old_max_supply > 0 && new_max_supply > old_max_supply {
-            let max_allowed = old_max_supply.checked_mul(2).ok_or(ContractError::MaxSupplyExceeded)?;
+            let max_allowed = old_max_supply
+                .checked_mul(2)
+                .ok_or(ContractError::MaxSupplyExceeded)?;
             if new_max_supply > max_allowed {
                 return Err(ContractError::MaxSupplyExceeded);
             }
@@ -1902,6 +1913,183 @@ mod tests {
         client.mint(&admin, &user, &0);
 
         assert_eq!(client.total_minted_to(&user), 0);
+    }
+
+    // ── Issue #420: batch claims must move the per-address minted total ──
+
+    /// Creates a course containing every quiz in `quiz_ids` and submits
+    /// `scores[i]` for `quiz_ids[i]`, so a multi-quiz batch has something to
+    /// claim. Per-quiz scores let a test build a batch where only some quizzes
+    /// actually mint.
+    fn create_course_with_quiz_scores(
+        env: &Env,
+        pt_client: &progress_tracker::ProgressTrackerClient,
+        learner: &Address,
+        course_id: &Symbol,
+        quiz_ids: &[Symbol],
+        scores: &[u32],
+    ) {
+        assert_eq!(quiz_ids.len(), scores.len());
+        let mut module_ids = Vec::new(env);
+        module_ids.push_back(Symbol::new(env, "mod_1"));
+        let mut ids = Vec::new(env);
+        for quiz_id in quiz_ids {
+            ids.push_back(quiz_id.clone());
+        }
+        pt_client.create_course(course_id, &1, &(quiz_ids.len() as u32), &module_ids, &ids);
+        pt_client.enroll(learner, course_id);
+        for (quiz_id, score) in quiz_ids.iter().zip(scores) {
+            pt_client.submit_quiz_score(learner, course_id, quiz_id, score);
+        }
+    }
+
+    #[test]
+    fn test_batch_claim_reward_updates_total_minted_to() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_ids = [
+            Symbol::new(&env, "quiz_1"),
+            Symbol::new(&env, "quiz_2"),
+            Symbol::new(&env, "quiz_3"),
+        ];
+        create_course_with_quiz_scores(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &quiz_ids,
+            &[80, 80, 80],
+        );
+
+        let mut batch = Vec::new(&env);
+        for quiz_id in &quiz_ids {
+            batch.push_back(quiz_id.clone());
+        }
+        let claimed = client.batch_claim_reward(&learner, &course_id, &batch);
+        assert_eq!(claimed.len(), 3);
+
+        // The invariant: every path that mints to an address is reflected in
+        // the cumulative minted total. The batch minted the entire balance, so
+        // the two must be equal (#420).
+        let expected = 3 * (80 as i128) * BASE_REWARD_PER_POINT;
+        assert_eq!(client.balance(&learner), expected);
+        assert_eq!(client.total_minted_to(&learner), expected);
+    }
+
+    #[test]
+    fn test_batch_claim_reward_counts_only_quizzes_it_actually_minted() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_ids = [
+            Symbol::new(&env, "quiz_1"),
+            Symbol::new(&env, "quiz_2"),
+            Symbol::new(&env, "quiz_3"),
+        ];
+        // quiz_2 scores 0, so the loop skips it and mints nothing for it. The
+        // total must track the two real claims, not the three submitted.
+        create_course_with_quiz_scores(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &quiz_ids,
+            &[80, 0, 80],
+        );
+
+        let mut batch = Vec::new(&env);
+        for quiz_id in &quiz_ids {
+            batch.push_back(quiz_id.clone());
+        }
+        let claimed = client.batch_claim_reward(&learner, &course_id, &batch);
+        assert_eq!(claimed.len(), 2);
+
+        let expected = 2 * (80 as i128) * BASE_REWARD_PER_POINT;
+        assert_eq!(client.balance(&learner), expected);
+        assert_eq!(client.total_minted_to(&learner), expected);
+    }
+
+    #[test]
+    fn test_total_minted_to_accumulates_across_single_and_batch_claims() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_ids = [Symbol::new(&env, "quiz_1"), Symbol::new(&env, "quiz_2")];
+        create_course_with_quiz_scores(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &quiz_ids,
+            &[80, 80],
+        );
+
+        // One claim through the single path, one through the batch path. The
+        // total has to carry across both, otherwise the batch either resets
+        // or overwrites the single claim's contribution.
+        client.claim_reward(&learner, &course_id, &quiz_ids[0]);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(quiz_ids[1].clone());
+        client.batch_claim_reward(&learner, &course_id, &batch);
+
+        let expected = 2 * (80 as i128) * BASE_REWARD_PER_POINT;
+        assert_eq!(client.total_minted_to(&learner), expected);
+        assert_eq!(client.total_minted_to(&learner), client.balance(&learner));
+    }
+
+    #[test]
+    fn test_batch_claim_reward_is_idempotent_for_total_minted_to() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_ids = [Symbol::new(&env, "quiz_1"), Symbol::new(&env, "quiz_2")];
+        create_course_with_quiz_scores(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &quiz_ids,
+            &[80, 80],
+        );
+
+        let mut batch = Vec::new(&env);
+        for quiz_id in &quiz_ids {
+            batch.push_back(quiz_id.clone());
+        }
+        client.batch_claim_reward(&learner, &course_id, &batch);
+        let after_first = client.total_minted_to(&learner);
+        let expected = 2 * (80 as i128) * BASE_REWARD_PER_POINT;
+        assert_eq!(after_first, expected);
+
+        // Re-submitting the same batch claims nothing, so the total must not
+        // move — the added amount has to come only from quizzes that actually
+        // minted.
+        let claimed = client.batch_claim_reward(&learner, &course_id, &batch);
+        assert!(claimed.is_empty());
+        assert_eq!(client.total_minted_to(&learner), after_first);
+        assert_eq!(client.total_minted_to(&learner), client.balance(&learner));
     }
 
     // ── Issue #237: reward claim history ─────────────────────────────────

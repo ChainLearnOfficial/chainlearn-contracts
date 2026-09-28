@@ -577,7 +577,12 @@ A learner is eligible for a credential when:
 |---|---|---|---|---|
 | `admin` | — | — | `Address` | Admin address. |
 | `progress_tracker` | — | — | `Address` | Progress-tracker address. |
-| `transfer_admin` | Admin | `new_admin: Address` | — | Transfer admin rights. |
+| `transfer_admin` | Admin | `new_admin: Address` | — | Initiate delayed admin transfer. |
+| `accept_admin` | Pending | — | — | Accept admin role after delay. |
+| `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
+| `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
+| `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the transfer delay. |
 | `contract_metadata` | — | — | `ContractMetadata` | Contract name and version. |
 | `is_initialized` | — | — | `bool` | Whether initialized. |
 | `get_storage_size` | — | — | `u64` | Number of persistent storage entries. |

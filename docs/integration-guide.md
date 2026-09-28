@@ -288,6 +288,45 @@ let is_valid = client.is_credential_valid(&credential_id);
 const isValid = await contract.isCredentialValid({ credential_id: credentialId });
 ```
 
+### 4. Admin Transfer (Two-Step Handover)
+
+All three contracts (`progress-tracker`, `learn-token`, `credential-nft`) use the
+same delayed handover. `transfer_admin` does **not** change the admin
+immediately — it records a pending candidate, and control only moves once that
+candidate accepts. The default delay is 48 hours (172,800s) on every contract.
+
+```rust
+// 1. Current admin proposes a new admin. Admin is unchanged by this call.
+contract.transfer_admin(&new_admin);
+
+// 2. Optionally, the current admin can abort at any point before acceptance.
+contract.cancel_admin_transfer();
+
+// 3. The candidate accepts, but only after the delay has elapsed.
+contract.accept_admin();
+```
+
+| Function | Auth | Returns | Description |
+|---|---|---|---|
+| `transfer_admin` | Admin | — | Record `new_admin` as pending; does not transfer. |
+| `accept_admin` | Pending | — | Complete the transfer once the delay has elapsed. |
+| `cancel_admin_transfer` | Admin | — | Clear the pending transfer. |
+| `pending_admin` | — | `Option<PendingAdminTransfer>` | Inspect the in-flight transfer. |
+| `admin_transfer_delay` | — | `u64` | Current delay in seconds. |
+| `set_admin_transfer_delay` | Admin | — | Set the delay for future transfers. |
+
+Notes for integrators:
+
+- `accept_admin` reverts with `admin transfer delay has not elapsed` if called
+  too early, and with `no pending admin transfer` if nothing is in flight.
+- Calling `transfer_admin` again before acceptance **overwrites** the candidate
+  and restarts the delay; it does not queue a second transfer.
+- `set_admin_transfer_delay` only affects transfers started after the call — it
+  never shortens or extends a transfer that is already pending.
+- A client can watch `admin_transfer_initiated`, `admin_transfer_accepted` and
+  `admin_transfer_cancelled` events to follow the lifecycle of one candidate.
+  All three share the pending address in the second topic slot.
+
 ## Error Handling
 
 ### Common Errors

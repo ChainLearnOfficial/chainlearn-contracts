@@ -1,5 +1,6 @@
 #![no_std]
 
+mod events;
 mod metadata;
 mod mint;
 mod verify;
@@ -429,7 +430,7 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
         metadata::write_entry(&env, &CredentialDataKey::Paused, &true);
-        // Event would ideally be emitted here, but we will omit it for simplicity if it wasn't added to events.rs
+        events::paused(&env, &admin, env.ledger().timestamp());
     }
 
     /// Unpause state-changing operations. Admin only.
@@ -441,6 +442,7 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
         metadata::write_entry(&env, &CredentialDataKey::Paused, &false);
+        events::unpaused(&env, &admin, env.ledger().timestamp());
     }
 
     /// Returns the admin address.
@@ -459,10 +461,29 @@ impl CredentialNft {
             .expect("not initialized")
     }
 
-    /// Transfer admin rights to a new address.
+    /// Initiate a delayed transfer of admin rights to a new address (#423).
+    ///
+    /// This does **not** change the admin immediately. It records `new_admin`
+    /// as pending; the transfer only takes effect once `new_admin` calls
+    /// [`Self::accept_admin`] after [`Self::admin_transfer_delay`] has elapsed.
+    /// The current admin can call [`Self::cancel_admin_transfer`] any time
+    /// before acceptance to abort it.
+    ///
+    /// # Why a delay
+    /// The previous immediate transfer meant a single compromised admin key
+    /// could hand control to an attacker-controlled address in one
+    /// transaction, with no window to notice or react. This now matches
+    /// `learn-token`, which already used the delayed pattern.
+    ///
+    /// Calling this again before a pending transfer is accepted overwrites it
+    /// with the new candidate and restarts the delay from now.
     ///
     /// # Arguments
     /// * `new_admin` - The new admin address
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    /// * If `new_admin` is the zero address
     pub fn transfer_admin(env: Env, new_admin: Address) {
         let admin: Address = env
             .storage()
@@ -479,14 +500,125 @@ impl CredentialNft {
             panic!("cannot transfer admin to zero address");
         }
 
+        let initiated_at = env.ledger().timestamp();
+        let delay = Self::admin_transfer_delay(env.clone());
+        env.storage().persistent().set(
+            &CredentialDataKey::PendingAdmin,
+            &metadata::PendingAdminTransfer {
+                new_admin: new_admin.clone(),
+                initiated_at,
+            },
+        );
+
+        events::admin_transfer_initiated(
+            &env,
+            &admin,
+            &new_admin,
+            initiated_at,
+            initiated_at.saturating_add(delay),
+        );
+    }
+
+    /// Complete a pending admin transfer once its delay has elapsed (#423).
+    ///
+    /// Must be called by the pending `new_admin` address, proving control of
+    /// that key before it's granted admin rights.
+    ///
+    /// # Panics
+    /// * If there is no pending admin transfer
+    /// * If the caller is not the pending `new_admin`
+    /// * If the delay has not yet elapsed
+    pub fn accept_admin(env: Env) {
+        let pending: metadata::PendingAdminTransfer = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::PendingAdmin)
+            .expect("no pending admin transfer");
+        pending.new_admin.require_auth();
+
+        let delay = Self::admin_transfer_delay(env.clone());
+        let ready_at = pending.initiated_at.saturating_add(delay);
+        if env.ledger().timestamp() < ready_at {
+            panic!("admin transfer delay has not elapsed");
+        }
+
+        let previous_admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
         env.storage()
             .persistent()
-            .set(&CredentialDataKey::Admin, &new_admin);
+            .set(&CredentialDataKey::Admin, &pending.new_admin);
+        env.storage()
+            .persistent()
+            .remove(&CredentialDataKey::PendingAdmin);
 
-        env.events().publish(
-            (Symbol::new(&env, "admin_transferred"),),
-            (admin, new_admin),
-        );
+        events::admin_transfer_accepted(&env, &previous_admin, &pending.new_admin);
+    }
+
+    /// Cancel a pending admin transfer before it is accepted (#423).
+    ///
+    /// Admin only. The primary safeguard against a compromised admin key: the
+    /// legitimate admin can abort an unauthorized `transfer_admin` call any
+    /// time before the pending `new_admin` accepts it.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    /// * If there is no pending admin transfer
+    pub fn cancel_admin_transfer(env: Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let pending: metadata::PendingAdminTransfer = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::PendingAdmin)
+            .expect("no pending admin transfer");
+        env.storage()
+            .persistent()
+            .remove(&CredentialDataKey::PendingAdmin);
+
+        events::admin_transfer_cancelled(&env, &admin, &pending.new_admin);
+    }
+
+    /// Returns the in-flight pending admin transfer, if any (#423).
+    pub fn pending_admin(env: Env) -> Option<metadata::PendingAdminTransfer> {
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::PendingAdmin)
+    }
+
+    /// Returns the current admin-transfer delay, in seconds (#423).
+    pub fn admin_transfer_delay(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::AdminTransferDelay)
+            .unwrap_or(metadata::DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS)
+    }
+
+    /// Set the admin-transfer delay, in seconds. Admin only (#423).
+    ///
+    /// Applies to transfers initiated after this call; it does not change the
+    /// deadline of a transfer already pending.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    pub fn set_admin_transfer_delay(env: Env, delay_seconds: u64) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage()
+            .persistent()
+            .set(&CredentialDataKey::AdminTransferDelay, &delay_seconds);
     }
 
     /// Reject transfer of a credential.
@@ -606,9 +738,9 @@ impl CredentialNft {
 
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        
+
         metadata::write_entry(&env, &CredentialDataKey::WasmHash, &new_wasm_hash);
-        
+
         let mut version: u32 = env
             .storage()
             .persistent()
@@ -617,10 +749,8 @@ impl CredentialNft {
         version += 1;
         metadata::write_entry(&env, &CredentialDataKey::UpgradeVersion, &version);
 
-        env.events().publish(
-            (Symbol::new(&env, "upgraded"),),
-            (new_wasm_hash, version),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "upgraded"),), (new_wasm_hash, version));
     }
 
     /// Wasm hash the contract was most recently upgraded to, or `None` if
@@ -648,6 +778,155 @@ mod tests {
     };
 
     /// Register both contracts and return `(admin, credential_id, tracker_id)`.
+    // ── Issue #422: pause/unpause must be observable ─────────────────────
+
+    #[test]
+    fn test_emergency_pause_emits_paused_event() {
+        let env = Env::default();
+        let (admin, _contract_id, _tracker_id) = setup_contract(&env);
+        let contract_id = env.register_contract(None, CredentialNft);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        client.initialize(&admin, &Address::generate(&env));
+
+        env.mock_all_auths();
+        let now = env.ledger().timestamp();
+
+        client.emergency_pause();
+
+        let all = env.events().all();
+        let last = all.last().expect("no event emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "paused"),).into_val(&env),
+                    (admin, now).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unpause_emits_unpaused_event() {
+        let env = Env::default();
+        let (admin, _contract_id, _tracker_id) = setup_contract(&env);
+        let contract_id = env.register_contract(None, CredentialNft);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        client.initialize(&admin, &Address::generate(&env));
+
+        env.mock_all_auths();
+        let now = env.ledger().timestamp();
+
+        client.emergency_pause();
+        env.events().all(); // discard the pause event
+
+        client.unpause();
+
+        let all = env.events().all();
+        let last = all.last().expect("no event emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "unpaused"),).into_val(&env),
+                    (admin, now).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    // ── Issue #423: delayed two-step admin transfer ──────────────────────
+
+    #[test]
+    fn test_transfer_admin_defers_the_handover() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        // The whole point of the delay: admin is unchanged until acceptance.
+        assert_eq!(client.admin(), admin);
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, new_admin);
+    }
+
+    #[test]
+    fn test_accept_admin_completes_the_transfer() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&0);
+        client.transfer_admin(&new_admin);
+        client.accept_admin();
+
+        assert_eq!(client.admin(), new_admin);
+        assert!(client.pending_admin().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay has not elapsed")]
+    fn test_accept_admin_panics_before_the_delay_elapses() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        // Default delay is 48h and the ledger has not moved, so this must fail.
+        client.accept_admin();
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_aborts_the_handover() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&0);
+        client.transfer_admin(&new_admin);
+        client.cancel_admin_transfer();
+
+        assert!(client.pending_admin().is_none());
+        assert_eq!(client.admin(), admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "no pending admin transfer")]
+    fn test_accept_admin_panics_after_cancellation() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&0);
+        client.transfer_admin(&new_admin);
+        client.cancel_admin_transfer();
+        client.accept_admin();
+    }
+
+    #[test]
+    fn test_default_admin_transfer_delay_matches_learn_token() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert_eq!(client.admin_transfer_delay(), 172_800);
+    }
+
     fn setup_contract(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
 
