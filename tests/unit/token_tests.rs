@@ -1477,6 +1477,42 @@ mod token_unit_tests {
         assert_eq!(client.balance(&holder), 750);
     }
 
+    /// #424: `snapshot` is only a marker; balances are captured per address
+    /// by `record_balance_snapshot`, and only for the addresses recorded.
+    #[test]
+    fn test_snapshot_workflow_marker_then_per_address_record() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let carol = Address::generate(&env);
+        client.mint(&admin, &alice, &300);
+        client.mint(&admin, &bob, &700);
+        client.mint(&admin, &carol, &50);
+
+        // The marker alone stores no balances.
+        client.snapshot(&42);
+        assert_eq!(client.balance_at(&alice, &42), 0);
+        assert_eq!(client.balance_at(&bob, &42), 0);
+
+        // Record alice and bob only, then let balances move.
+        client.record_balance_snapshot(&alice, &42);
+        client.record_balance_snapshot(&bob, &42);
+        client.transfer(&bob, &alice, &200);
+
+        assert_eq!(client.balance(&alice), 500);
+        assert_eq!(client.balance(&bob), 500);
+        assert_eq!(client.balance_at(&alice, &42), 300);
+        assert_eq!(client.balance_at(&bob, &42), 700);
+        // carol was never recorded, so nothing is stored for her.
+        assert_eq!(client.balance_at(&carol, &42), 0);
+        // A different height is an independent snapshot.
+        assert_eq!(client.balance_at(&alice, &43), 0);
+    }
+
     #[test]
     fn test_balance_at_unknown_snapshot_is_zero() {
         let env = Env::default();
