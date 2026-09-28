@@ -8,10 +8,6 @@
 use soroban_sdk::{Address, Env, Symbol};
 
 /// Emitted when the contract is paused by an admin (#422).
-//! Contract events. Pause events match learn-token's structure (#430).
-
-use soroban_sdk::{Address, Env, Symbol};
-
 /// Emitted when the contract is paused by an admin.
 ///
 /// Topics: ["paused"]

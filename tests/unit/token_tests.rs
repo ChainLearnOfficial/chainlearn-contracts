@@ -852,7 +852,11 @@ mod token_unit_tests {
         let voter = Address::generate(&env);
         client.mint(&admin, &voter, &1000);
 
+        env.ledger().with_mut(|l| l.sequence_number = 99);
         let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        client.record_balance_snapshot(&voter, &snapshot_ledger);
+        env.ledger().with_mut(|l| l.sequence_number = 100);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Increase rewards"),
             &2,
@@ -885,6 +889,47 @@ mod token_unit_tests {
     }
 
     #[test]
+    #[should_panic(expected = "no snapshot available at specified ledger")]
+    fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let voter = Address::generate(&env);
+        client.mint(&admin, &voter, &1_000);
+        env.ledger().with_mut(|l| l.sequence_number = 100);
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Missing snapshot"),
+            &2,
+            &0,
+            &1_000,
+            &99,
+        );
+        env.ledger().with_mut(|l| l.timestamp = 500);
+
+        client.vote(&voter, &proposal_id, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "snapshot_ledger must be earlier than the current ledger")]
+    fn test_create_proposal_rejects_current_or_future_snapshot_ledger() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 100);
+
+        client.create_proposal(
+            &SorobanString::from_str(&env, "Future snapshot"),
+            &2,
+            &0,
+            &1_000,
+            &100,
+        );
+    }
+
+    #[test]
     fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -901,9 +946,16 @@ mod token_unit_tests {
             l.timestamp = 0;
         });
 
-        client.create_vesting(&beneficiary, &total_amount, &cliff_timestamp, &duration_seconds);
+        client.create_vesting(
+            &beneficiary,
+            &total_amount,
+            &cliff_timestamp,
+            &duration_seconds,
+        );
 
-        let schedule = client.get_vesting_schedule(&beneficiary).expect("schedule should exist");
+        let schedule = client
+            .get_vesting_schedule(&beneficiary)
+            .expect("schedule should exist");
         assert_eq!(schedule.total_amount, 10_000);
         assert_eq!(schedule.cliff_timestamp, 100);
         assert_eq!(schedule.duration_seconds, 1_000);
@@ -986,6 +1038,21 @@ mod token_unit_tests {
 
         // Attempting to claim again after schedule is exhausted must panic
         client.claim_vested(&beneficiary);
+    }
+
+    #[test]
+    #[should_panic(expected = "vesting amount exceeds remaining supply capacity")]
+    fn test_vesting_rejects_amount_above_remaining_supply() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token_with_max_supply(&env, 1_000);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minted = Address::generate(&env);
+        client.mint(&admin, &minted, &600);
+
+        let beneficiary = Address::generate(&env);
+        client.create_vesting(&beneficiary, &401, &0, &1_000);
     }
 
     // ── Issue #241: admin transfer delay ─────────────────────────────────────
@@ -1298,7 +1365,11 @@ mod token_unit_tests {
         assert_eq!(pending.new_admin, new_admin);
 
         // 3. Verify current admin hasn't changed
-        assert_eq!(client.admin(), admin, "admin must not change until accepted");
+        assert_eq!(
+            client.admin(),
+            admin,
+            "admin must not change until accepted"
+        );
 
         // 4. Attempt to accept before delay elapses - should fail
         let result = client.try_accept_admin();
@@ -1335,10 +1406,12 @@ mod token_unit_tests {
 
         let holder = Address::generate(&env);
         client.mint(&admin, &holder, &500);
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         client.snapshot(&10);
         client.record_balance_snapshot(&holder, &10);
 
         // Later balance changes do not affect the recorded snapshot.
+        env.ledger().with_mut(|l| l.sequence_number = 20);
         client.mint(&admin, &holder, &250);
         client.snapshot(&20);
         client.record_balance_snapshot(&holder, &20);
@@ -1359,6 +1432,30 @@ mod token_unit_tests {
         client.mint(&admin, &holder, &500);
         assert_eq!(client.balance_at(&holder, &99), 0);
         assert_eq!(client.balance_at(&Address::generate(&env), &99), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "snapshot ledger must match the current ledger")]
+    fn test_snapshot_marker_cannot_be_backdated() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 100);
+
+        client.snapshot(&99);
+    }
+
+    #[test]
+    #[should_panic(expected = "snapshot ledger must match the current ledger")]
+    fn test_balance_snapshot_cannot_be_backdated() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 100);
+
+        client.record_balance_snapshot(&Address::generate(&env), &99);
     }
 
     #[test]
@@ -1579,25 +1676,22 @@ mod token_unit_tests {
     #[should_panic(expected = "maximum supply cap exceeded")]
     fn test_claim_vested_over_supply_cap_panics() {
         let env = Env::default();
-        let (_admin, client) = setup_vesting(&env, 9_999);
+        let (_admin, client) = setup_vesting(&env, 10_000);
         let beneficiary = Address::generate(&env);
         client.create_vesting(&beneficiary, &10_000, &0, &100);
+        client.set_max_supply(&9_999);
         env.ledger().with_mut(|l| l.timestamp = 100);
 
         client.claim_vested(&beneficiary);
     }
 
     #[test]
-    #[should_panic(expected = "maximum supply cap exceeded")]
-    fn test_claim_vested_supply_overflow_is_capped_not_wrapped() {
+    #[should_panic(expected = "vesting amount exceeds remaining supply capacity")]
+    fn test_vesting_remaining_supply_check_near_i128_max() {
         let env = Env::default();
         let (admin, client) = setup_vesting(&env, i128::MAX);
         client.mint(&admin, &admin, &(i128::MAX - 10));
         let beneficiary = Address::generate(&env);
-        client.create_vesting(&beneficiary, &10_000, &0, &100);
-        env.ledger().with_mut(|l| l.timestamp = 100);
-
-        // current_supply + claimable overflows i128; checked_add reports the cap.
-        client.claim_vested(&beneficiary);
+        client.create_vesting(&beneficiary, &11, &0, &100);
     }
 }
