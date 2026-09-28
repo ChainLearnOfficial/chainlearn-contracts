@@ -862,6 +862,7 @@ impl ProgressTracker {
         quiz_id: Symbol,
         new_score: u32,
     ) {
+        Self::require_not_paused(&env);
         learner.require_auth();
         Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
     }
@@ -1860,10 +1861,29 @@ impl ProgressTracker {
             .expect("not initialized")
     }
 
-    /// Transfer admin rights to a new address.
+    /// Initiate a delayed transfer of admin rights to a new address (#423).
+    ///
+    /// This does **not** change the admin immediately. It records `new_admin`
+    /// as pending; the transfer only takes effect once `new_admin` calls
+    /// [`Self::accept_admin`] after [`Self::admin_transfer_delay`] has elapsed.
+    /// The current admin can call [`Self::cancel_admin_transfer`] any time
+    /// before acceptance to abort it.
+    ///
+    /// # Why a delay
+    /// The previous immediate transfer meant a single compromised admin key
+    /// could hand control to an attacker-controlled address in one
+    /// transaction, with no window to notice or react. This now matches
+    /// `learn-token`, which already used the delayed pattern.
+    ///
+    /// Calling this again before a pending transfer is accepted overwrites it
+    /// with the new candidate and restarts the delay from now.
     ///
     /// # Arguments
     /// * `new_admin` - The new admin address
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    /// * If `new_admin` is the zero address
     pub fn transfer_admin(env: Env, new_admin: Address) {
         let admin: Address = env
             .storage()
@@ -1880,13 +1900,125 @@ impl ProgressTracker {
             panic!("cannot transfer admin to zero address");
         }
 
+        let initiated_at = env.ledger().timestamp();
+        let delay = Self::admin_transfer_delay(env.clone());
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::PendingAdmin,
+            &types::PendingAdminTransfer {
+                new_admin: new_admin.clone(),
+                initiated_at,
+            },
+        );
+
+        events::admin_transfer_initiated(
+            &env,
+            &admin,
+            &new_admin,
+            initiated_at,
+            initiated_at.saturating_add(delay),
+        );
+    }
+
+    /// Complete a pending admin transfer once its delay has elapsed (#423).
+    ///
+    /// Must be called by the pending `new_admin` address, proving control of
+    /// that key before it's granted admin rights.
+    ///
+    /// # Panics
+    /// * If there is no pending admin transfer
+    /// * If the caller is not the pending `new_admin`
+    /// * If the delay has not yet elapsed
+    pub fn accept_admin(env: Env) {
+        let pending: types::PendingAdminTransfer = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::PendingAdmin)
+            .expect("no pending admin transfer");
+        pending.new_admin.require_auth();
+
+        let delay = Self::admin_transfer_delay(env.clone());
+        let ready_at = pending.initiated_at.saturating_add(delay);
+        if env.ledger().timestamp() < ready_at {
+            panic!("admin transfer delay has not elapsed");
+        }
+
+        let previous_admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        types::write_entry(&env, &ProgressTrackerDataKey::Admin, &pending.new_admin);
         env.storage()
             .persistent()
-            .set(&ProgressTrackerDataKey::Admin, &new_admin);
+            .remove(&ProgressTrackerDataKey::PendingAdmin);
 
-        env.events().publish(
-            (Symbol::new(&env, "admin_transferred"),),
-            (admin, new_admin),
+        events::admin_transfer_accepted(&env, &previous_admin, &pending.new_admin);
+    }
+
+    /// Cancel a pending admin transfer before it is accepted (#423).
+    ///
+    /// Admin only. The primary safeguard against a compromised admin key: the
+    /// legitimate admin can abort an unauthorized `transfer_admin` call any
+    /// time before the pending `new_admin` accepts it.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    /// * If there is no pending admin transfer
+    pub fn cancel_admin_transfer(env: Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let pending: types::PendingAdminTransfer = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::PendingAdmin)
+            .expect("no pending admin transfer");
+        env.storage()
+            .persistent()
+            .remove(&ProgressTrackerDataKey::PendingAdmin);
+
+        events::admin_transfer_cancelled(&env, &admin, &pending.new_admin);
+    }
+
+    /// Returns the in-flight pending admin transfer, if any (#423).
+    pub fn pending_admin(env: Env) -> Option<types::PendingAdminTransfer> {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::PendingAdmin)
+    }
+
+    /// Returns the current admin-transfer delay, in seconds (#423).
+    pub fn admin_transfer_delay(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::AdminTransferDelay)
+            .unwrap_or(types::DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS)
+    }
+
+    /// Set the admin-transfer delay, in seconds. Admin only (#423).
+    ///
+    /// Applies to transfers initiated after this call; it does not change the
+    /// deadline of a transfer already pending.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin
+    pub fn set_admin_transfer_delay(env: Env, delay_seconds: u64) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&ProgressTrackerDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::AdminTransferDelay,
+            &delay_seconds,
         );
     }
 
@@ -2260,6 +2392,7 @@ impl ProgressTracker {
         quiz_id: Symbol,
         new_score: u32,
     ) {
+        Self::require_not_paused(&env);
         Self::require_learner_or_delegate(&env, &caller, &learner);
         Self::retake_quiz_in_place(&env, &learner, &course_id, quiz_id, new_score);
     }
@@ -3762,6 +3895,260 @@ mod tests {
         let stranger = Address::generate(&env);
 
         client.get_completion_percentage(&stranger, &course_id);
+    }
+
+    // ── Issue #422: pause/unpause must be observable ─────────────────────
+
+    #[test]
+    fn test_emergency_pause_emits_paused_event() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 42_000);
+
+        client.emergency_pause();
+
+        let all = env.events().all();
+        let last = all.last().expect("no event emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "paused"),).into_val(&env),
+                    (admin, 42_000u64).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unpause_emits_unpaused_event() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 43_500);
+
+        client.emergency_pause();
+        env.events().all(); // discard the pause event
+
+        client.unpause();
+
+        let all = env.events().all();
+        let last = all.last().expect("no event emitted");
+        assert_eq!(
+            vec![&env, last],
+            vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "unpaused"),).into_val(&env),
+                    (admin, 43_500u64).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    // ── Issue #423: delayed two-step admin transfer ──────────────────────
+
+    #[test]
+    fn test_transfer_admin_defers_the_handover() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        // The whole point of the delay: admin is unchanged until acceptance.
+        assert_eq!(client.admin(), admin);
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, new_admin);
+    }
+
+    #[test]
+    fn test_accept_admin_completes_the_transfer_after_the_delay() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        // Advance past the default 48h delay.
+        env.ledger().with_mut(|l| l.timestamp += 172_801);
+        client.accept_admin();
+
+        assert_eq!(client.admin(), new_admin);
+        assert!(client.pending_admin().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay has not elapsed")]
+    fn test_accept_admin_panics_before_the_delay_elapses() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        // One second short of the 48h delay.
+        env.ledger().with_mut(|l| l.timestamp += 172_799);
+        client.accept_admin();
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_aborts_the_handover() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        client.cancel_admin_transfer();
+
+        assert!(client.pending_admin().is_none());
+        assert_eq!(client.admin(), admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "no pending admin transfer")]
+    fn test_accept_admin_panics_after_cancellation() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&0);
+        client.transfer_admin(&new_admin);
+        client.cancel_admin_transfer();
+        client.accept_admin();
+    }
+
+    #[test]
+    fn test_pending_transfer_is_overwritten_by_a_later_candidate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let first = Address::generate(&env);
+        let second = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&first);
+        client.transfer_admin(&second);
+
+        // A second call replaces the candidate rather than queueing, so the
+        // first address can never accept.
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, second);
+    }
+
+    #[test]
+    fn test_default_admin_transfer_delay_matches_learn_token() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        assert_eq!(client.admin_transfer_delay(), 172_800);
+    }
+
+    // ── Issue #421: retakes must respect the pause state ─────────────────
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_retake_quiz_panics_when_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
+
+        client.emergency_pause();
+        // The learner has to be able to retry for real once the pause lifts
+        // (covered below), so this must be the pause rejecting the call and
+        // not some other guard firing first.
+        client.retake_quiz(&learner, &course_id, &quiz_1, &90);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_retake_quiz_for_panics_when_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
+        client.delegate_progress(&learner, &delegate);
+
+        client.emergency_pause();
+        client.retake_quiz_for(&delegate, &learner, &course_id, &quiz_1, &90);
+    }
+
+    #[test]
+    fn test_retake_quiz_succeeds_after_unpause() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
+
+        client.emergency_pause();
+        client.unpause();
+
+        // Unpaused retakes still work, so the new guard is not a blanket ban.
+        client.retake_quiz(&learner, &course_id, &quiz_1, &90);
+        assert_eq!(client.get_quiz_score(&learner, &course_id, &quiz_1), 90);
+    }
+
+    #[test]
+    fn test_retake_quiz_for_succeeds_after_unpause() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
+        client.delegate_progress(&learner, &delegate);
+
+        client.unpause();
+        // Delegate path still works once the pause lifts, mirroring the
+        // direct path above.
+        client.retake_quiz_for(&delegate, &learner, &course_id, &quiz_1, &90);
+        assert_eq!(client.get_quiz_score(&learner, &course_id, &quiz_1), 90);
     }
 
     // ── Issue #234: quiz retake support ───────────────────────────────────
