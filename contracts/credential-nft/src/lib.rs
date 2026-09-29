@@ -7,7 +7,9 @@ mod verify;
 mod xcall;
 
 use chainlearn_shared::ContractMetadata;
-use metadata::{remove_entry, CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
+use metadata::{
+    remove_entry, CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification,
+};
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
@@ -430,6 +432,9 @@ impl CredentialNft {
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+        if Self::is_paused(&env) {
+            panic!("already paused");
+        }
         metadata::write_entry(&env, &CredentialDataKey::Paused, &true);
         events::paused(&env, &admin, env.ledger().timestamp());
     }
@@ -442,6 +447,9 @@ impl CredentialNft {
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+        if !Self::is_paused(&env) {
+            panic!("not paused");
+        }
         metadata::write_entry(&env, &CredentialDataKey::Paused, &false);
         events::unpaused(&env, &admin, env.ledger().timestamp());
     }
@@ -848,6 +856,33 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "already paused")]
+    fn test_emergency_pause_rejects_double_pause() {
+        let env = Env::default();
+        let (admin, _contract_id, _tracker_id) = setup_contract(&env);
+        let contract_id = env.register_contract(None, CredentialNft);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        client.initialize(&admin, &Address::generate(&env));
+        env.mock_all_auths();
+
+        client.emergency_pause();
+        client.emergency_pause();
+    }
+
+    #[test]
+    #[should_panic(expected = "not paused")]
+    fn test_unpause_rejects_when_not_paused() {
+        let env = Env::default();
+        let (admin, _contract_id, _tracker_id) = setup_contract(&env);
+        let contract_id = env.register_contract(None, CredentialNft);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        client.initialize(&admin, &Address::generate(&env));
+        env.mock_all_auths();
+
+        client.unpause();
     }
 
     // ── Issue #423: delayed two-step admin transfer ──────────────────────
