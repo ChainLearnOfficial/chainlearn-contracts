@@ -50,9 +50,7 @@ impl ProgressTracker {
         // On-chain upgrade counter, separate from the crate's semantic
         // version above (#219). Starts at zero for a freshly initialized
         // contract; bumped whenever the contract is upgraded in place.
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Version, &0u32);
+        types::write_entry(&env, &ProgressTrackerDataKey::Version, &0u32);
         Ok(())
     }
 
