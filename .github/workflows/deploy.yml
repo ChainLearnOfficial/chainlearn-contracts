@@ -16,7 +16,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          target: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
 
       - name: Install Soroban CLI
         run: cargo install --locked soroban-cli
@@ -31,16 +31,85 @@ jobs:
         env:
           SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
           SOROBAN_NETWORK_PASSPHRASE: ${{ secrets.SOROBAN_NETWORK_PASSPHRASE }}
-          SOROBAN_SECRET_KEY: ${{ secrets.SOROBAN_SECRET_KEY }}
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
         run: |
+          set -euo pipefail
           echo "Deploying contracts..."
-          # Placeholder for the actual soroban deploy command. 
-          # Example:
-          # soroban contract deploy --wasm target/wasm32-unknown-unknown/release/chainlearn_contracts.wasm --source $SOROBAN_SECRET_KEY --rpc-url $SOROBAN_RPC_URL --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE"
-          echo "Deployment successful."
+
+          echo "Deploying learn-token..."
+          LEARN_TOKEN_ID=$(soroban contract deploy \
+            --wasm target/wasm32-unknown-unknown/release/learn_token.wasm \
+            --source "$STELLAR_SECRET_KEY" \
+            --rpc-url "$SOROBAN_RPC_URL" \
+            --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE")
+          echo "LEARN_TOKEN_ID=$LEARN_TOKEN_ID" >> "$GITHUB_ENV"
+          echo "learn-token deployed: $LEARN_TOKEN_ID"
+
+          echo "Deploying credential-nft..."
+          CREDENTIAL_NFT_ID=$(soroban contract deploy \
+            --wasm target/wasm32-unknown-unknown/release/credential_nft.wasm \
+            --source "$STELLAR_SECRET_KEY" \
+            --rpc-url "$SOROBAN_RPC_URL" \
+            --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE")
+          echo "CREDENTIAL_NFT_ID=$CREDENTIAL_NFT_ID" >> "$GITHUB_ENV"
+          echo "credential-nft deployed: $CREDENTIAL_NFT_ID"
+
+          echo "Deploying progress-tracker..."
+          PROGRESS_TRACKER_ID=$(soroban contract deploy \
+            --wasm target/wasm32-unknown-unknown/release/progress_tracker.wasm \
+            --source "$STELLAR_SECRET_KEY" \
+            --rpc-url "$SOROBAN_RPC_URL" \
+            --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE")
+          echo "PROGRESS_TRACKER_ID=$PROGRESS_TRACKER_ID" >> "$GITHUB_ENV"
+          echo "progress-tracker deployed: $PROGRESS_TRACKER_ID"
+
+          echo "All contracts deployed successfully."
 
       - name: Verify Deployment
+        env:
+          SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
+          SOROBAN_NETWORK_PASSPHRASE: ${{ secrets.SOROBAN_NETWORK_PASSPHRASE }}
         run: |
+          set -euo pipefail
           echo "Verifying deployment status..."
-          # Verification logic...
+
+          contracts=(
+            "learn-token:$LEARN_TOKEN_ID:target/wasm32-unknown-unknown/release/learn_token.wasm"
+            "credential-nft:$CREDENTIAL_NFT_ID:target/wasm32-unknown-unknown/release/credential_nft.wasm"
+            "progress-tracker:$PROGRESS_TRACKER_ID:target/wasm32-unknown-unknown/release/progress_tracker.wasm"
+          )
+
+          for entry in "${contracts[@]}"; do
+            IFS=":" read -r name id wasm_path <<< "$entry"
+            if [ -z "$id" ]; then
+              echo "Error: Contract ID for $name is empty."
+              exit 1
+            fi
+            echo "Verifying $name ($id) exists on-chain..."
+            tmp_wasm=$(mktemp)
+            soroban contract fetch \
+              --id "$id" \
+              --rpc-url "$SOROBAN_RPC_URL" \
+              --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE" \
+              --out-file "$tmp_wasm"
+
+            if [ ! -s "$tmp_wasm" ]; then
+              echo "Error: Failed to fetch bytecode for $name ($id) from chain."
+              rm -f "$tmp_wasm"
+              exit 1
+            fi
+
+            local_hash=$(sha256sum "$wasm_path" | awk '{print $1}')
+            fetched_hash=$(sha256sum "$tmp_wasm" | awk '{print $1}')
+            rm -f "$tmp_wasm"
+
+            if [ "$local_hash" != "$fetched_hash" ]; then
+              echo "Error: Hash mismatch for $name ($id)"
+              echo "  Local build: $local_hash"
+              echo "  On-chain:    $fetched_hash"
+              exit 1
+            fi
+            echo "Successfully verified $name ($id) on-chain (SHA256: $local_hash)."
+          done
+
           echo "Verification completed successfully."

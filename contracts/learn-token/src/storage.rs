@@ -28,6 +28,10 @@ pub enum TokenDataKey {
     Snapshot(u32),
     /// Maps (address, ledger_height) to the balance at that snapshot (#192).
     SnapshotBalance(SnapshotBalanceKey),
+    /// Distinct ledger heights at which snapshots have been recorded.
+    SnapshotLedgers,
+    /// Addresses snapshotted at a specific ledger height.
+    SnapshotAddresses(u32),
     /// Registry of every spender an owner has ever approved, so expired
     /// allowances can be swept in bulk without an on-chain way to enumerate
     /// storage keys (#201).
@@ -757,7 +761,86 @@ pub fn set_snapshot_balance(env: &Env, address: &Address, ledger_height: u32, ba
     env.storage().persistent().set(&key, &balance);
     if is_new {
         track_entry_created(env);
+
+        let mut ledgers: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&TokenDataKey::SnapshotLedgers)
+            .unwrap_or_else(|| Vec::new(env));
+        if !ledgers.contains(ledger_height) {
+            let ledgers_is_new = !env.storage().persistent().has(&TokenDataKey::SnapshotLedgers);
+            ledgers.push_back(ledger_height);
+            env.storage().persistent().set(&TokenDataKey::SnapshotLedgers, &ledgers);
+            if ledgers_is_new {
+                track_entry_created(env);
+            }
+        }
+
+        let addr_key = TokenDataKey::SnapshotAddresses(ledger_height);
+        let addr_is_new = !env.storage().persistent().has(&addr_key);
+        let mut addresses: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&addr_key)
+            .unwrap_or_else(|| Vec::new(env));
+        if !addresses.contains(address) {
+            addresses.push_back(address.clone());
+            env.storage().persistent().set(&addr_key, &addresses);
+            if addr_is_new {
+                track_entry_created(env);
+            }
+        }
     }
+}
+
+/// Prune snapshot entries recorded at ledger heights strictly less than `older_than_ledger`.
+///
+/// Returns the number of individual `SnapshotBalance` entries removed.
+pub fn prune_snapshots(env: &Env, older_than_ledger: u32) -> u32 {
+    let ledgers_opt: Option<Vec<u32>> = env
+        .storage()
+        .persistent()
+        .get(&TokenDataKey::SnapshotLedgers);
+    let Some(ledgers) = ledgers_opt else {
+        return 0;
+    };
+
+    let mut remaining_ledgers = Vec::new(env);
+    let mut removed_count: u32 = 0;
+
+    for ledger in ledgers.iter() {
+        if ledger < older_than_ledger {
+            let addr_key = TokenDataKey::SnapshotAddresses(ledger);
+            if let Some(addresses) = env.storage().persistent().get::<_, Vec<Address>>(&addr_key) {
+                for addr in addresses.iter() {
+                    let key = TokenDataKey::SnapshotBalance(SnapshotBalanceKey {
+                        address: addr,
+                        ledger_height: ledger,
+                    });
+                    if env.storage().persistent().has(&key) {
+                        env.storage().persistent().remove(&key);
+                        track_entry_removed(env);
+                        removed_count = removed_count.saturating_add(1);
+                    }
+                }
+                env.storage().persistent().remove(&addr_key);
+                track_entry_removed(env);
+            }
+        } else {
+            remaining_ledgers.push_back(ledger);
+        }
+    }
+
+    if remaining_ledgers.len() != ledgers.len() {
+        if remaining_ledgers.is_empty() {
+            env.storage().persistent().remove(&TokenDataKey::SnapshotLedgers);
+            track_entry_removed(env);
+        } else {
+            env.storage().persistent().set(&TokenDataKey::SnapshotLedgers, &remaining_ledgers);
+        }
+    }
+
+    removed_count
 }
 
 /// Get a snapshot of an address's balance at a given ledger height.

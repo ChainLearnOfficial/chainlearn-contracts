@@ -288,3 +288,18 @@ where
         bump_storage_size(env, 1);
     }
 }
+
+/// Remove `key` from persistent storage, decrementing [`get_storage_size`]
+/// iff `key` was present. Use this (instead of
+/// `env.storage().persistent().remove` directly) for every persistent removal
+/// so the counter stays accurate.
+pub fn remove_entry<K>(env: &Env, key: &K)
+where
+    K: IntoVal<Env, Val>,
+{
+    let existed = env.storage().persistent().has(key);
+    env.storage().persistent().remove(key);
+    if existed {
+        bump_storage_size(env, -1);
+    }
+}

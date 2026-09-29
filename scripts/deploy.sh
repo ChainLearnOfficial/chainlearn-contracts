@@ -31,6 +31,7 @@ else
 fi
 
 # Verify secret key is available
+STELLAR_SECRET_KEY="${STELLAR_SECRET_KEY:-${SOROBAN_SECRET_KEY:-}}"
 if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
     echo "Error: STELLAR_SECRET_KEY environment variable is not set."
     echo "Export your Stellar secret key before running this script."
