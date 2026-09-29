@@ -7,7 +7,9 @@ mod verify;
 mod xcall;
 
 use chainlearn_shared::ContractMetadata;
-use metadata::{remove_entry, CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification};
+use metadata::{
+    remove_entry, CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification,
+};
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
@@ -422,7 +424,8 @@ impl CredentialNft {
         }
     }
 
-    /// Pause all state-changing operations. Admin only.
+    /// Pause all state-changing operations.
+    /// Admin only.
     pub fn emergency_pause(env: Env) {
         let admin: Address = env
             .storage()
