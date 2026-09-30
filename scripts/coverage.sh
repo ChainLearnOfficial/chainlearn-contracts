@@ -15,6 +15,7 @@ cargo tarpaulin \
   --out Lcov \
   --exclude-files "tests/*" \
   --exclude-files "scripts/*" \
+  --exclude-files "vendor/*" \
   --fail-under 80
 
 echo "Coverage report generated in tarpaulin-report.html, cobertura.xml, and lcov.info"
