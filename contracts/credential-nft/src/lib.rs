@@ -426,7 +426,8 @@ impl CredentialNft {
         }
     }
 
-    /// Pause all state-changing operations. Admin only.
+    /// Pause all state-changing operations.
+    /// Admin only.
     pub fn emergency_pause(env: Env) {
         let admin: Address = env
             .storage()
