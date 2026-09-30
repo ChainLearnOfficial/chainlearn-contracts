@@ -1268,6 +1268,7 @@ impl ProgressTracker {
     /// * `course_id` - The course to update
     /// * `content_hash` - Hash of the course content, or `none` to unset
     pub fn set_course_content_hash(env: Env, course_id: Symbol, content_hash: Symbol) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -1305,6 +1306,7 @@ impl ProgressTracker {
     /// * If the course does not exist
     /// * If difficulty is not 0, 1, or 2
     pub fn set_course_difficulty(env: Env, course_id: Symbol, difficulty: u32) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -1411,6 +1413,7 @@ impl ProgressTracker {
     }
 
     pub fn set_course_tags(env: Env, course_id: Symbol, tags: Vec<Symbol>) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -1504,6 +1507,7 @@ impl ProgressTracker {
     /// * `course_id` - The course to update
     /// * `new_version` - The new version number
     pub fn update_course_version(env: Env, course_id: Symbol, new_version: u32) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -1571,6 +1575,7 @@ impl ProgressTracker {
     /// assert_eq!(client.get_prerequisites(&Symbol::new(&env, "rust_201")), prereqs);
     /// ```
     pub fn set_prerequisites(env: Env, course_id: Symbol, prerequisites: Vec<Symbol>) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -4135,6 +4140,82 @@ mod tests {
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         assert_eq!(client.admin_transfer_delay(), 172_800);
+    }
+
+    // ── Issue #457: course mutations must respect the pause state ───────
+
+    fn paused_course(env: &Env) -> (Address, Symbol) {
+        let (_admin, contract_id) = setup_contract(env);
+        let client = ProgressTrackerClient::new(env, &contract_id);
+        env.mock_all_auths();
+        let course_id = create_test_course(env, &client);
+        client.emergency_pause();
+        (contract_id, course_id)
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_set_course_content_hash_panics_when_paused() {
+        let env = Env::default();
+        let (contract_id, course_id) = paused_course(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash"));
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_set_course_difficulty_panics_when_paused() {
+        let env = Env::default();
+        let (contract_id, course_id) = paused_course(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        client.set_course_difficulty(&course_id, &2);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_set_course_tags_panics_when_paused() {
+        let env = Env::default();
+        let (contract_id, course_id) = paused_course(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        client.set_course_tags(&course_id, &Vec::new(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_update_course_version_panics_when_paused() {
+        let env = Env::default();
+        let (contract_id, course_id) = paused_course(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        client.update_course_version(&course_id, &2);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_set_prerequisites_panics_when_paused() {
+        let env = Env::default();
+        let (contract_id, course_id) = paused_course(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        client.set_prerequisites(&course_id, &Vec::new(&env));
+    }
+
+    #[test]
+    fn test_course_mutations_succeed_after_unpause() {
+        let env = Env::default();
+        let (contract_id, course_id) = paused_course(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        client.unpause();
+
+        let content_hash = Symbol::new(&env, "new_hash");
+        client.set_course_content_hash(&course_id, &content_hash);
+        client.set_course_difficulty(&course_id, &2);
+        client.set_course_tags(&course_id, &Vec::new(&env));
+        client.update_course_version(&course_id, &2);
+        client.set_prerequisites(&course_id, &Vec::new(&env));
+
+        let course = client.get_course(&course_id);
+        assert_eq!(course.content_hash, content_hash);
+        assert_eq!(course.difficulty, 2);
+        assert_eq!(course.version, 2);
     }
 
     // ── Issue #421: retakes must respect the pause state ─────────────────
