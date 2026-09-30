@@ -1966,9 +1966,7 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         types::write_entry(&env, &ProgressTrackerDataKey::Admin, &pending.new_admin);
-        env.storage()
-            .persistent()
-            .remove(&ProgressTrackerDataKey::PendingAdmin);
+        types::remove_entry(&env, &ProgressTrackerDataKey::PendingAdmin);
 
         events::admin_transfer_accepted(&env, &previous_admin, &pending.new_admin);
     }
@@ -1995,9 +1993,7 @@ impl ProgressTracker {
             .persistent()
             .get(&ProgressTrackerDataKey::PendingAdmin)
             .expect("no pending admin transfer");
-        env.storage()
-            .persistent()
-            .remove(&ProgressTrackerDataKey::PendingAdmin);
+        types::remove_entry(&env, &ProgressTrackerDataKey::PendingAdmin);
 
         events::admin_transfer_cancelled(&env, &admin, &pending.new_admin);
     }
@@ -2070,7 +2066,8 @@ impl ProgressTracker {
         Self::require_not_paused(&env);
         learner.require_auth();
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
             &delegate,
         );
@@ -2102,9 +2099,10 @@ impl ProgressTracker {
         Self::require_not_paused(&env);
         learner.require_auth();
 
-        env.storage()
-            .persistent()
-            .remove(&ProgressTrackerDataKey::DelegatedTo(learner.clone()));
+        types::remove_entry(
+            &env,
+            &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
+        );
 
         env.events()
             .publish((Symbol::new(&env, "delegation_revoked"),), (&learner,));

@@ -56,6 +56,10 @@ pub struct ClaimEstimate {
     /// Human-readable reason `would_succeed` is false. Empty string if `would_succeed` is true.
     pub failure_reason: SorobanString,
     /// Estimated gas cost for executing the reward claim (#214).
+    ///
+    /// Note: This is a rough, constant compile-time estimate (50,000 instructions on success,
+    /// 0 on failure) for budgeting and cost-planning purposes, not a dynamic measurement
+    /// of actual runtime CPU, memory, or storage resource consumption.
     pub estimated_gas: u64,
 }
 
@@ -378,6 +382,21 @@ impl LearnToken {
         }
         let balance = storage::get_balance(&env, &address);
         storage::set_snapshot_balance(&env, &address, ledger_height, balance);
+    }
+
+    /// Prune old snapshot balance entries created before `older_than_ledger`. Admin only.
+    ///
+    /// # Arguments
+    /// * `older_than_ledger` - Ledger height threshold below which snapshots are removed
+    ///
+    /// # Returns
+    /// The number of snapshot balance entries removed.
+    pub fn prune_snapshots(env: Env, older_than_ledger: u32) -> u32 {
+        let admin = storage::get_admin(&env);
+        admin.require_auth();
+        let removed = storage::prune_snapshots(&env, older_than_ledger);
+        events::snapshots_pruned(&env, older_than_ledger, removed);
+        removed
     }
 
     // ── SEP-41 Standard Interface ─────────────────────────────────────────
@@ -894,9 +913,10 @@ impl LearnToken {
     /// Preview a `claim_reward` call without executing it or changing any
     /// state (#199).
     ///
-    /// See [`ClaimEstimate`] for why this reports the reward amount rather
-    /// than a raw gas/CPU figure — that number isn't something a Soroban
-    /// contract can compute about its own execution. Re-runs exactly the
+    /// See [`ClaimEstimate`] for details on reported fields. Note that `estimated_gas`
+    /// is a rough constant estimate (50,000 instructions on success, 0 on failure)
+    /// intended for baseline resource planning, rather than a dynamically measured
+    /// runtime metric. Re-runs exactly the
     /// same checks `claim_reward` does (already-claimed, quiz score via the
     /// progress-tracker, score bounds, reward cap, supply cap) so a caller
     /// can tell whether the real call would succeed, and for what amount,
@@ -1433,7 +1453,7 @@ impl LearnToken {
         if exists && is_expired {
             events::allowance_expired(&env, &owner, &spender, expiration_ledger);
             let mut spenders = storage::get_allowance_spenders(&env, &owner);
-            if let Some(pos) = spenders.iter().position(|s| s == &spender) {
+            if let Some(pos) = spenders.first_index_of(&spender) {
                 spenders.remove(pos);
                 storage::set_allowance_spenders(&env, &owner, &spenders);
             }

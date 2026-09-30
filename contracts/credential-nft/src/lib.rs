@@ -192,9 +192,11 @@ impl CredentialNft {
             issuer_name,
         };
 
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::Display(credential_id), &display);
+        metadata::write_entry(
+            &env,
+            &CredentialDataKey::Display(credential_id),
+            &display,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "credential_display_set"),),
@@ -508,7 +510,8 @@ impl CredentialNft {
 
         let initiated_at = env.ledger().timestamp();
         let delay = Self::admin_transfer_delay(env.clone());
-        env.storage().persistent().set(
+        metadata::write_entry(
+            &env,
             &CredentialDataKey::PendingAdmin,
             &metadata::PendingAdminTransfer {
                 new_admin: new_admin.clone(),

@@ -372,3 +372,13 @@ pub fn admin_transfer_delay_updated(env: &Env, old_delay_seconds: u64, new_delay
     env.events()
         .publish(topics, (old_delay_seconds, new_delay_seconds));
 }
+
+/// Emitted when old snapshot entries are pruned.
+///
+/// Topics: ["snapshots_pruned"]
+/// Data: (older_than_ledger, removed_count)
+pub fn snapshots_pruned(env: &Env, older_than_ledger: u32, removed_count: u32) {
+    let topics = (Symbol::new(env, "snapshots_pruned"),);
+    env.events()
+        .publish(topics, (older_than_ledger, removed_count));
+}
