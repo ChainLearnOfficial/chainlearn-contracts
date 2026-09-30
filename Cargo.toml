@@ -118,6 +118,10 @@ name = "event_emission_tests"
 path = "tests/unit/event_emission_tests.rs"
 
 [[test]]
+name = "error_message_tests"
+path = "tests/unit/error_message_tests.rs"
+
+[[test]]
 name = "gas_benchmarks"
 path = "tests/benchmarks/gas_benchmarks.rs"
 

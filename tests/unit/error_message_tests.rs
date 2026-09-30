@@ -360,7 +360,8 @@ mod error_message_tests {
     #[should_panic(expected = "score must be greater than 0")]
     fn test_learn_token_zero_score_error_message() {
         let env = Env::default();
-        let (_admin, _contract_id, pt_contract_id) = setup_token(&env);
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
 
         let learner = Address::generate(&env);
@@ -376,8 +377,10 @@ mod error_message_tests {
         pt_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(&learner, &course_id);
         
-        // Submit quiz with score 0 (invalid)
+        // progress-tracker accepts zero scores; learn-token rejects them when
+        // calculating a reward from the cross-contract score lookup.
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id, &0);
+        client.claim_reward(&learner, &course_id, &quiz_id);
     }
 
     #[test]
