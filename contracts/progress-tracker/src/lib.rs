@@ -1846,6 +1846,9 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+        if Self::is_paused(&env) {
+            panic!("already paused");
+        }
         types::write_entry(&env, &ProgressTrackerDataKey::Paused, &true);
         events::paused(&env, &admin, env.ledger().timestamp());
     }
@@ -1858,6 +1861,9 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+        if !Self::is_paused(&env) {
+            panic!("not paused");
+        }
         types::write_entry(&env, &ProgressTrackerDataKey::Paused, &false);
         events::unpaused(&env, &admin, env.ledger().timestamp());
     }
@@ -3067,7 +3073,13 @@ mod tests {
         quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
         quiz_ids.push_back(Symbol::new(&env, "quiz_b"));
         quiz_ids.push_back(Symbol::new(&env, "quiz_a"));
-        client.create_course(&Symbol::new(&env, "dup_quiz"), &1, &3, &module_ids, &quiz_ids);
+        client.create_course(
+            &Symbol::new(&env, "dup_quiz"),
+            &1,
+            &3,
+            &module_ids,
+            &quiz_ids,
+        );
     }
 
     #[test]
@@ -3993,6 +4005,29 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "already paused")]
+    fn test_emergency_pause_rejects_double_pause() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        client.emergency_pause();
+        client.emergency_pause();
+    }
+
+    #[test]
+    #[should_panic(expected = "not paused")]
+    fn test_unpause_rejects_when_not_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        client.unpause();
     }
 
     // ── Issue #423: delayed two-step admin transfer ──────────────────────
