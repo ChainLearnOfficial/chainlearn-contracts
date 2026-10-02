@@ -342,7 +342,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_admin_cannot_set_max_supply_below_current_supply() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -407,7 +406,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_set_max_supply_rejects_exceeding_2x_increase() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -602,7 +600,7 @@ mod token_unit_tests {
         assert_eq!(client.allowance_spender_count(&owner), 2);
 
         env.ledger().with_mut(|l| {
-            l.sequence_number = 20;
+            l.sequence_number = 11;
         });
 
         let removed = client.cleanup_expired_allowances(&owner);
@@ -637,8 +635,7 @@ mod token_unit_tests {
 
         assert!(result.is_err(), "second initialize call should fail");
         let contract_err = result
-            .err()
-            .expect("expected an error")
+            .expect_err("expected an error")
             .expect("expected a typed contract error, not a host trap");
         assert_eq!(contract_err, learn_token::ContractError::AlreadyInitialized);
     }
@@ -891,8 +888,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,18 +923,27 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &0,
         );
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
@@ -948,12 +952,13 @@ mod token_unit_tests {
         let voter = Address::generate(&env);
         env.mock_all_auths();
         client.mint(&admin, &voter, &100);
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Paused vote"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &9,
         );
         client.pause(&admin);
         client.vote(&voter, &proposal_id, &0);
@@ -966,16 +971,66 @@ mod token_unit_tests {
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Paused execution"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &9,
         );
         env.ledger().with_mut(|ledger| ledger.timestamp = 100);
         client.pause(&admin);
         client.execute_proposal(&proposal_id);
+    }
+
+    #[test]
+    fn test_batch_claim_reward_appends_claim_records_to_history() {
+        let env = Env::default();
+        let (_admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "course_batch");
+        let quiz_1 = Symbol::new(&env, "quiz_b1");
+        let quiz_2 = Symbol::new(&env, "quiz_b2");
+
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_b1"));
+        let mut quiz_ids_src = Vec::new(&env);
+        quiz_ids_src.push_back(quiz_1.clone());
+        quiz_ids_src.push_back(quiz_2.clone());
+
+        pt_client.create_course(&course_id, &1, &2, &module_ids, &quiz_ids_src);
+        pt_client.enroll(&learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_1, &80);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_2, &95);
+
+        env.ledger().with_mut(|l| l.timestamp = 1_500);
+
+        let mut claim_ids = Vec::new(&env);
+        claim_ids.push_back(quiz_1.clone());
+        claim_ids.push_back(quiz_2.clone());
+
+        let successful = client.batch_claim_reward(&learner, &course_id, &claim_ids);
+        assert_eq!(successful.len(), 2);
+
+        // Verify history contains records from batch_claim_reward (#502)
+        let history = client.get_claim_history(&learner);
+        assert_eq!(history.len(), 2);
+        let rec1 = history.get(0).unwrap();
+        let rec2 = history.get(1).unwrap();
+        assert_eq!(rec1.course_id, course_id);
+        assert_eq!(rec1.quiz_id, quiz_1);
+        assert_eq!(rec1.amount, 8_000);
+        assert_eq!(rec1.timestamp, 1_500);
+        assert_eq!(rec2.course_id, course_id);
+        assert_eq!(rec2.quiz_id, quiz_2);
+        assert_eq!(rec2.amount, 9_500);
+        assert_eq!(rec2.timestamp, 1_500);
     }
 
     #[test]
@@ -1549,6 +1604,7 @@ mod token_unit_tests {
         client.mint(&admin, &carol, &50);
 
         // The marker alone stores no balances.
+        env.ledger().with_mut(|l| l.sequence_number = 42);
         client.snapshot(&42);
         assert_eq!(client.balance_at(&alice, &42), 0);
         assert_eq!(client.balance_at(&bob, &42), 0);
