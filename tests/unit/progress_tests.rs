@@ -760,8 +760,7 @@ mod progress_unit_tests {
 
         assert!(result.is_err(), "second initialize call should fail");
         let contract_err = result
-            .err()
-            .expect("expected an error")
+            .expect_err("expected an error")
             .expect("expected a typed contract error, not a host trap");
         assert_eq!(
             contract_err,
@@ -1698,6 +1697,31 @@ mod progress_unit_tests {
         let learner = Address::generate(&env);
 
         // No delegation was ever set -- revoking must not panic.
+        client.revoke_delegation(&learner);
+        assert_eq!(client.delegated_to(&learner), None);
+    }
+
+    #[test]
+    fn test_revoke_delegation_succeeds_while_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &delegate);
+        assert_eq!(client.delegated_to(&learner), Some(delegate));
+
+        // Emergency pause
+        client.emergency_pause();
+
+        // Attempting to delegate while paused must fail
+        let second_delegate = Address::generate(&env);
+        assert!(client.try_delegate_progress(&learner, &second_delegate).is_err());
+
+        // Revoking delegation must succeed even while paused (#492)
         client.revoke_delegation(&learner);
         assert_eq!(client.delegated_to(&learner), None);
     }

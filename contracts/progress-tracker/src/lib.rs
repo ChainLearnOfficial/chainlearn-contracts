@@ -2080,6 +2080,9 @@ impl ProgressTracker {
 
     /// Revoke `learner`'s active progress delegation, if any. Learner only.
     ///
+    /// Permitted even while the contract is paused so that learners can revoke
+    /// compromised or malicious delegates during an emergency (#492).
+    ///
     /// After this, only `learner` themselves may call the state-changing
     /// progress functions for their own progress. A no-op is not treated as
     /// an error: revoking when there is no active delegation simply leaves
@@ -2096,7 +2099,6 @@ impl ProgressTracker {
     /// client.revoke_delegation(&learner);
     /// ```
     pub fn revoke_delegation(env: Env, learner: Address) {
-        Self::require_not_paused(&env);
         learner.require_auth();
 
         types::remove_entry(
