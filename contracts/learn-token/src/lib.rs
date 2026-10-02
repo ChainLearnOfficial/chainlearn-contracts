@@ -1621,6 +1621,7 @@ impl LearnToken {
         cliff_timestamp: u64,
         duration_seconds: u64,
     ) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
