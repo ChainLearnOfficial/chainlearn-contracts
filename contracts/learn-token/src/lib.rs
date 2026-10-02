@@ -1877,6 +1877,10 @@ impl LearnToken {
             }
         }
 
+        if winning_votes == 0 {
+            panic!("no votes cast");
+        }
+
         proposal.executed = true;
         proposal.winning_choice = winning_choice;
         storage::set_proposal(&env, proposal_id, &proposal);
@@ -3419,6 +3423,34 @@ mod tests {
         let prop = client.get_proposal(&prop_id).unwrap();
         assert!(prop.executed);
         assert_eq!(prop.winning_choice, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "no votes cast")]
+    fn test_execute_proposal_zero_votes_panics() {
+        let env = Env::default();
+        let (_admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        env.mock_all_auths();
+
+        env.ledger().with_mut(|li| li.sequence_number = 99);
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        env.ledger().with_mut(|li| li.sequence_number = 100);
+
+        let start = 1_000u64;
+        let end = 2_000u64;
+        let prop_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Zero Vote Proposal"),
+            &2,
+            &start,
+            &end,
+            &snapshot_ledger,
+        );
+
+        // Advance time past end_time without any votes
+        env.ledger().with_mut(|li| li.timestamp = 2_500);
+        client.execute_proposal(&prop_id);
     }
 
     // ── Issue #254: storage size tracking ─────────────────────────────────
