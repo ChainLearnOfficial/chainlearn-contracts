@@ -756,3 +756,5 @@ For comprehensive integration examples, see the `examples/` directory in the rep
 - Rust client (`examples/rust_client_example.rs`)
 - JavaScript client (`examples/javascript_client_example.js`)
 - CLI examples (`examples/cli_usage_examples.sh`)
+
+<!-- Updated documentation references -->
