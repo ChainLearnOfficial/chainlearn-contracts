@@ -342,7 +342,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_admin_cannot_set_max_supply_below_current_supply() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -407,7 +406,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_set_max_supply_rejects_exceeding_2x_increase() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -602,7 +600,7 @@ mod token_unit_tests {
         assert_eq!(client.allowance_spender_count(&owner), 2);
 
         env.ledger().with_mut(|l| {
-            l.sequence_number = 20;
+            l.sequence_number = 11;
         });
 
         let removed = client.cleanup_expired_allowances(&owner);
@@ -637,8 +635,7 @@ mod token_unit_tests {
 
         assert!(result.is_err(), "second initialize call should fail");
         let contract_err = result
-            .err()
-            .expect("expected an error")
+            .expect_err("expected an error")
             .expect("expected a typed contract error, not a host trap");
         assert_eq!(contract_err, learn_token::ContractError::AlreadyInitialized);
     }
@@ -891,8 +888,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,18 +923,27 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &0,
         );
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
@@ -948,12 +952,13 @@ mod token_unit_tests {
         let voter = Address::generate(&env);
         env.mock_all_auths();
         client.mint(&admin, &voter, &100);
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Paused vote"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &9,
         );
         client.pause(&admin);
         client.vote(&voter, &proposal_id, &0);
@@ -966,15 +971,40 @@ mod token_unit_tests {
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Paused execution"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &9,
         );
         env.ledger().with_mut(|ledger| ledger.timestamp = 100);
         client.pause(&admin);
+        client.execute_proposal(&proposal_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "no votes cast")]
+    fn test_execute_proposal_fails_with_zero_votes() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        env.ledger().with_mut(|l| l.sequence_number = 100);
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Unvoted proposal"),
+            &2,
+            &0,
+            &1000,
+            &99,
+        );
+
+        // Fast forward timestamp past voting end_time
+        env.ledger().with_mut(|l| l.timestamp = 2000);
+
+        // Attempting to execute with zero votes must panic (#503)
         client.execute_proposal(&proposal_id);
     }
 
@@ -1549,6 +1579,7 @@ mod token_unit_tests {
         client.mint(&admin, &carol, &50);
 
         // The marker alone stores no balances.
+        env.ledger().with_mut(|l| l.sequence_number = 42);
         client.snapshot(&42);
         assert_eq!(client.balance_at(&alice, &42), 0);
         assert_eq!(client.balance_at(&bob, &42), 0);

@@ -1877,6 +1877,10 @@ impl LearnToken {
             }
         }
 
+        if winning_votes == 0 {
+            panic!("no votes cast");
+        }
+
         proposal.executed = true;
         proposal.winning_choice = winning_choice;
         storage::set_proposal(&env, proposal_id, &proposal);
