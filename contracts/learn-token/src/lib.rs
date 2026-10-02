@@ -843,6 +843,7 @@ impl LearnToken {
         course_id: Symbol,
         quiz_ids: soroban_sdk::Vec<Symbol>,
     ) -> soroban_sdk::Vec<Symbol> {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         let mut successful = soroban_sdk::Vec::new(&env);
