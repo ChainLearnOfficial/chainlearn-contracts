@@ -1,6 +1,6 @@
 //! Unit tests for the learn-token contract.
 
-use learn_token::{LearnToken, LearnTokenClient};
+use learn_token::{AdminInfo, AdminRole, LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -342,7 +342,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_admin_cannot_set_max_supply_below_current_supply() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -407,7 +406,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_set_max_supply_rejects_exceeding_2x_increase() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -602,7 +600,7 @@ mod token_unit_tests {
         assert_eq!(client.allowance_spender_count(&owner), 2);
 
         env.ledger().with_mut(|l| {
-            l.sequence_number = 20;
+            l.sequence_number = 11;
         });
 
         let removed = client.cleanup_expired_allowances(&owner);
@@ -891,8 +889,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,18 +924,27 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &0,
         );
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
@@ -948,12 +953,13 @@ mod token_unit_tests {
         let voter = Address::generate(&env);
         env.mock_all_auths();
         client.mint(&admin, &voter, &100);
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Paused vote"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &9,
         );
         client.pause(&admin);
         client.vote(&voter, &proposal_id, &0);
@@ -966,16 +972,161 @@ mod token_unit_tests {
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 10);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Paused execution"),
             &2,
             &0,
             &100,
-            &env.ledger().sequence(),
+            &9,
         );
         env.ledger().with_mut(|ledger| ledger.timestamp = 100);
         client.pause(&admin);
         client.execute_proposal(&proposal_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_set_transfer_restriction_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        client.pause(&admin);
+        client.set_transfer_restriction(&learn_token::TransferRestriction::WhitelistOnly);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_add_to_whitelist_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        client.pause(&admin);
+        client.add_to_whitelist(&user);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_remove_from_whitelist_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        client.add_to_whitelist(&user);
+        client.pause(&admin);
+        client.remove_from_whitelist(&user);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_snapshot_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 10);
+        client.pause(&admin);
+        client.snapshot(&10);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_record_balance_snapshot_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.sequence_number = 10);
+        client.pause(&admin);
+        client.record_balance_snapshot(&user, &10);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_grant_role_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        client.pause(&admin);
+        client.grant_role(&admin, &user, &AdminRole::Pauser);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_revoke_role_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        client.grant_role(&admin, &user, &AdminRole::Pauser);
+        client.pause(&admin);
+        client.revoke_role(&admin, &user, &AdminRole::Pauser);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_add_admin_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        client.pause(&admin);
+        client.add_admin(&admin, &AdminInfo { address: user, role: AdminRole::Admin });
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_remove_admin_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+        client.add_admin(&admin, &AdminInfo { address: user.clone(), role: AdminRole::Admin });
+        client.pause(&admin);
+        client.remove_admin(&admin, &AdminInfo { address: user, role: AdminRole::Admin });
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_increase_allowance_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+        client.pause(&admin);
+        client.increase_allowance(&owner, &spender, &100, &1000);
+    }
+
+    #[test]
+    fn test_unpause_restores_admin_and_config_operations() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.pause(&admin);
+        assert!(client.try_add_to_whitelist(&user).is_err());
+        assert!(client.try_increase_allowance(&user, &spender, &50, &1000).is_err());
+
+        client.unpause(&admin);
+        client.add_to_whitelist(&user);
+        assert!(client.is_whitelisted(&user));
+        client.increase_allowance(&user, &spender, &50, &1000);
+        assert_eq!(client.allowance(&user, &spender), 50);
     }
 
     #[test]
@@ -1549,6 +1700,7 @@ mod token_unit_tests {
         client.mint(&admin, &carol, &50);
 
         // The marker alone stores no balances.
+        env.ledger().with_mut(|l| l.sequence_number = 42);
         client.snapshot(&42);
         assert_eq!(client.balance_at(&alice, &42), 0);
         assert_eq!(client.balance_at(&bob, &42), 0);

@@ -223,6 +223,7 @@ impl LearnToken {
     pub fn set_transfer_restriction(env: Env, restriction: storage::TransferRestriction) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        Self::require_not_paused(&env);
         if restriction == storage::TransferRestriction::WhitelistOnly {
             Self::stage_whitelist_restriction(&env, &restriction);
             return;
@@ -300,6 +301,7 @@ impl LearnToken {
     pub fn add_to_whitelist(env: Env, address: Address) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        Self::require_not_paused(&env);
         storage::add_to_whitelist(&env, &address);
         events::whitelist_updated(&env, &address, true);
     }
@@ -311,6 +313,7 @@ impl LearnToken {
     pub fn remove_from_whitelist(env: Env, address: Address) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        Self::require_not_paused(&env);
         storage::remove_from_whitelist(&env, &address);
         events::whitelist_updated(&env, &address, false);
     }
@@ -345,6 +348,7 @@ impl LearnToken {
     pub fn snapshot(env: Env, ledger_height: u32) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        Self::require_not_paused(&env);
         if ledger_height != env.ledger().sequence() {
             panic!("snapshot ledger must match the current ledger");
         }
@@ -377,6 +381,7 @@ impl LearnToken {
     pub fn record_balance_snapshot(env: Env, address: Address, ledger_height: u32) {
         let admin = storage::get_admin(&env);
         admin.require_auth();
+        Self::require_not_paused(&env);
         if ledger_height != env.ledger().sequence() {
             panic!("snapshot ledger must match the current ledger");
         }
@@ -992,6 +997,7 @@ impl LearnToken {
     /// Grant an admin role to an address. Admin only.
     pub fn grant_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
         }
@@ -1002,6 +1008,7 @@ impl LearnToken {
     /// Revoke an admin role from an address. Admin only.
     pub fn revoke_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
         }
@@ -1014,6 +1021,7 @@ impl LearnToken {
     /// Requires authorization from an existing Admin.
     pub fn add_admin(env: Env, caller: Address, admin_info: AdminInfo) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
         }
@@ -1027,6 +1035,7 @@ impl LearnToken {
     /// Requires authorization from an existing Admin.
     pub fn remove_admin(env: Env, caller: Address, admin_info: AdminInfo) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
         }
@@ -1411,6 +1420,7 @@ impl LearnToken {
         expiration_ledger: u32,
     ) {
         owner.require_auth();
+        Self::require_not_paused(&env);
 
         if additional_amount < 0 {
             panic!("negative amount");
