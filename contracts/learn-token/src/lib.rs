@@ -897,6 +897,16 @@ impl LearnToken {
             total_minted += reward_amount;
 
             storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
+            storage::append_claim_record(
+                &env,
+                &learner,
+                &storage::ClaimRecord {
+                    course_id: course_id.clone(),
+                    quiz_id: quiz_id.clone(),
+                    amount: reward_amount,
+                    timestamp: env.ledger().timestamp(),
+                },
+            );
             events::reward_claimed(&env, &learner, &quiz_id, score, reward_amount, &course_id);
             successful.push_back(quiz_id);
         }
