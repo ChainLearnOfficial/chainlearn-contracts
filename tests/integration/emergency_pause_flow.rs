@@ -26,7 +26,7 @@ fn test_token_emergency_pause_prevents_state_changes() {
     env.mock_all_auths();
 
     let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
-    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+    let _progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
 
     // Mint tokens to the learner so we have something to transfer/burn.
     token_client.mint(admin, learner, &10_000);
@@ -150,6 +150,17 @@ fn test_progress_tracker_emergency_pause() {
     progress_client.complete_module(learner, &course_id, &Symbol::new(env, "mod_basics"));
     let progress = progress_client.get_progress(learner, &course_id);
     assert!(progress.overall_progress > 0);
+
+    // ── Delegation pause flow (#492) ──
+    let delegate = Address::generate(env);
+    progress_client.delegate_progress(learner, &delegate);
+    assert_eq!(progress_client.delegated_to(learner), Some(delegate));
+
+    // Pause again: revoking delegation remains allowed during emergency pause
+    progress_client.emergency_pause();
+    progress_client.revoke_delegation(learner);
+    assert_eq!(progress_client.delegated_to(learner), None);
+    progress_client.unpause();
 }
 
 // ── Issue #281: credential-nft emergency pause ───────────────────────────
