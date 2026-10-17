@@ -5,7 +5,7 @@ use progress_tracker::ProgressTracker;
 use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString};
 
 #[test]
-#[should_panic(expected = "insufficient balance")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn test_underflow_balance_subtraction() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -29,7 +29,7 @@ fn test_underflow_balance_subtraction() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient balance")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn test_underflow_balance_burn() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -79,7 +79,7 @@ fn test_overflow_supply() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient allowance")]
+#[should_panic(expected = "Error(Contract, #6)")]
 fn test_underflow_allowance_spend() {
     let env = Env::default();
     let admin = Address::generate(&env);

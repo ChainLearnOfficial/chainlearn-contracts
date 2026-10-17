@@ -60,7 +60,7 @@ fn test_end_to_end_reward_flow() {
 }
 
 #[test]
-#[should_panic(expected = "reward already claimed")]
+#[should_panic(expected = "Error(Contract, #12)")]
 fn test_double_claim_prevented() {
     let setup = fixtures::setup_chainlearn_env();
     let env = &setup.env;

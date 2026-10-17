@@ -96,7 +96,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient balance")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_transfer_insufficient_balance() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -132,7 +132,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "reward already claimed")]
+    #[should_panic(expected = "Error(Contract, #12)")]
     fn test_claim_reward_double_claim() {
         let env = Env::default();
         let (_admin, contract_id, pt_contract_id) = setup_token(&env);
@@ -187,7 +187,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient allowance")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_transfer_from_insufficient_allowance() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -204,7 +204,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient allowance")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_transfer_from_expired_allowance() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -724,7 +724,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient balance")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_security_transfer_balance_underflow_reverts() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -767,7 +767,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient balance")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_security_burn_balance_underflow_reverts() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -891,8 +891,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,6 +926,16 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
@@ -939,7 +947,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
