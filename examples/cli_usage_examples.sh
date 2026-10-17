@@ -1,7 +1,9 @@
 #!/bin/bash
 # Example Soroban CLI commands for ChainLearn
+#
+# Set STELLAR_SECRET_KEY in the environment before running this script.
+# This file must not export a placeholder; that would overwrite a real key.
 
-export STELLAR_SECRET_KEY="S..."
 PROGRESS_ID="C..."
 TOKEN_ID="C..."
 CREDENTIAL_ID="C..."

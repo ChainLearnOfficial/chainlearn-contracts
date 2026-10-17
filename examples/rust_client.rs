@@ -14,19 +14,35 @@
 //! Run with:
 //!   cargo run --example rust_client
 
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
+use soroban_sdk::{Address, Env, String as SorobanString, Symbol};
 
 fn main() {
     let env = Env::default();
-    let _admin = Address::generate(&env);
-    let _learner = Address::generate(&env);
+    // Address::from_string is the soroban_sdk constructor. Address::from_str does not exist.
+    let _admin = Address::from_string(&SorobanString::from_str(
+        &env,
+        "GABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABVCX",
+    ));
+    let _learner = Address::from_string(&SorobanString::from_str(
+        &env,
+        "GAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHV4",
+    ));
 
-    let _progress_tracker = Address::generate(&env);
-    let _learn_token = Address::generate(&env);
-    let _credential_nft = Address::generate(&env);
+    let _progress_tracker = Address::from_string(&SorobanString::from_str(
+        &env,
+        "CAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDQF",
+    ));
+    let _learn_token = Address::from_string(&SorobanString::from_str(
+        &env,
+        "CABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARHO",
+    ));
+    let _credential_nft = Address::from_string(&SorobanString::from_str(
+        &env,
+        "CABQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVX",
+    ));
 
     // ── Admin: Create a course ─────────────────────────────────────────
-    let course_id = Symbol::new(&env, "rust_101");
+    let _course_id = Symbol::new(&env, "rust_101");
     let mut module_ids = soroban_sdk::Vec::new(&env);
     module_ids.push_back(Symbol::new(&env, "mod_basics"));
     module_ids.push_back(Symbol::new(&env, "mod_ownership"));
