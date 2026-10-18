@@ -1175,6 +1175,52 @@ mod progress_unit_tests {
     }
 
     #[test]
+    fn test_batch_complete_module_batch_size_one_works_like_single() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+
+        client.batch_complete_module(&learner, &course_id, &batch);
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 1);
+        assert_eq!(progress.modules_completed_bitmap, 1);
+    }
+
+    #[test]
+    fn test_batch_complete_module_all_modules_in_course_marks_all_complete() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // Course has exactly 3 modules: mod_1, mod_2, mod_3
+        let mut batch = Vec::new(&env);
+        batch.push_back(Symbol::new(&env, "mod_1"));
+        batch.push_back(Symbol::new(&env, "mod_2"));
+        batch.push_back(Symbol::new(&env, "mod_3"));
+
+        client.batch_complete_module(&learner, &course_id, &batch);
+
+        let progress = client.get_progress(&learner, &course_id);
+        // All 3 module bits must be set: 0b111 = 7
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 3);
+        assert_eq!(progress.modules_completed_bitmap, 0b111);
+    }
+
+    #[test]
     fn test_batch_complete_module_matches_sequential_single_calls() {
         let env = Env::default();
         let (_admin, contract_id) = setup_contract(&env);
@@ -2414,11 +2460,15 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         // enroll_checked must fail when paused
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_err());
 
         // Unpause and verify enroll_checked succeeds
         client.unpause();
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_ok());
     }
 
     #[test]
@@ -2440,9 +2490,25 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         let caller = learner.clone();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_err());
 
         client.unpause();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_ok());
     }
 }
