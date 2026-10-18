@@ -891,8 +891,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,6 +926,16 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
@@ -939,7 +947,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
@@ -1840,5 +1847,77 @@ mod token_unit_tests {
         client.mint(&admin, &admin, &(i128::MAX - 10));
         let beneficiary = Address::generate(&env);
         client.create_vesting(&beneficiary, &11, &0, &100);
+    }
+
+    // ── get_vesting_claimed tests (#634) ──────────────────────────────────
+
+    #[test]
+    fn test_get_vesting_claimed_returns_zero_for_beneficiary_with_no_vesting() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 0);
+    }
+
+    #[test]
+    fn test_get_vesting_claimed_returns_zero_before_any_claims() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 0);
+
+        client.create_vesting(&beneficiary, &10_000, &100, &1_000);
+
+        // Before any claims, claimed amount must be exactly 0
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 0);
+    }
+
+    #[test]
+    fn test_get_vesting_claimed_returns_correct_amount_after_claiming() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 0);
+
+        client.create_vesting(&beneficiary, &10_000, &0, &1_000);
+
+        // Advance to 500s (50% vested)
+        env.ledger().with_mut(|l| l.timestamp = 500);
+        client.claim_vested(&beneficiary);
+
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 5_000);
+    }
+
+    #[test]
+    fn test_get_vesting_claimed_accumulates_across_multiple_claims() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 0);
+
+        client.create_vesting(&beneficiary, &10_000, &0, &1_000);
+
+        // First claim at 250s (25% -> 2,500)
+        env.ledger().with_mut(|l| l.timestamp = 250);
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 2_500);
+
+        // Second claim at 750s (75% -> additional 5,000, cumulative 7,500)
+        env.ledger().with_mut(|l| l.timestamp = 750);
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 7_500);
+
+        // Final claim at 1,000s (100% -> cumulative 10,000)
+        env.ledger().with_mut(|l| l.timestamp = 1_000);
+        client.claim_vested(&beneficiary);
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 10_000);
     }
 }
