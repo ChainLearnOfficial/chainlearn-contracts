@@ -1466,6 +1466,122 @@ mod progress_unit_tests {
     }
 
     #[test]
+    fn test_batch_submit_quiz_score_batch_size_one_works_like_single() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 85u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert_eq!(submitted.len(), 1);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_1")));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 85);
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            85
+        );
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_with_duplicate_quiz_ids_skips_second() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // Same quiz_1 submitted twice in the same batch: first score 75, second score 95
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 75u32));
+        scores.push_back((Symbol::new(&env, "quiz_1"), 95u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        // First attempt succeeds, duplicate is skipped and omitted from returned list
+        assert_eq!(submitted.len(), 1);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_1")));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 75);
+        // Score must remain 75 from first submission, not overwritten by 95
+        assert_eq!(
+            client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1")),
+            75
+        );
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_all_entries_valid() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 80u32));
+        scores.push_back((Symbol::new(&env, "quiz_2"), 90u32));
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        assert_eq!(submitted.len(), 2);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_1")));
+        assert!(submitted.contains(Symbol::new(&env, "quiz_2")));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 2);
+        assert_eq!(progress.total_quiz_score, 170);
+    }
+
+    #[test]
+    fn test_batch_submit_quiz_score_returned_vec_excludes_all_skipped_quizzes() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        let mut scores = Vec::new(&env);
+        scores.push_back((Symbol::new(&env, "quiz_1"), 70u32)); // Valid -> submitted
+        scores.push_back((Symbol::new(&env, "invalid_quiz"), 80u32)); // Not in course -> skipped
+        scores.push_back((Symbol::new(&env, "quiz_2"), 150u32)); // Score > 100 -> skipped
+        scores.push_back((Symbol::new(&env, "quiz_1"), 90u32)); // Duplicate -> skipped
+
+        let submitted = client.batch_submit_quiz_score(&learner, &course_id, &scores);
+
+        // Only quiz_1 should be in returned vec
+        assert_eq!(submitted.len(), 1);
+        assert!(submitted.contains(Symbol::new(&env, "quiz_1")));
+        assert!(!submitted.contains(Symbol::new(&env, "invalid_quiz")));
+        assert!(!submitted.contains(Symbol::new(&env, "quiz_2")));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 70);
+    }
+
+    #[test]
     fn test_batch_submit_quiz_score_matches_sequential_single_calls() {
         let env = Env::default();
         let (_admin, contract_id) = setup_contract(&env);
@@ -2414,11 +2530,15 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         // enroll_checked must fail when paused
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_err());
 
         // Unpause and verify enroll_checked succeeds
         client.unpause();
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_ok());
     }
 
     #[test]
@@ -2440,9 +2560,25 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         let caller = learner.clone();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_err());
 
         client.unpause();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_ok());
     }
 }
