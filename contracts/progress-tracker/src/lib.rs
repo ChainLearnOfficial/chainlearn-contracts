@@ -2066,6 +2066,11 @@ impl ProgressTracker {
         Self::require_not_paused(&env);
         learner.require_auth();
 
+        let zero_address = chainlearn_shared::zero_address(&env);
+        if delegate == zero_address {
+            panic!("cannot delegate to zero address");
+        }
+
         types::write_entry(
             &env,
             &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
@@ -2099,10 +2104,7 @@ impl ProgressTracker {
         Self::require_not_paused(&env);
         learner.require_auth();
 
-        types::remove_entry(
-            &env,
-            &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
-        );
+        types::remove_entry(&env, &ProgressTrackerDataKey::DelegatedTo(learner.clone()));
 
         env.events()
             .publish((Symbol::new(&env, "delegation_revoked"),), (&learner,));

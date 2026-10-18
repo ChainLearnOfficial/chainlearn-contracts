@@ -2414,11 +2414,15 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         // enroll_checked must fail when paused
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_err());
 
         // Unpause and verify enroll_checked succeeds
         client.unpause();
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_ok());
     }
 
     #[test]
@@ -2440,9 +2444,52 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         let caller = learner.clone();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_err());
 
         client.unpause();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_ok());
+    }
+
+    // ── Zero address rejection tests (#638) ──────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "cannot transfer admin to zero address")]
+    fn test_transfer_admin_to_zero_address_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let zero_address = chainlearn_shared::zero_address(&env);
+        client.transfer_admin(&zero_address);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot delegate to zero address")]
+    fn test_delegate_progress_to_zero_address_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let zero_address = chainlearn_shared::zero_address(&env);
+        client.delegate_progress(&learner, &zero_address);
     }
 }

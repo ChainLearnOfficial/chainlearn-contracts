@@ -1624,6 +1624,11 @@ impl LearnToken {
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
+        let zero_address = chainlearn_shared::zero_address(&env);
+        if beneficiary == zero_address {
+            panic!("cannot vest to zero address");
+        }
+
         if total_amount <= 0 {
             panic!("total_amount must be positive");
         }

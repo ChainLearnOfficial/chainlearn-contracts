@@ -564,7 +564,8 @@ mod credential_unit_tests {
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id =
+            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
 
         let before = client.get_storage_size();
         let _ = client.verify_credential(&cred_id);
@@ -613,6 +614,36 @@ mod credential_unit_tests {
         assert_ne!(cert1, cert3);
 
         // Valid credential metadata URI format
-        assert!(client.try_mint_credential(&learner1, &course1, &90, &cert1).is_ok());
+        assert!(client
+            .try_mint_credential(&learner1, &course1, &90, &cert1)
+            .is_ok());
+    }
+
+    // ── Zero address rejection tests (#638) ──────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "cannot mint to zero address")]
+    fn test_mint_credential_to_zero_address_panics() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let zero_address = chainlearn_shared::zero_address(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_valid_metadata_123");
+        client.mint_credential(&zero_address, &course_id, &85, &uri);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot transfer admin to zero address")]
+    fn test_transfer_admin_to_zero_address_panics() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let zero_address = chainlearn_shared::zero_address(&env);
+        client.transfer_admin(&zero_address);
     }
 }

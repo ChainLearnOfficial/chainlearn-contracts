@@ -64,6 +64,11 @@ pub fn mint_credential(
     score: u32,
     metadata_uri: &Symbol,
 ) -> u64 {
+    let zero_address = chainlearn_shared::zero_address(env);
+    if *to == zero_address {
+        panic!("cannot mint to zero address");
+    }
+
     // Metadata URI gate: must be non-empty, >= 8 chars, with a valid scheme
     validate_metadata_uri(env, metadata_uri);
 
