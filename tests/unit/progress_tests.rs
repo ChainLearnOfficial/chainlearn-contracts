@@ -2107,6 +2107,108 @@ mod progress_unit_tests {
         );
     }
 
+    // ── Issue #637: course archiving edge cases ───────────────────────────
+
+    #[test]
+    #[should_panic(expected = "course already archived")]
+    fn test_archive_already_archived_course_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        client.archive_course(&course_id);
+        client.archive_course(&course_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "course is archived")]
+    fn test_enrolling_in_archived_course_panics() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        client.archive_course(&course_id);
+
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+    }
+
+    #[test]
+    fn test_completing_modules_in_archived_course_succeeds() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        // Archive the course
+        client.archive_course(&course_id);
+
+        // Enrolled learner completes next module in archived course
+        client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
+
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.modules_completed_bitmap.count_ones(), 2);
+        assert!(progress.overall_progress > 0);
+    }
+
+    #[test]
+    fn test_submitting_quiz_scores_in_archived_course_succeeds() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        // Archive the course
+        client.archive_course(&course_id);
+
+        // Enrolled learner submits quiz score in archived course
+        client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
+
+        let score = client.get_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"));
+        assert_eq!(score, 85);
+        let progress = client.get_progress(&learner, &course_id);
+        assert_eq!(progress.quizzes_submitted, 1);
+        assert_eq!(progress.total_quiz_score, 85);
+    }
+
+    #[test]
+    fn test_archive_course_emits_course_archived_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        client.archive_course(&course_id);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "course_archived"),).into_val(&env),
+                    (course_id,).into_val(&env),
+                )
+            ]
+        );
+    }
+
     // ── Issue #240: contract initialization verification ────────────────────
 
     #[test]
@@ -2414,11 +2516,15 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         // enroll_checked must fail when paused
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_err());
 
         // Unpause and verify enroll_checked succeeds
         client.unpause();
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_ok());
     }
 
     #[test]
@@ -2440,9 +2546,25 @@ mod progress_unit_tests {
         client.emergency_pause();
 
         let caller = learner.clone();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_err());
 
         client.unpause();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_ok());
     }
 }
