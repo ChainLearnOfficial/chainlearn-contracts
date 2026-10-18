@@ -620,6 +620,70 @@ mod token_unit_tests {
         assert_eq!(client.allowance_spender_count(&owner), 1);
     }
 
+    // ── allowance_spender_count tests (#635) ──────────────────────────────
+
+    #[test]
+    fn test_allowance_spender_count_returns_zero_for_owner_with_no_allowances() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+
+        assert_eq!(client.allowance_spender_count(&owner), 0);
+    }
+
+    #[test]
+    fn test_allowance_spender_count_returns_one_after_one_approve() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &100, &100);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+    }
+
+    #[test]
+    fn test_allowance_spender_count_returns_two_after_two_approves_to_different_spenders() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let spender1 = Address::generate(&env);
+        let spender2 = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender1, &100, &100);
+        client.approve(&owner, &spender2, &250, &200);
+
+        assert_eq!(client.allowance_spender_count(&owner), 2);
+    }
+
+    #[test]
+    fn test_allowance_spender_count_does_not_decrease_when_allowance_expires() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Approve with expiration ledger 50
+        client.approve(&owner, &spender, &100, &50);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+
+        // Advance ledger sequence past expiration
+        env.ledger().with_mut(|l| l.sequence_number = 100);
+
+        // The allowance has expired (returns 0)
+        assert_eq!(client.allowance(&owner, &spender), 0);
+
+        // But the spender registry entry persists until explicitly cleaned up
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+    }
+
     #[test]
     fn test_initialize_twice_returns_already_initialized_error() {
         let env = Env::default();
@@ -891,8 +955,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,6 +990,16 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
@@ -939,7 +1011,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
