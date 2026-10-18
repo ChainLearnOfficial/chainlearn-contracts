@@ -891,8 +891,6 @@ mod token_unit_tests {
     #[test]
     #[should_panic(expected = "no snapshot available at specified ledger")]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
-    #[should_panic(expected = "contract is paused")]
-    fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
@@ -928,6 +926,16 @@ mod token_unit_tests {
             &0,
             &1_000,
             &100,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_proposal_fails_while_paused() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
         client.pause(&admin);
         client.create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
@@ -939,7 +947,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    fn test_vesting_schedule_cliff_linear_vesting_and_claiming() {
     #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
@@ -1840,5 +1847,103 @@ mod token_unit_tests {
         client.mint(&admin, &admin, &(i128::MAX - 10));
         let beneficiary = Address::generate(&env);
         client.create_vesting(&beneficiary, &11, &0, &100);
+    }
+
+    // ── i128 boundary tests for token operations (#639) ───────────────────
+
+    #[test]
+    fn test_approve_with_i128_max_amount() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.approve(&owner, &spender, &i128::MAX, &1_000);
+        assert_eq!(client.allowance(&owner, &spender), i128::MAX);
+    }
+
+    #[test]
+    fn test_transfer_of_exact_balance_leaves_zero() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &sender, &50_000);
+        assert_eq!(client.balance(&sender), 50_000);
+
+        // Transfer exactly 100% of balance
+        client.transfer(&sender, &recipient, &50_000);
+        assert_eq!(client.balance(&sender), 0);
+        assert_eq!(client.balance(&recipient), 50_000);
+    }
+
+    #[test]
+    fn test_burn_of_exact_balance_leaves_zero() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let user = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &user, &75_000);
+        assert_eq!(client.balance(&user), 75_000);
+
+        let supply_before = client.total_supply();
+        // Burn exactly 100% of user balance
+        client.burn(&user, &75_000);
+        assert_eq!(client.balance(&user), 0);
+        assert_eq!(client.total_supply(), supply_before - 75_000);
+    }
+
+    #[test]
+    fn test_mint_to_i128_max_supply_cap() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let pt_contract_id = env.register_contract(None, ProgressTracker);
+        ProgressTrackerClient::new(&env, &pt_contract_id).initialize(&admin);
+        let contract_id = env.register_contract(None, LearnToken);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        client.initialize(
+            &admin,
+            &SorobanString::from_str(&env, "CLearn"),
+            &SorobanString::from_str(&env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &i128::MAX,
+        );
+        env.mock_all_auths();
+
+        let recipient = Address::generate(&env);
+        // Mint up to i128::MAX
+        client.mint(&admin, &recipient, &i128::MAX);
+        assert_eq!(client.balance(&recipient), i128::MAX);
+        assert_eq!(client.total_supply(), i128::MAX);
+    }
+
+    #[test]
+    fn test_allowance_operations_at_i128_max() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Approve i128::MAX
+        client.approve(&owner, &spender, &i128::MAX, &1_000);
+        assert_eq!(client.allowance(&owner, &spender), i128::MAX);
+
+        // Decrease allowance by 1_000
+        client.decrease_allowance(&owner, &spender, &1_000);
+        assert_eq!(client.allowance(&owner, &spender), i128::MAX - 1_000);
+
+        // Increase back by 1_000 to return to i128::MAX without overflow
+        client.increase_allowance(&owner, &spender, &1_000, &1_000);
+        assert_eq!(client.allowance(&owner, &spender), i128::MAX);
     }
 }
