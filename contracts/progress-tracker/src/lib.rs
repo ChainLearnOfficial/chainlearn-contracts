@@ -4657,4 +4657,74 @@ mod tests {
         assert_eq!(stats.average_score, 90);
         assert_eq!(stats.potential_rewards, 9_000);
     }
+
+    // ── Issue #533: course difficulty unit tests ──────────────────────────
+
+    #[test]
+    fn test_get_course_difficulty_defaults_to_beginner() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        assert_eq!(client.get_course_difficulty(&course_id), 0);
+    }
+
+    #[test]
+    fn test_set_course_difficulty_supports_all_levels() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        for difficulty in [0, 1, 2] {
+            client.set_course_difficulty(&course_id, &difficulty);
+            assert_eq!(client.get_course_difficulty(&course_id), difficulty);
+        }
+    }
+
+    #[test]
+    fn test_set_course_difficulty_emits_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        client.set_course_difficulty(&course_id, &2);
+
+        let events = env.events().all();
+        let (_, topics, data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (Symbol::new(&env, "course_difficulty_set"),).into_val(&env)
+        );
+        assert_eq!(*data, (&course_id, 2u32).into_val(&env));
+    }
+
+    #[test]
+    fn test_set_course_difficulty_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let course_id = Symbol::new(&env, "rust_101");
+
+        // No authorization is mocked, so the admin-only call must be rejected.
+        assert!(client.try_set_course_difficulty(&course_id, &1).is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_set_course_difficulty_panics_for_nonexistent_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_course_difficulty(&Symbol::new(&env, "missing"), &1);
+    }
 }
