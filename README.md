@@ -477,8 +477,8 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `create_vesting_schedule` | Admin | `beneficiary: Address, total_amount: i128, cliff_timestamp: u64, duration_seconds: u64` | — | Create a vesting schedule. |
-| `claim_vested_tokens` | Beneficiary | `beneficiary: Address` | — | Claim vested tokens. |
+| `create_vesting` | Admin | `beneficiary: Address, total_amount: i128, cliff_timestamp: u64, duration_seconds: u64` | — | Create a vesting schedule. |
+| `claim_vested` | Beneficiary | `beneficiary: Address` | — | Claim vested tokens. |
 | `get_vesting_schedule` | — | `beneficiary: Address` | `Option<VestingSchedule>` | Vesting schedule details. |
 
 #### Governance
@@ -487,7 +487,7 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 |---|---|---|---|---|
 | `create_proposal` | Admin | `description: String, choices: u32, start_time: u64, end_time: u64, snapshot_ledger: u32` | `u64` | Create a proposal using a past ledger for voting power. |
 | `vote` | Token Holder | `proposal_id: u64, choice: u32` | — | Cast a vote using the voter's recorded balance at the proposal snapshot. |
-| `execute_proposal` | — | `proposal_id: u64` | — | Execute a passed proposal. |
+| `execute_proposal` | Admin | `proposal_id: u64` | `u32` | Execute a passed proposal. Returns the winning choice index. |
 | `get_proposal` | — | `proposal_id: u64` | `Option<Proposal>` | Proposal details. |
 
 ### credential-nft

@@ -5,8 +5,8 @@ mod storage;
 
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
-    String as SorobanString, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, BytesN, Env,
+    IntoVal, String as SorobanString, Symbol, Vec,
 };
 
 // Re-export governance/vesting/admin types so tests can use them.
@@ -473,17 +473,17 @@ impl LearnToken {
         from.require_auth();
 
         if from == to {
-            return;
+            panic_with_error!(&env, ContractError::TransferToSelf);
         }
 
         // Prevent transfers to the contract itself, which would lock tokens
         // irretrievably (#76).
         if to == env.current_contract_address() {
-            panic!("cannot transfer to contract");
+            panic_with_error!(&env, ContractError::TransferToContract);
         }
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         if amount == 0 {
@@ -492,7 +492,7 @@ impl LearnToken {
 
         let from_balance = storage::get_balance(&env, &from);
         if from_balance < amount {
-            panic!("insufficient balance");
+            panic_with_error!(&env, ContractError::InsufficientBalance);
         }
 
         // Check transfer restrictions (#191)
@@ -520,17 +520,17 @@ impl LearnToken {
         spender.require_auth();
 
         if from == to {
-            return;
+            panic_with_error!(&env, ContractError::TransferToSelf);
         }
 
         // Prevent transfers to the contract itself, which would lock tokens
         // irretrievably (#76).
         if to == env.current_contract_address() {
-            panic!("cannot transfer to contract");
+            panic_with_error!(&env, ContractError::TransferToContract);
         }
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         if amount == 0 {
@@ -545,12 +545,12 @@ impl LearnToken {
 
         let allowance = storage::get_allowance(&env, &from, &spender);
         if allowance < amount {
-            panic!("insufficient allowance");
+            panic_with_error!(&env, ContractError::InsufficientAllowance);
         }
 
         let from_balance = storage::get_balance(&env, &from);
         if from_balance < amount {
-            panic!("insufficient balance");
+            panic_with_error!(&env, ContractError::InsufficientBalance);
         }
 
         // Check transfer restrictions (#191)
@@ -584,11 +584,11 @@ impl LearnToken {
         owner.require_auth();
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         if expiration_ledger <= env.ledger().sequence() {
-            panic!("expiration_ledger must be in the future");
+            panic_with_error!(&env, ContractError::ExpirationInPast);
         }
 
         storage::set_allowance(&env, &owner, &spender, amount, expiration_ledger);
@@ -624,12 +624,12 @@ impl LearnToken {
         from.require_auth();
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         let from_balance = storage::get_balance(&env, &from);
         if from_balance < amount {
-            panic!("insufficient balance");
+            panic_with_error!(&env, ContractError::InsufficientBalance);
         }
 
         storage::set_balance(&env, &from, from_balance - amount);
@@ -661,7 +661,7 @@ impl LearnToken {
         spender.require_auth();
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         // Surface an expired allowance the same way transfer_from does, so
@@ -674,12 +674,12 @@ impl LearnToken {
 
         let allowance = storage::get_allowance(&env, &from, &spender);
         if allowance < amount {
-            panic!("insufficient allowance");
+            panic_with_error!(&env, ContractError::InsufficientAllowance);
         }
 
         let from_balance = storage::get_balance(&env, &from);
         if from_balance < amount {
-            panic!("insufficient balance");
+            panic_with_error!(&env, ContractError::InsufficientBalance);
         }
 
         storage::reduce_allowance(&env, &from, &spender, amount);
@@ -702,7 +702,7 @@ impl LearnToken {
         Self::require_not_paused(&env);
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Minter) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         let zero_address = chainlearn_shared::zero_address(&env);
@@ -711,7 +711,7 @@ impl LearnToken {
         }
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         if amount == 0 {
@@ -755,7 +755,7 @@ impl LearnToken {
         learner.require_auth();
 
         if storage::is_reward_claimed(&env, &learner, &course_id, &quiz_id) {
-            panic!("reward already claimed");
+            panic_with_error!(&env, ContractError::RewardAlreadyClaimed);
         }
 
         // Verify score by querying the progress-tracker contract via a single
@@ -775,7 +775,7 @@ impl LearnToken {
         }
 
         if score > MAX_QUIZ_SCORE {
-            panic!("score exceeds maximum");
+            panic_with_error!(&env, ContractError::InvalidScore);
         }
 
         let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
@@ -993,7 +993,7 @@ impl LearnToken {
     pub fn grant_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
         storage::add_admin(&env, &address, &role);
         events::role_granted(&env, &address, &role);
@@ -1003,7 +1003,7 @@ impl LearnToken {
     pub fn revoke_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
         storage::remove_admin(&env, &address, &role);
         events::role_revoked(&env, &address, &role);
@@ -1015,7 +1015,7 @@ impl LearnToken {
     pub fn add_admin(env: Env, caller: Address, admin_info: AdminInfo) {
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         storage::add_admin(&env, &admin_info.address, &admin_info.role);
@@ -1028,7 +1028,7 @@ impl LearnToken {
     pub fn remove_admin(env: Env, caller: Address, admin_info: AdminInfo) {
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         storage::remove_admin(&env, &admin_info.address, &admin_info.role);
@@ -1052,7 +1052,7 @@ impl LearnToken {
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin)
             || !storage::has_role(&env, &co_signer, &storage::AdminRole::Admin)
         {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         env.events().publish(
@@ -1078,7 +1078,7 @@ impl LearnToken {
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin)
             || !storage::has_role(&env, &co_signer, &storage::AdminRole::Admin)
         {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         env.deployer()
@@ -1116,7 +1116,7 @@ impl LearnToken {
     pub fn pause(env: Env, caller: Address) {
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         if storage::is_paused(&env) {
@@ -1131,7 +1131,7 @@ impl LearnToken {
     pub fn unpause(env: Env, caller: Address) {
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Pauser) {
-            panic!("not authorized");
+            panic_with_error!(&env, ContractError::NotAuthorized);
         }
 
         if !storage::is_paused(&env) {
@@ -1413,11 +1413,11 @@ impl LearnToken {
         owner.require_auth();
 
         if additional_amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         if expiration_ledger <= env.ledger().sequence() {
-            panic!("expiration_ledger must be in the future");
+            panic_with_error!(&env, ContractError::ExpirationInPast);
         }
 
         let current = storage::get_allowance(&env, &owner, &spender);
@@ -1521,7 +1521,7 @@ impl LearnToken {
         owner.require_auth();
 
         if decrease_amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         let current = storage::get_allowance(&env, &owner, &spender);
@@ -1572,11 +1572,11 @@ impl LearnToken {
         owner.require_auth();
 
         if amount < 0 {
-            panic!("negative amount");
+            panic_with_error!(&env, ContractError::NegativeAmount);
         }
 
         if expiration_ledger <= env.ledger().sequence() {
-            panic!("expiration_ledger must be in the future");
+            panic_with_error!(&env, ContractError::ExpirationInPast);
         }
 
         let current_nonce = storage::get_permit_nonce(&env, &owner);
@@ -2595,7 +2595,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "reward already claimed")]
+    #[should_panic(expected = "Error(Contract, #12)")]
     fn test_claim_reward_prevents_double_claim() {
         let env = Env::default();
         let (_, lt_contract_id, pt_contract_id) = setup(&env);
@@ -2708,7 +2708,7 @@ mod tests {
     // ── #76: transfer to contract address ───────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "cannot transfer to contract")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn test_transfer_to_contract_address_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);
@@ -2723,7 +2723,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot transfer to contract")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn test_transfer_from_to_contract_address_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);
@@ -2738,6 +2738,20 @@ mod tests {
 
         // Attempt transfer_from to the contract itself — must panic
         client.transfer_from(&spender, &owner, &lt_contract_id, &200);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #8)")]
+    fn test_transfer_to_self_is_rejected() {
+        let env = Env::default();
+        let (admin, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+
+        let alice = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.mint(&admin, &alice, &500);
+        client.transfer(&alice, &alice, &100);
     }
 
     // ── #77: increase_allowance / decrease_allowance ─────────────────────────
@@ -2858,7 +2872,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient balance")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_burn_more_than_balance_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);
@@ -2872,7 +2886,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "negative amount")]
+    #[should_panic(expected = "Error(Contract, #4)")]
     fn test_burn_negative_amount_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);
@@ -2922,7 +2936,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient allowance")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_burn_from_beyond_allowance_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);
@@ -2939,7 +2953,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient balance")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_burn_from_beyond_balance_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);
@@ -2957,7 +2971,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient allowance")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_burn_from_without_allowance_panics() {
         let env = Env::default();
         let (admin, lt_contract_id, _) = setup(&env);

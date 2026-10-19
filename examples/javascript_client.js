@@ -11,7 +11,8 @@
  *
  * Environment variables:
  *   STELLAR_RPC_URL        - Soroban RPC endpoint (default: testnet)
- *   STELLAR_SECRET_KEY      - Admin/learner secret key
+ *   STELLAR_SECRET_KEY      - Admin secret key
+ *   LEARNER_SECRET_KEY      - Learner secret key (must be different from the admin key)
  *   PROGRESS_TRACKER_ID     - Deployed progress-tracker contract ID
  *   LEARN_TOKEN_ID          - Deployed learn-token contract ID
  *   CREDENTIAL_NFT_ID       - Deployed credential-nft contract ID
@@ -222,12 +223,18 @@ async function mintCredential(adminKeypair, learnerKeypair) {
 // ── Main Flow ─────────────────────────────────────────────────────────
 
 async function main() {
-  const adminKeypair = StellarSdk.Keypair.fromSecret(
-    process.env.STELLAR_SECRET_KEY
-  );
-  const learnerKeypair = StellarSdk.Keypair.fromSecret(
-    process.env.STELLAR_SECRET_KEY // In production, use a different key
-  );
+  const adminSecret = process.env.STELLAR_SECRET_KEY;
+  const learnerSecret = process.env.LEARNER_SECRET_KEY;
+  if (!adminSecret || !learnerSecret) {
+    throw new Error(
+      "Set STELLAR_SECRET_KEY and LEARNER_SECRET_KEY before running this example"
+    );
+  }
+  if (adminSecret === learnerSecret) {
+    throw new Error("Admin and learner must use separate secret keys");
+  }
+  const adminKeypair = StellarSdk.Keypair.fromSecret(adminSecret);
+  const learnerKeypair = StellarSdk.Keypair.fromSecret(learnerSecret);
 
   console.log("=== ChainLearn Full Flow ===\n");
 
