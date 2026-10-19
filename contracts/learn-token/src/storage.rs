@@ -715,13 +715,16 @@ pub fn add_to_whitelist(env: &Env, address: &Address) {
 }
 
 /// Remove an address from the whitelist.
+///
+/// Panics if the address is not currently whitelisted.
 pub fn remove_from_whitelist(env: &Env, address: &Address) {
     let key = TokenDataKey::Whitelist(address.clone());
     let existed = env.storage().persistent().has(&key);
-    env.storage().persistent().remove(&key);
-    if existed {
-        track_entry_removed(env);
+    if !existed {
+        panic!("address is not whitelisted");
     }
+    env.storage().persistent().remove(&key);
+    track_entry_removed(env);
 }
 
 /// Record the ledger sequence of the most recent transfer made by `sender`.
@@ -838,6 +841,17 @@ pub fn prune_snapshots(env: &Env, older_than_ledger: u32) -> u32 {
         } else {
             env.storage().persistent().set(&TokenDataKey::SnapshotLedgers, &remaining_ledgers);
         }
+    }
+
+    if remaining_ledgers.is_empty() {
+        env.storage()
+            .persistent()
+            .remove(&TokenDataKey::SnapshotLedgers);
+        track_entry_removed(env);
+    } else {
+        env.storage()
+            .persistent()
+            .set(&TokenDataKey::SnapshotLedgers, &remaining_ledgers);
     }
 
     removed_count

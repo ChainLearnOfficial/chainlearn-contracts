@@ -309,6 +309,8 @@ impl LearnToken {
 
     /// Remove an address from the transfer whitelist. Admin only.
     ///
+    /// Panics if the address is not currently whitelisted.
+    ///
     /// # Arguments
     /// * `address` - The address to remove from the whitelist
     pub fn remove_from_whitelist(env: Env, address: Address) {
@@ -3316,6 +3318,47 @@ mod tests {
     // ── upgrade (#198) ────────────────────────────────────────────────────
 
     #[test]
+    fn test_prune_expired_allowance_clears_allowance_and_registry_entry() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+
+        env.mock_all_auths();
+        let expiration = env.ledger().sequence() + 1;
+        client.approve(&owner, &spender, &100, &expiration);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+
+        env.ledger()
+            .with_mut(|ledger| ledger.sequence_number = expiration + 1);
+        assert!(client.prune_expired_allowance(&owner, &spender));
+        assert_eq!(client.allowance(&owner, &spender), 0);
+        assert_eq!(client.allowance_spender_count(&owner), 0);
+    }
+
+    #[test]
+    fn test_prune_expired_allowance_reduces_cleanup_registry_count() {
+        let env = Env::default();
+        let (_, lt_contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_contract_id);
+        let owner = Address::generate(&env);
+        let expired = Address::generate(&env);
+        let active = Address::generate(&env);
+
+        env.mock_all_auths();
+        let expiration = env.ledger().sequence() + 1;
+        client.approve(&owner, &expired, &100, &expiration);
+        client.approve(&owner, &active, &100, &(expiration + 100));
+        env.ledger()
+            .with_mut(|ledger| ledger.sequence_number = expiration + 1);
+
+        assert!(client.prune_expired_allowance(&owner, &expired));
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+        assert_eq!(client.cleanup_expired_allowances(&owner), 0);
+    }
+
+    #[test]
     fn test_upgrade_version_and_wasm_hash_default_before_any_upgrade() {
         let env = Env::default();
         let (_, lt_contract_id, _) = setup(&env);
@@ -3411,6 +3454,246 @@ mod tests {
     }
 
     // ── Governance tests (#226) ──────────────────────────────────────────────
+
+    fn seed_snapshot(
+        env: &Env,
+        contract_id: &Address,
+        address: &Address,
+        ledger: u32,
+        balance: i128,
+    ) {
+        env.as_contract(contract_id, || {
+            storage::set_snapshot_balance(env, address, ledger, balance);
+        });
+    }
+
+    #[test]
+    fn test_prune_snapshots_removes_only_entries_before_threshold() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let old = Address::generate(&env);
+        let boundary = Address::generate(&env);
+        let current = Address::generate(&env);
+        seed_snapshot(&env, &contract_id, &old, 10, 100);
+        seed_snapshot(&env, &contract_id, &boundary, 20, 200);
+        seed_snapshot(&env, &contract_id, &current, 30, 300);
+
+        env.mock_all_auths();
+        assert_eq!(client.prune_snapshots(&20), 1);
+        assert_eq!(client.balance_at(&old, &10), 0);
+        assert_eq!(client.balance_at(&boundary, &20), 200);
+        assert_eq!(client.balance_at(&current, &30), 300);
+    }
+
+    #[test]
+    fn test_prune_snapshots_counts_each_removed_balance() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let first = Address::generate(&env);
+        let second = Address::generate(&env);
+        seed_snapshot(&env, &contract_id, &first, 10, 100);
+        seed_snapshot(&env, &contract_id, &second, 10, 200);
+
+        env.mock_all_auths();
+        assert_eq!(client.prune_snapshots(&11), 2);
+    }
+
+    #[test]
+    fn test_prune_snapshots_preserves_entry_at_threshold() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+        seed_snapshot(&env, &contract_id, &address, 20, 100);
+
+        env.mock_all_auths();
+        assert_eq!(client.prune_snapshots(&20), 0);
+        assert_eq!(client.balance_at(&address, &20), 100);
+    }
+
+    #[test]
+    fn test_prune_snapshots_returns_zero_when_nothing_is_old() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+        seed_snapshot(&env, &contract_id, &address, 20, 100);
+
+        env.mock_all_auths();
+        assert_eq!(client.prune_snapshots(&20), 0);
+        assert_eq!(client.balance_at(&address, &20), 100);
+    }
+
+    #[test]
+    fn test_prune_snapshots_makes_pruned_balance_unavailable() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+        seed_snapshot(&env, &contract_id, &address, 10, 100);
+
+        env.mock_all_auths();
+        assert_eq!(client.prune_snapshots(&11), 1);
+        assert_eq!(client.balance_at(&address, &10), 0);
+    }
+
+    #[test]
+    fn test_prune_snapshots_requires_admin_auth() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.mock_auths(&[]);
+        assert!(client.try_prune_snapshots(&1).is_err());
+    }
+
+    #[test]
+    fn test_is_whitelisted_defaults_to_false() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        assert!(!client.is_whitelisted(&Address::generate(&env)));
+    }
+
+    #[test]
+    fn test_add_to_whitelist_makes_address_whitelisted() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.add_to_whitelist(&address);
+        assert!(client.is_whitelisted(&address));
+    }
+
+    #[test]
+    fn test_remove_from_whitelist_completes_lifecycle() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.add_to_whitelist(&address);
+        client.remove_from_whitelist(&address);
+        assert!(!client.is_whitelisted(&address));
+    }
+
+    #[test]
+    fn test_remove_from_whitelist_panics_when_address_is_absent() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        assert!(client
+            .try_remove_from_whitelist(&Address::generate(&env))
+            .is_err());
+    }
+
+    #[test]
+    fn test_remove_from_whitelist_emits_removed_event() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.add_to_whitelist(&address);
+        client.remove_from_whitelist(&address);
+
+        let (event_contract, topics, data) = env.events().all().last().unwrap();
+        assert_eq!(event_contract, contract_id);
+        assert_eq!(
+            topics,
+            (Symbol::new(&env, "whitelist_updated"), address).into_val(&env)
+        );
+        let (added,): (bool,) = soroban_sdk::TryFromVal::try_from_val(&env, &data).unwrap();
+        assert!(!added);
+    }
+
+    #[test]
+    fn test_remove_from_whitelist_requires_admin_auth() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let address = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.add_to_whitelist(&address);
+        env.mock_auths(&[]);
+        assert!(client.try_remove_from_whitelist(&address).is_err());
+    }
+
+    #[test]
+    fn test_proposal_count_is_zero_before_any_proposal() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        assert_eq!(client.proposal_count(), 0);
+    }
+
+    #[test]
+    fn test_proposal_count_is_one_after_one_proposal() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.ledger().with_mut(|ledger| ledger.sequence_number = 1);
+        env.mock_all_auths();
+        client.create_proposal(
+            &SorobanString::from_str(&env, "first"),
+            &2,
+            &10,
+            &20,
+            &(env.ledger().sequence() - 1),
+        );
+        assert_eq!(client.proposal_count(), 1);
+    }
+
+    #[test]
+    fn test_proposal_count_increments_for_multiple_proposals() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.ledger().with_mut(|ledger| ledger.sequence_number = 1);
+        env.mock_all_auths();
+        for number in 0..3 {
+            client.create_proposal(
+                &SorobanString::from_str(&env, "proposal"),
+                &2,
+                &(10 + number),
+                &(20 + number),
+                &(env.ledger().sequence() - 1),
+            );
+        }
+        assert_eq!(client.proposal_count(), 3);
+    }
+
+    #[test]
+    fn test_proposal_count_is_read_only() {
+        let env = Env::default();
+        let (_, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.ledger().with_mut(|ledger| ledger.sequence_number = 1);
+        env.mock_all_auths();
+        client.create_proposal(
+            &SorobanString::from_str(&env, "first"),
+            &2,
+            &10,
+            &20,
+            &(env.ledger().sequence() - 1),
+        );
+        assert_eq!(client.proposal_count(), 1);
+        assert_eq!(client.proposal_count(), 1);
+    }
 
     #[test]
     fn test_governance_proposal_lifecycle() {
