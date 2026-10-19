@@ -4659,4 +4659,32 @@ mod tests {
         assert_eq!(stats.average_score, 90);
         assert_eq!(stats.potential_rewards, 9_000);
     }
+
+    #[test]
+    fn test_course_exists_is_read_only_for_missing_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let missing_course = Symbol::new(&env, "ghost_course");
+
+        assert!(!client.course_exists(&missing_course));
+        assert!(!client.course_exists(&missing_course));
+        assert!(client.try_get_course(&missing_course).is_err());
+    }
+
+    #[test]
+    fn test_course_exists_remains_true_after_archiving() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        assert!(client.course_exists(&course_id));
+
+        client.archive_course(&course_id);
+
+        assert!(client.course_exists(&course_id));
+        assert!(client.get_course(&course_id).archived);
+    }
 }
