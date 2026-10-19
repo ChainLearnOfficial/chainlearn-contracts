@@ -180,11 +180,11 @@ This document provides a structured security audit checklist for reviewing the C
 
 | Contract | Files | Lines |
 |---|---|---|
-| `learn-token` | `lib.rs`, `storage.rs`, `events.rs` | ~1400 |
-| `credential-nft` | `lib.rs`, `mint.rs`, `verify.rs`, `metadata.rs`, `xcall.rs` | ~750 |
-| `progress-tracker` | `lib.rs`, `types.rs`, `rewards.rs` | ~1500 |
-| `shared` | `constants.rs`, `lib.rs` | ~60 |
-| **Total** | | **~3710** |
+| `learn-token` | `lib.rs`, `storage.rs`, `events.rs` | ~5230 |
+| `credential-nft` | `lib.rs`, `mint.rs`, `verify.rs`, `metadata.rs`, `xcall.rs`, `events.rs` | ~2660 |
+| `progress-tracker` | `lib.rs`, `types.rs`, `rewards.rs`, `events.rs` | ~5050 |
+| `shared` | `constants.rs`, `lib.rs` | ~100 |
+| **Total** | | **~13040** |
 
 ## Known Limitations
 

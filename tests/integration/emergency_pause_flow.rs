@@ -120,6 +120,9 @@ fn test_progress_tracker_emergency_pause() {
     assert!(progress_client
         .try_enroll(&new_learner, &course_id)
         .is_err());
+    assert!(progress_client
+        .try_enroll_checked(&new_learner, &course_id, &None)
+        .is_err());
 
     // ── Module completion reverts when paused ──
     // Enroll a learner before pausing so we can test complete_module.

@@ -131,11 +131,19 @@ soroban contract invoke \
 
 ### Option C: Using Deploy Script
 
+> [!NOTE]
+> `scripts/deploy.sh` enforces a safety guard (lines 62-66) that refuses to run if `deployments-<network>.json` already exists to prevent accidental overwrites. You must back up or remove the existing deployment file before redeploying.
+
 ```bash
-# Re-deploy and upgrade all contracts
+# 1. Back up existing deployment file (recommended before re-deploying)
+mv deployments-testnet.json deployments-testnet.backup.$(date +%s).json
+# Alternatively, remove it if no backup is needed:
+# rm deployments-testnet.json
+
+# 2. Re-deploy all contracts
 ./scripts/deploy.sh testnet
 
-# Re-initialize if needed (only if initialization logic changed)
+# 3. Re-initialize if needed (only if initialization logic changed)
 ./scripts/initialize.sh testnet
 ```
 
@@ -307,10 +315,11 @@ soroban contract invoke \
 
 If rollback is not possible:
 
-1. Deploy fresh contracts
-2. Re-initialize with same parameters
-3. Migrate state (if needed) via custom migration script
-4. Update all cross-contract references
+1. Back up or remove existing deployment file (`mv deployments-<network>.json deployments-<network>.backup.json`) to satisfy `deploy.sh` guards
+2. Deploy fresh contracts (`./scripts/deploy.sh <network>`)
+3. Re-initialize with same parameters (`./scripts/initialize.sh <network>`)
+4. Migrate state (if needed) via custom migration script
+5. Update all cross-contract references
 
 ## Upgrade Checklist
 

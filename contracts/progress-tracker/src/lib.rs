@@ -2096,7 +2096,6 @@ impl ProgressTracker {
     /// client.revoke_delegation(&learner);
     /// ```
     pub fn revoke_delegation(env: Env, learner: Address) {
-        Self::require_not_paused(&env);
         learner.require_auth();
 
         types::remove_entry(
@@ -2690,6 +2689,21 @@ mod tests {
             client.get_progress(&learner, &course_id).overall_progress,
             0
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_enroll_checked_panics_when_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+
+        client.emergency_pause();
+        client.enroll_checked(&learner, &course_id, &None);
     }
 
     // ── Issue #265: course last updated timestamp ───────────────────────
@@ -4304,6 +4318,43 @@ mod tests {
         // direct path above.
         client.retake_quiz_for(&delegate, &learner, &course_id, &quiz_1, &90);
         assert_eq!(client.get_quiz_score(&learner, &course_id, &quiz_1), 90);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_delegate_progress_panics_when_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.emergency_pause();
+        client.delegate_progress(&learner, &delegate);
+    }
+
+    #[test]
+    fn test_revoke_delegation_succeeds_when_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &delegate);
+        assert_eq!(client.delegated_to(&learner), Some(delegate));
+
+        client.emergency_pause();
+
+        let other = Address::generate(&env);
+        assert!(client.try_delegate_progress(&learner, &other).is_err());
+
+        client.revoke_delegation(&learner);
+        assert_eq!(client.delegated_to(&learner), None);
     }
 
     // ── Issue #234: quiz retake support ───────────────────────────────────
