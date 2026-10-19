@@ -1155,7 +1155,6 @@ impl ProgressTracker {
     ///
     /// # Panics
     /// * If the learner is not enrolled in the course
-    /// * If the learner has not submitted any quiz for the course
     pub fn get_course_score(env: Env, learner: Address, course_id: Symbol) -> u32 {
         let progress: ProgressInfo = env
             .storage()
@@ -1163,8 +1162,9 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Progress(learner, course_id))
             .expect("not enrolled");
 
+        // An enrolled learner with no submitted quizzes has a score of zero.
         if progress.quizzes_submitted == 0 {
-            panic!("no quizzes submitted");
+            return 0;
         }
 
         // Both aggregates are bounded (score <= MAX_QUIZ_SCORE per quiz), so the
@@ -2854,8 +2854,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "no quizzes submitted")]
-    fn test_get_course_score_without_submissions_panics() {
+    fn test_get_course_score_returns_zero_without_submissions() {
         let env = Env::default();
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
@@ -2865,8 +2864,7 @@ mod tests {
         let learner = Address::generate(&env);
         client.enroll(&learner, &course_id);
 
-        // Enrolled but no quiz taken — there is no score to verify against.
-        client.get_course_score(&learner, &course_id);
+        assert_eq!(client.get_course_score(&learner, &course_id), 0);
     }
 
     #[test]
