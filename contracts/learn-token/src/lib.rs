@@ -221,6 +221,7 @@ impl LearnToken {
     /// # Arguments
     /// * `restriction` - The new restriction to apply
     pub fn set_transfer_restriction(env: Env, restriction: storage::TransferRestriction) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         if restriction == storage::TransferRestriction::WhitelistOnly {
@@ -298,6 +299,7 @@ impl LearnToken {
     /// # Arguments
     /// * `address` - The address to whitelist
     pub fn add_to_whitelist(env: Env, address: Address) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         storage::add_to_whitelist(&env, &address);
@@ -309,6 +311,7 @@ impl LearnToken {
     /// # Arguments
     /// * `address` - The address to remove from the whitelist
     pub fn remove_from_whitelist(env: Env, address: Address) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         storage::remove_from_whitelist(&env, &address);
@@ -343,6 +346,7 @@ impl LearnToken {
     /// before they change: the value stored is the balance at the time of the
     /// `record_balance_snapshot` call, not at `ledger_height`.
     pub fn snapshot(env: Env, ledger_height: u32) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         if ledger_height != env.ledger().sequence() {
@@ -375,6 +379,7 @@ impl LearnToken {
     /// [`Self::balance_at`]. Calling it again for the same address and height
     /// overwrites the stored value with the then-current balance.
     pub fn record_balance_snapshot(env: Env, address: Address, ledger_height: u32) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
         if ledger_height != env.ledger().sequence() {
@@ -991,6 +996,7 @@ impl LearnToken {
 
     /// Grant an admin role to an address. Admin only.
     pub fn grant_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
+        Self::require_not_paused(&env);
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
@@ -1001,6 +1007,7 @@ impl LearnToken {
 
     /// Revoke an admin role from an address. Admin only.
     pub fn revoke_role(env: Env, caller: Address, address: Address, role: storage::AdminRole) {
+        Self::require_not_paused(&env);
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
@@ -1013,6 +1020,7 @@ impl LearnToken {
     ///
     /// Requires authorization from an existing Admin.
     pub fn add_admin(env: Env, caller: Address, admin_info: AdminInfo) {
+        Self::require_not_paused(&env);
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
@@ -1026,6 +1034,7 @@ impl LearnToken {
     ///
     /// Requires authorization from an existing Admin.
     pub fn remove_admin(env: Env, caller: Address, admin_info: AdminInfo) {
+        Self::require_not_paused(&env);
         caller.require_auth();
         if !storage::has_role(&env, &caller, &storage::AdminRole::Admin) {
             panic!("not authorized");
@@ -1409,24 +1418,26 @@ impl LearnToken {
         spender: Address,
         additional_amount: i128,
         expiration_ledger: u32,
-    ) {
+    ) -> Result<(), ContractError> {
+        Self::require_not_paused(&env);
         owner.require_auth();
 
         if additional_amount < 0 {
-            panic!("negative amount");
+            return Err(ContractError::NegativeAmount);
         }
 
         if expiration_ledger <= env.ledger().sequence() {
-            panic!("expiration_ledger must be in the future");
+            return Err(ContractError::ExpirationInPast);
         }
 
         let current = storage::get_allowance(&env, &owner, &spender);
         let new_amount = current
             .checked_add(additional_amount)
-            .expect("allowance overflow");
+            .ok_or(ContractError::MaxSupplyExceeded)?;
         storage::set_allowance(&env, &owner, &spender, new_amount, expiration_ledger);
         storage::track_allowance_spender(&env, &owner, &spender);
         events::approve(&env, &owner, &spender, new_amount, expiration_ledger);
+        Ok(())
     }
 
     /// Remove an expired allowance from persistent storage (#111).
@@ -1621,6 +1632,7 @@ impl LearnToken {
         cliff_timestamp: u64,
         duration_seconds: u64,
     ) {
+        Self::require_not_paused(&env);
         let admin = storage::get_admin(&env);
         admin.require_auth();
 
