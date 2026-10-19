@@ -1703,6 +1703,30 @@ mod progress_unit_tests {
     }
 
     #[test]
+    fn test_revoke_delegation_succeeds_when_paused() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.delegate_progress(&learner, &delegate);
+        assert_eq!(client.delegated_to(&learner), Some(delegate));
+
+        client.emergency_pause();
+
+        // delegate_progress must fail when paused
+        let other = Address::generate(&env);
+        assert!(client.try_delegate_progress(&learner, &other).is_err());
+
+        // revoke_delegation must succeed when paused
+        assert!(client.try_revoke_delegation(&learner).is_ok());
+        assert_eq!(client.delegated_to(&learner), None);
+    }
+
+    #[test]
     #[should_panic]
     fn test_revoke_delegation_requires_learner_auth() {
         let env = Env::default();
