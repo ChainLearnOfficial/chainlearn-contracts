@@ -1,14 +1,14 @@
 /**
  * Example JavaScript client to interact with ChainLearn contracts using Stellar SDK.
  */
-import { Keypair, SorobanRpc, Contract, Networks, TransactionBuilder, BASE_FEE, xdr } from 'stellar-sdk';
+import { Keypair, rpc, Contract, Networks, TransactionBuilder, BASE_FEE, xdr } from '@stellar/stellar-sdk';
 
 const RPC_URL = 'https://soroban-testnet.stellar.org:443';
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 const PROGRESS_TRACKER_ID = 'C...'; // Replace with actual contract ID
 
 export async function enrollLearner(secretKey, courseId) {
-    const server = new SorobanRpc.Server(RPC_URL);
+    const server = new rpc.Server(RPC_URL);
     const keypair = Keypair.fromSecret(secretKey);
     const contract = new Contract(PROGRESS_TRACKER_ID);
 

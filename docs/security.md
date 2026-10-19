@@ -165,7 +165,7 @@ if new_max_supply > max_allowed {
 **Threat**: Attacker gains control of admin key.
 
 **Mitigation**:
-- **Delayed admin transfer**: 24-hour delay before new admin can accept
+- **Delayed admin transfer**: 48-hour delay (172,800 seconds) before new admin can accept
 - **Cancel window**: Current admin can cancel pending transfer
 - **Multi-sig for critical ops**: Upgrades require two admin signatures
 - **Emergency pause**: Can freeze all operations

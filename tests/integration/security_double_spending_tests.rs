@@ -61,7 +61,7 @@ fn create_course_and_complete(
 // ── Double-claim reward ─────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "reward already claimed")]
+#[should_panic(expected = "Error(Contract, #12)")]
 fn test_double_claim_reward_is_prevented() {
     let env = Env::default();
     let (_admin, token_client, _credential_client, progress_client) = setup_env(&env);

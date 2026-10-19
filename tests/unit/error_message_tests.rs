@@ -280,7 +280,7 @@ mod error_message_tests {
     // ── Learn Token Error Message Tests ───────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "insufficient balance")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_learn_token_insufficient_balance_error_message() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -294,7 +294,7 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "negative amount")]
+    #[should_panic(expected = "Error(Contract, #4)")]
     fn test_learn_token_negative_amount_error_message() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -308,7 +308,7 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot transfer to contract")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn test_learn_token_transfer_to_contract_error_message() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -318,11 +318,11 @@ mod error_message_tests {
         env.mock_all_auths();
 
         client.mint(&admin, &alice, &1000);
-        client.transfer(&alice, &env.current_contract_address(), &100);
+        client.transfer(&alice, &contract_id, &100);
     }
 
     #[test]
-    #[should_panic(expected = "insufficient allowance")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_learn_token_insufficient_allowance_error_message() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -338,7 +338,7 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "reward already claimed")]
+    #[should_panic(expected = "Error(Contract, #12)")]
     fn test_learn_token_reward_already_claimed_error_message() {
         let env = Env::default();
         let (_admin, contract_id, pt_contract_id) = setup_token(&env);
@@ -399,7 +399,7 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "not authorized")]
+    #[should_panic(expected = "Error(Contract, #13)")]
     fn test_learn_token_not_authorized_error_message() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -407,8 +407,9 @@ mod error_message_tests {
 
         let non_admin = Address::generate(&env);
         let recipient = Address::generate(&env);
-        
-        // Don't mock auths, so mint should fail
+        env.mock_all_auths();
+
+        // Authorization succeeds, but this address does not hold the minter role.
         client.mint(&non_admin, &recipient, &1000);
     }
 
@@ -455,7 +456,7 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "expiration_ledger must be in the future")]
+    #[should_panic(expected = "Error(Contract, #10)")]
     fn test_learn_token_past_expiration_error_message() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -464,6 +465,7 @@ mod error_message_tests {
         let owner = Address::generate(&env);
         let spender = Address::generate(&env);
         env.mock_all_auths();
+        env.ledger().with_mut(|li| li.sequence_number = 10);
 
         let past_ledger = env.ledger().sequence() - 1;
         client.approve(&owner, &spender, &500, &past_ledger);
