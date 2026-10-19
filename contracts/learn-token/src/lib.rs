@@ -4496,4 +4496,151 @@ mod tests {
             ]
         );
     }
+
+    // ── Issue #530: governance edge-case tests ───────────────────────────
+
+    #[test]
+    #[should_panic(expected = "already voted")]
+    fn test_governance_rejects_voting_twice_on_same_proposal() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let voter = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.mint(&admin, &voter, &100);
+        env.ledger().with_mut(|li| li.sequence_number = 99);
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        client.record_balance_snapshot(&voter, &snapshot_ledger);
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 100;
+            li.timestamp = 1_500;
+        });
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Double vote guard"),
+            &2,
+            &1_000,
+            &2_000,
+            &snapshot_ledger,
+        );
+
+        client.vote(&voter, &proposal_id, &0);
+        client.vote(&voter, &proposal_id, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "no snapshot available at specified ledger")]
+    fn test_governance_rejects_voter_without_recorded_snapshot_balance() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let voter = Address::generate(&env);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 99;
+            li.timestamp = 1_500;
+        });
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 100;
+            li.timestamp = 1_500;
+        });
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Missing voter snapshot"),
+            &2,
+            &1_000,
+            &2_000,
+            &snapshot_ledger,
+        );
+
+        client.vote(&voter, &proposal_id, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "voting has ended")]
+    fn test_governance_rejects_vote_after_end_time() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let voter = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.mint(&admin, &voter, &100);
+        env.ledger().with_mut(|li| li.sequence_number = 99);
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        client.record_balance_snapshot(&voter, &snapshot_ledger);
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 100;
+            li.timestamp = 2_000;
+        });
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Closed vote"),
+            &2,
+            &1_000,
+            &2_000,
+            &snapshot_ledger,
+        );
+
+        client.vote(&voter, &proposal_id, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "voting period has not ended")]
+    fn test_governance_rejects_execution_before_end_time() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 1_500);
+        client.create_proposal(
+            &SorobanString::from_str(&env, "Early execution"),
+            &2,
+            &1_000,
+            &2_000,
+            &env.ledger().sequence(),
+        );
+
+        client.execute_proposal(&1);
+    }
+
+    #[test]
+    fn test_governance_tie_breaking_selects_first_choice() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let voter_one = Address::generate(&env);
+        let voter_two = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.mint(&admin, &voter_one, &100);
+        client.mint(&admin, &voter_two, &100);
+        env.ledger().with_mut(|li| li.sequence_number = 99);
+        let snapshot_ledger = env.ledger().sequence();
+        client.snapshot(&snapshot_ledger);
+        client.record_balance_snapshot(&voter_one, &snapshot_ledger);
+        client.record_balance_snapshot(&voter_two, &snapshot_ledger);
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 100;
+            li.timestamp = 1_500;
+        });
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "Tie-breaking"),
+            &2,
+            &1_000,
+            &2_000,
+            &snapshot_ledger,
+        );
+
+        client.vote(&voter_one, &proposal_id, &0);
+        client.vote(&voter_two, &proposal_id, &1);
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+
+        assert_eq!(client.execute_proposal(&proposal_id), 0);
+        assert_eq!(client.get_proposal(&proposal_id).unwrap().winning_choice, 0);
+    }
 }
