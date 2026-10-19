@@ -4,6 +4,7 @@ mod events;
 mod storage;
 
 use chainlearn_shared::{BASE_REWARD_PER_POINT, MAX_QUIZ_SCORE};
+pub use chainlearn_shared::TOKEN_DECIMALS;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, Address, BytesN, Env,
     IntoVal, String as SorobanString, Symbol, Vec,
@@ -1936,7 +1937,7 @@ mod tests {
             &admin,
             &SorobanString::from_str(env, "CLearn"),
             &SorobanString::from_str(env, "CLRN"),
-            &7,
+            &TOKEN_DECIMALS,
             &pt_contract_id,
             &1_000_000_000_000_000,
         );
@@ -2538,7 +2539,7 @@ mod tests {
 
         assert_eq!(client.name(), SorobanString::from_str(&env, "CLearn"));
         assert_eq!(client.symbol(), SorobanString::from_str(&env, "CLRN"));
-        assert_eq!(client.decimals(), 7);
+        assert_eq!(client.decimals(), TOKEN_DECIMALS);
         assert_eq!(client.total_supply(), 0);
         assert_eq!(client.admin(), admin);
     }

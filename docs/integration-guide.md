@@ -429,21 +429,19 @@ for quiz_id in quiz_ids.iter() {
 client.batch_claim_reward(&learner, &course_id, &quiz_ids);
 ```
 
-### 4. Event Listening
+### 4. Event Monitoring
 
-Subscribe to events for real-time updates:
+In testing environments, inspect emitted events with `env.events().all()`:
 
 ```rust
-// Rust - Listen for events
-env.events().subscribe(|event| {
-    match event.symbol.as_str() {
-        "reward_claimed" => { /* Handle reward claimed */ }
-        "credential_minted" => { /* Handle credential minted */ }
-        "credential_eligible" => { /* Handle eligibility */ }
-        _ => {}
-    }
-});
+// Test environment: Inspect emitted events
+let all_events = env.events().all();
+for event in all_events.iter() {
+    // Process or assert on emitted contract events
+}
 ```
+
+For off-chain indexers and client applications, poll or stream events using the Soroban RPC `getEvents` method with filters for topics such as `reward_claimed`, `credential_minted`, or `credential_eligible`.
 
 ### 5. Pagination
 

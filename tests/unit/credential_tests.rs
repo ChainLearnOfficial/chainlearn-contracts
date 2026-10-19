@@ -580,6 +580,36 @@ mod credential_unit_tests {
     }
 
     #[test]
+    fn test_storage_size_tracks_admin_transfer_and_metadata_update() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let initial_size = client.get_storage_size();
+        let new_admin = Address::generate(&env);
+
+        client.set_admin_transfer_delay(&0);
+        assert_eq!(client.get_storage_size(), initial_size + 1);
+
+        let before_transfer = client.get_storage_size();
+        client.transfer_admin(&new_admin);
+        assert_eq!(client.get_storage_size(), before_transfer + 1);
+
+        client.accept_admin();
+        assert_eq!(client.get_storage_size(), before_transfer);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        let before_update = client.get_storage_size();
+        client.update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_Qm456"));
+        assert_eq!(client.get_storage_size(), before_update);
+    }
+
+    #[test]
     fn test_generate_certificate_deterministic_and_unique() {
         let env = Env::default();
         let (_admin, contract_id, tracker_id) = setup_contract(&env);
