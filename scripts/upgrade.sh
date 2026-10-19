@@ -304,7 +304,9 @@ else
 fi
 
 echo "$UPDATED" | jq empty 2>/dev/null
-if [ $? -eq 0 ]; then
+# Issue #477: Fixed JSON validation to work with set -e
+# Use conditional that doesn't exit immediately on jq failure
+if echo "$UPDATED" | jq empty 2>/dev/null; then
     echo "$UPDATED" > "$DEPLOY_FILE"
     echo "  Deployment file updated: $DEPLOY_FILE"
 else

@@ -171,6 +171,7 @@ impl CredentialNft {
         description: Option<Symbol>,
         issuer_name: Option<Symbol>,
     ) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -496,6 +497,7 @@ impl CredentialNft {
     /// * If the caller is not the current admin
     /// * If `new_admin` is the zero address
     pub fn transfer_admin(env: Env, new_admin: Address) {
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .persistent()
@@ -622,6 +624,51 @@ impl CredentialNft {
         write_entry(&env, &CredentialDataKey::AdminTransferDelay, &delay_seconds);
     }
 
+    // ── Emergency Pause (#475) ───────────────────────────────────────────────
+
+    /// Check if the contract is paused.
+    fn is_paused(env: &Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&CredentialDataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Require that the contract is not paused, panicking otherwise.
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env) {
+            panic!("contract is paused");
+        }
+    }
+
+    /// Pause all state-changing operations. Admin only (#475).
+    pub fn emergency_pause(env: Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        if Self::is_paused(&env) {
+            panic!("already paused");
+        }
+        write_entry(&env, &CredentialDataKey::Paused, &true);
+    }
+
+    /// Unpause all operations. Admin only (#475).
+    pub fn unpause(env: Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&CredentialDataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        if !Self::is_paused(&env) {
+            panic!("not paused");
+        }
+        write_entry(&env, &CredentialDataKey::Paused, &false);
+    }
+
     /// Reject transfer of a credential.
     ///
     /// Credentials are soulbound (non-transferable) and permanently bound to the
@@ -664,6 +711,7 @@ impl CredentialNft {
     /// # Returns
     /// The generated certificate URI symbol.
     pub fn generate_certificate(env: Env, learner: Address, course_id: Symbol) -> Symbol {
+        Self::require_not_paused(&env);
         learner.require_auth();
 
         let cert_key = CredentialDataKey::CertificateURI(learner.clone(), course_id.clone());
