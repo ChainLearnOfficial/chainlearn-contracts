@@ -389,7 +389,8 @@ impl ProgressTracker {
             module_id,
         );
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -466,7 +467,8 @@ impl ProgressTracker {
             );
         }
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -632,7 +634,8 @@ impl ProgressTracker {
             true,
         );
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -718,7 +721,8 @@ impl ProgressTracker {
             }
         }
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -1523,9 +1527,11 @@ impl ProgressTracker {
 
         course.version = new_version;
         course.updated_at = env.ledger().timestamp();
-        env.storage()
-            .persistent()
-            .set(&ProgressTrackerDataKey::Course(course_id.clone()), &course);
+        types::write_entry(
+            &env,
+            &ProgressTrackerDataKey::Course(course_id.clone()),
+            &course,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "course_version_updated"),),
@@ -1760,7 +1766,7 @@ impl ProgressTracker {
         };
 
         // Store that this achievement type has been earned
-        env.storage().persistent().set(&achievement_key, &true);
+        types::write_entry(env, &achievement_key, &true);
 
         // Add to learner's achievements list
         let achievements_key = ProgressTrackerDataKey::Achievements(learner.clone());
@@ -1770,9 +1776,7 @@ impl ProgressTracker {
             .get(&achievements_key)
             .unwrap_or_else(|| Vec::new(env));
         achievements.push_back(achievement);
-        env.storage()
-            .persistent()
-            .set(&achievements_key, &achievements);
+        types::write_entry(env, &achievements_key, &achievements);
 
         // Emit achievement earned event
         env.events().publish(
@@ -2204,7 +2208,8 @@ impl ProgressTracker {
             module_id,
         );
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -2258,7 +2263,8 @@ impl ProgressTracker {
             );
         }
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -2313,7 +2319,8 @@ impl ProgressTracker {
             true,
         );
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );
@@ -2377,7 +2384,8 @@ impl ProgressTracker {
             }
         }
 
-        env.storage().persistent().set(
+        types::write_entry(
+            &env,
             &ProgressTrackerDataKey::Progress(learner.clone(), course_id.clone()),
             &progress,
         );

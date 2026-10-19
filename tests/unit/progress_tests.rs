@@ -2238,6 +2238,44 @@ mod progress_unit_tests {
         assert_eq!(client.get_storage_size(), before + 2);
     }
 
+    #[test]
+    fn test_storage_size_tracks_update_course_version_and_achievements() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let course_id = create_test_course(&env, &client);
+        let before_version_update = client.get_storage_size();
+
+        // Updating course version modifies existing course entry (+0)
+        client.update_course_version(&course_id, &2);
+        assert_eq!(client.get_storage_size(), before_version_update);
+
+        // Test transfer_admin and accept_admin
+        client.set_admin_transfer_delay(&0);
+        let before_transfer = client.get_storage_size();
+        let new_admin = Address::generate(&env);
+
+        client.transfer_admin(&new_admin);
+        // PendingAdmin added (+1)
+        assert_eq!(client.get_storage_size(), before_transfer + 1);
+
+        client.accept_admin();
+        // PendingAdmin removed (-1), Admin overwritten (+0)
+        assert_eq!(client.get_storage_size(), before_transfer);
+
+        // Test delegation
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        let before_delegation = client.get_storage_size();
+        client.delegate_progress(&learner, &delegate);
+        assert_eq!(client.get_storage_size(), before_delegation + 1);
+
+        client.revoke_delegation(&learner);
+        assert_eq!(client.get_storage_size(), before_delegation);
+    }
+
     // ── Issue #419: tag-to-course reverse index for get_courses_by_tag ────────
 
     #[test]

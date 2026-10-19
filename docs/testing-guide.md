@@ -45,7 +45,7 @@ When testing for expected panics (e.g., unauthorized access), use the `#[should_
 
 ```rust
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #1)")]
+#[should_panic(expected = "Error(Contract, #1)")]
 fn test_unauthorized_access() {
     let (env, client, _admin) = setup_test();
     let unauthorized_user = Address::generate(&env);

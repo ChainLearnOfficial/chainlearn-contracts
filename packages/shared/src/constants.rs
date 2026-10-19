@@ -6,6 +6,9 @@ pub const MIN_CREDENTIAL_SCORE: u32 = 50;
 /// Maximum score for any quiz.
 pub const MAX_QUIZ_SCORE: u32 = 100;
 
+/// Token decimal places for the platform token.
+pub const TOKEN_DECIMALS: u32 = 7;
+
 /// Base reward per quiz point (in token base units).
 pub const BASE_REWARD_PER_POINT: i128 = 100;
 

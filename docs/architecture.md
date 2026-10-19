@@ -124,6 +124,7 @@ sequenceDiagram
 | `Balance(address)` | `i128` | Token balance |
 | `Allowance(owner, spender)` | `AllowanceData` | Spending allowance |
 | `RewardClaimed(learner, course_id, quiz_id)` | `bool` | Double-claim prevention |
+| `SnapshotBalance(address, ledger_height)` | `i128` | Balance snapshot for governance voting |
 | `ProgressTracker` | `Address` | Progress tracker address |
 
 ### credential-nft Storage
@@ -143,6 +144,7 @@ The `chainlearn-shared` package provides common types and constants:
 
 - `MIN_CREDENTIAL_SCORE` (50): Minimum score for credential eligibility
 - `MAX_QUIZ_SCORE` (100): Maximum quiz score
+- `TOKEN_DECIMALS` (7): Token decimal places
 - `BASE_REWARD_PER_POINT` (100): Tokens per quiz point
 - `MAX_CREDENTIALS_PAGE_SIZE` (50): Pagination limit
 

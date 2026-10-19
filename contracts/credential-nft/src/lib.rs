@@ -8,7 +8,8 @@ mod xcall;
 
 use chainlearn_shared::ContractMetadata;
 use metadata::{
-    remove_entry, CredentialDataKey, CredentialDisplay, CredentialInfo, CredentialVerification,
+    remove_entry, write_entry, CredentialDataKey, CredentialDisplay, CredentialInfo,
+    CredentialVerification,
 };
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
@@ -240,9 +241,7 @@ impl CredentialNft {
         validate_metadata_uri(&env, &new_metadata_uri);
 
         info.metadata_uri = new_metadata_uri.clone();
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::Credential(credential_id), &info);
+        write_entry(&env, &CredentialDataKey::Credential(credential_id), &info);
 
         env.events().publish(
             (Symbol::new(&env, "credential_metadata_updated"),),
@@ -557,9 +556,7 @@ impl CredentialNft {
             .persistent()
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::Admin, &pending.new_admin);
+        write_entry(&env, &CredentialDataKey::Admin, &pending.new_admin);
         remove_entry(&env, &CredentialDataKey::PendingAdmin);
 
         events::admin_transfer_accepted(&env, &previous_admin, &pending.new_admin);
@@ -622,9 +619,7 @@ impl CredentialNft {
             .expect("not initialized");
         admin.require_auth();
 
-        env.storage()
-            .persistent()
-            .set(&CredentialDataKey::AdminTransferDelay, &delay_seconds);
+        write_entry(&env, &CredentialDataKey::AdminTransferDelay, &delay_seconds);
     }
 
     /// Reject transfer of a credential.

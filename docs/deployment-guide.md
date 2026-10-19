@@ -53,7 +53,12 @@ After initialization, verify the deployment:
 1. **Check Deployment File**: Ensure `deployments-<network>.json` exists and contains valid Stellar Contract IDs starting with `C`.
 2. **On-Chain Verification**: Use the Soroban CLI to invoke read functions on the deployed contracts to verify their state.
    ```bash
-   soroban contract invoke --id <PROGRESS_TRACKER_ID> --network testnet --source <STELLAR_SECRET_KEY> -- admin
+   soroban contract invoke \
+       --id <PROGRESS_TRACKER_ID> \
+       --rpc-url <RPC_URL> \
+       --network-passphrase "<NETWORK_PASSPHRASE>" \
+       --source <STELLAR_SECRET_KEY> \
+       -- admin
    ```
 3. **Cross-Contract Verification**: Ensure that the `learn-token` and `credential-nft` contracts return the correct `progress-tracker` ID.
 
