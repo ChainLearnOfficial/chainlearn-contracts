@@ -244,3 +244,78 @@ fn test_transfer_from_with_expired_allowance_fails() {
     assert_eq!(token_client.balance(&recipient), 0);
     assert_eq!(token_client.total_supply(), 8_000);
 }
+
+#[test]
+fn test_burn_reduces_balance_and_total_supply() {
+    let setup = fixtures::setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = Symbol::new(env, "course_1");
+    let quiz_id = Symbol::new(env, "quiz_1");
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
+    token_client.claim_reward(learner, &course_id, &quiz_id); // 8000
+
+    token_client.burn(learner, &3_000);
+
+    assert_eq!(token_client.balance(learner), 5_000);
+    assert_eq!(token_client.total_supply(), 5_000);
+}
+
+#[test]
+fn test_burn_from_with_allowance() {
+    let setup = fixtures::setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    let spender = Address::generate(env);
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = Symbol::new(env, "course_1");
+    let quiz_id = Symbol::new(env, "quiz_1");
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
+    token_client.claim_reward(learner, &course_id, &quiz_id); // 8000
+
+    token_client.approve(learner, &spender, &5_000, &999_999);
+
+    // The spender destroys part of the owner's balance using the allowance.
+    token_client.burn_from(&spender, learner, &2_000);
+
+    assert_eq!(token_client.balance(learner), 6_000);
+    assert_eq!(token_client.allowance(learner, &spender), 3_000);
+    assert_eq!(token_client.total_supply(), 6_000);
+    assert_eq!(token_client.balance(&spender), 0);
+}
+
+#[test]
+fn test_burn_after_full_learner_journey() {
+    let setup = fixtures::setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = fixtures::create_sample_course(env, &progress_client);
+    fixtures::complete_full_course(env, learner, &course_id, &progress_client);
+
+    // Earn the rewards for both quizzes, then burn part of the balance.
+    token_client.claim_reward(learner, &course_id, &Symbol::new(env, "quiz_midterm"));
+    token_client.claim_reward(learner, &course_id, &Symbol::new(env, "quiz_final"));
+    assert_eq!(token_client.balance(learner), 16_000);
+    assert_eq!(token_client.total_supply(), 16_000);
+
+    token_client.burn(learner, &6_000);
+
+    assert_eq!(token_client.balance(learner), 10_000);
+    assert_eq!(token_client.total_supply(), 10_000);
+}
