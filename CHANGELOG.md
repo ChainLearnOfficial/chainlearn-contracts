@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each operation against per-operation CPU instruction thresholds from
   `scripts/gas-thresholds.env`, and CI fails when any operation exceeds its
   threshold (#562)
+- Unit tests for `get_certificate_uri`: unset, generated, idempotent, learner- and
+  course-scoped, and `cert_`-prefixed format coverage (#545)
+- Minimum-delay validation on credential-nft `set_admin_transfer_delay`: values below the
+  one-hour `MIN_ADMIN_TRANSFER_DELAY_SECONDS` are rejected, and `admin_transfer_delay` is
+  clamped to that minimum (#546)
+- Minimum-delay validation on progress-tracker `set_admin_transfer_delay`, matching
+  credential-nft and learn-token (#547)
+- progress-tracker events now index `learner`/`course_id` as topic slots
+  (`[event_name, learner, course_id]`, `[event_name, course_id]`, or `[event_name, learner]`)
+  so indexers can filter server-side instead of scanning every payload (#549)
 - MIT `LICENSE` file, referenced from the README and declared in Cargo metadata (#341)
 - `CODE_OF_CONDUCT.md` with community standards, reporting and enforcement guidelines (#342)
 - GitHub issue templates for bug reports and feature requests, linked from the README (#343)
@@ -43,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unused `check_allowance_expired_readonly` helper in learn-token storage (#344)
 
 ### Fixed
+- credential-nft: removed a duplicated Emergency Pause block (duplicate `is_paused`,
+  `require_not_paused`, `emergency_pause` and `unpause` definitions) that prevented the
+  crate from compiling
 - learn-token governance proposal creation, voting, and execution now respect the emergency pause (#446)
 - progress-tracker rejects zero-score quiz retakes before comparing them with the stored score (#444)
 - `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)

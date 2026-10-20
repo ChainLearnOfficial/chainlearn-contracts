@@ -57,7 +57,9 @@ Tracks learner enrollment, module completion, and quiz scores:
   `module_completed(learner, course_id, module_id, overall_progress)`,
   `quiz_submitted(learner, course_id, quiz_id, score)`, and `credential_eligible(learner, course_id)` --
   published once, the moment eligibility flips from false to true, so indexers don't have to poll
-  `get_progress`
+  `get_progress`. Every learner/course event indexes `learner` and `course_id` as topic slots
+  (`[event_name, learner, course_id]`), so "every event for learner X" or "for course Y" is a
+  server-side `getEvents` topic filter rather than a full payload scan
 
 ### shared (Utilities Package)
 
@@ -473,7 +475,7 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 | `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
 | `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
 | `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
-| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the delay (minimum 3,600 seconds). |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the delay (minimum 3,600 seconds; panics below). |
 
 #### Configuration
 
@@ -573,7 +575,7 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 | `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
 | `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
 | `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
-| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the transfer delay. |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the transfer delay (minimum 3,600 seconds; panics below). |
 | `contract_metadata` | — | — | `ContractMetadata` | Contract name and version. |
 | `is_initialized` | — | — | `bool` | Whether initialized. |
 | `get_storage_size` | — | — | `u64` | Number of persistent storage entries. |
@@ -690,16 +692,24 @@ struct ContractMetadata {
 
 | Event | Topics | Data | Description |
 |---|---|---|---|
-| `course_created` | — | `(course_id, total_modules, total_quizzes, module_ids)` | New course registered. |
-| `enrolled` | — | `(learner, course_id, enrolled_at)` | Learner enrolled. |
-| `module_completed` | — | `(learner, course_id, module_id, overall_progress)` | Module marked complete. |
-| `quiz_submitted` | — | `(learner, course_id, quiz_id, score)` | Quiz score submitted. |
-| `quiz_retaken` | — | `(learner, course_id, quiz_id, previous_score, new_score)` | Quiz retaken with higher score. |
-| `credential_eligible` | — | `(learner, course_id)` | Learner became eligible for credential. |
-| `course_archived` | — | `(course_id,)` | Course archived. |
-| `content_hash_set` | — | `(course_id, content_hash)` | Content hash updated. |
-| `course_difficulty_set` | — | `(course_id, difficulty)` | Difficulty updated. |
-| `course_tags_set` | — | `(course_id, tags)` | Tags updated. |
+| `course_created` | `[course_created, course_id]` | `(total_modules, total_quizzes, module_ids)` | New course registered. |
+| `enrolled` | `[enrolled, learner, course_id]` | `(enrolled_at,)` | Learner enrolled. |
+| `module_completed` | `[module_completed, learner, course_id]` | `(module_id, overall_progress)` | Module marked complete. |
+| `quiz_submitted` | `[quiz_submitted, learner, course_id]` | `(quiz_id, score)` | Quiz score submitted. |
+| `quiz_retaken` | `[quiz_retaken, learner, course_id]` | `(quiz_id, previous_score, new_score)` | Quiz retaken with higher score. |
+| `credential_eligible` | `[credential_eligible, learner, course_id]` | `()` | Learner became eligible for credential. |
+| `course_archived` | `[course_archived, course_id]` | `()` | Course archived. |
+| `content_hash_set` | `[content_hash_set, course_id]` | `(content_hash,)` | Content hash updated. |
+| `course_difficulty_set` | `[course_difficulty_set, course_id]` | `(difficulty,)` | Difficulty updated. |
+| `course_tags_set` | `[course_tags_set, course_id]` | `(tags,)` | Tags updated. |
+| `course_version_updated` | `[course_version_updated, course_id]` | `(new_version,)` | Course version updated. |
+| `prerequisites_set` | `[prerequisites_set, course_id]` | `(prerequisites,)` | Prerequisites replaced. |
+| `achievement_earned` | `[achievement_earned, learner]` | `(achievement_type, course_id, timestamp)` | Achievement awarded. |
+| `progress_delegated` | `[progress_delegated, learner]` | `(delegate,)` | Progress tracking delegated. |
+| `delegation_revoked` | `[delegation_revoked, learner]` | `()` | Delegation revoked. |
+| `paused` | `[paused]` | `(admin, timestamp)` | Contract paused. |
+| `unpaused` | `[unpaused]` | `(admin, timestamp)` | Contract unpaused. |
+| `upgraded` | `[upgraded]` | `(new_wasm_hash, upgrade_version)` | Contract upgraded in place. |
 
 ### learn-token
 

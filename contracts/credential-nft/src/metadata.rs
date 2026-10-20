@@ -71,6 +71,9 @@ pub struct PendingAdminTransfer {
 /// Default delay (in seconds) a pending admin transfer must wait before it can
 /// be accepted, matching `learn-token`. 172_800s = 48 hours (#423).
 pub const DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS: u64 = 172_800;
+/// Smallest configurable admin-transfer delay; zero would defeat the handoff
+/// guard, matching `learn-token` (#445, #546).
+pub const MIN_ADMIN_TRANSFER_DELAY_SECONDS: u64 = 3_600;
 
 // ── Storage Size Tracking (#239) ─────────────────────────────────────────────
 //
