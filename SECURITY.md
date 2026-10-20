@@ -154,7 +154,7 @@ This document provides a structured security audit checklist for reviewing the C
 - [ ] All state-changing operations emit appropriate events
 - [ ] Events include indexed topics for efficient server-side filtering
 - [ ] Event data contains all fields needed to reconstruct the operation
-- [ ] `credential_revoked` events include learner, course_id, credential_id, and admin
+- [ ] `credential_revoked` events index learner and course_id as topics and carry credential_id and admin in data
 - [ ] `reward` events include learner, course_id, quiz_id, score, and amount
 - [ ] `credential_eligible` is emitted once per (learner, course) when eligibility first flips
 

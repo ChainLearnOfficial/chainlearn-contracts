@@ -38,7 +38,8 @@ Non-transferable (soulbound) credential NFTs that certify course completion:
 - **One per course**: Each learner can only receive one credential per course
 - **Non-transferable**: `transfer()` is rejected -- credentials are permanently bound to the earner
 - **Events**: `credential_minted(learner, course_id, credential_id, score, metadata_uri)` and
-  `credential_revoked(learner, course_id, credential_id, admin)`
+  `credential_revoked(learner, course_id, credential_id, admin)`. Both index the learner and
+  course as topics so indexers can filter credential activity per learner and per course
 
 ### progress-tracker (On-chain Progress)
 
@@ -715,12 +716,12 @@ struct ContractMetadata {
 
 | Event | Topics | Data | Description |
 |---|---|---|---|
-| `credential_minted` | — | `(learner, course_id, credential_id, score, metadata_uri)` | Credential minted. |
-| `credential_revoked` | — | `(learner, course_id, credential_id, admin)` | Credential revoked. |
-| `credential_revoked` (with reason) | — | `(learner, course_id, credential_id, admin, reason)` | Credential revoked with reason. |
-| `credential_renewed` | — | `(credential_id, new_expiry)` | Credential expiration renewed. |
-| `credential_metadata_updated` | — | `(credential_id, new_metadata_uri)` | Metadata URI updated. |
-| `credential_display_set` | — | `(credential_id,)` | Display properties set. |
+| `credential_minted` | `[credential_minted, learner, course_id]` | `(credential_id, score, metadata_uri)` | Credential minted. |
+| `credential_revoked` | `[credential_revoked, learner, course_id]` | `(credential_id, admin)` | Credential revoked. |
+| `credential_revoked` (with reason) | `[credential_revoked, learner, course_id]` | `(credential_id, admin, reason)` | Credential revoked with reason. |
+| `credential_renewed` | `[credential_renewed, credential_id]` | `(new_expiry,)` | Credential expiration renewed. |
+| `credential_metadata_updated` | `[credential_metadata_updated, credential_id]` | `(new_metadata_uri,)` | Metadata URI updated. |
+| `credential_display_set` | `[credential_display_set, credential_id]` | `(image_url, description, issuer_name)` | Display properties set. |
 | `certificate_generated` | `[certificate_generated, learner, course_id]` | `(cert_uri,)` | Certificate URI generated. |
 ## Documentation
 

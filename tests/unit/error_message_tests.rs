@@ -97,6 +97,9 @@ mod error_message_tests {
         quiz_ids.push_back(quiz_id.clone());
         pt_client.create_course(course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(learner, course_id);
+        // Complete the course's only module so credential mints get past the
+        // tracker's eligibility gate and reach the panic under test.
+        pt_client.complete_module(learner, course_id, &Symbol::new(env, "mod_1"));
         pt_client.submit_quiz_score(learner, course_id, quiz_id, &score);
     }
 

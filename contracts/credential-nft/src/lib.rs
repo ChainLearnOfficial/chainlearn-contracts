@@ -200,9 +200,12 @@ impl CredentialNft {
             &display,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "credential_display_set"),),
-            (credential_id,),
+        events::credential_display_set(
+            &env,
+            credential_id,
+            &display.image_url,
+            &display.description,
+            &display.issuer_name,
         );
     }
 
@@ -244,10 +247,7 @@ impl CredentialNft {
         info.metadata_uri = new_metadata_uri.clone();
         write_entry(&env, &CredentialDataKey::Credential(credential_id), &info);
 
-        env.events().publish(
-            (Symbol::new(&env, "credential_metadata_updated"),),
-            (credential_id, new_metadata_uri),
-        );
+        events::credential_metadata_updated(&env, credential_id, &new_metadata_uri);
     }
 
     /// Verify a credential and return its info.
@@ -624,51 +624,6 @@ impl CredentialNft {
         write_entry(&env, &CredentialDataKey::AdminTransferDelay, &delay_seconds);
     }
 
-    // ── Emergency Pause (#475) ───────────────────────────────────────────────
-
-    /// Check if the contract is paused.
-    fn is_paused(env: &Env) -> bool {
-        env.storage()
-            .persistent()
-            .get(&CredentialDataKey::Paused)
-            .unwrap_or(false)
-    }
-
-    /// Require that the contract is not paused, panicking otherwise.
-    fn require_not_paused(env: &Env) {
-        if Self::is_paused(env) {
-            panic!("contract is paused");
-        }
-    }
-
-    /// Pause all state-changing operations. Admin only (#475).
-    pub fn emergency_pause(env: Env) {
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&CredentialDataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
-        if Self::is_paused(&env) {
-            panic!("already paused");
-        }
-        write_entry(&env, &CredentialDataKey::Paused, &true);
-    }
-
-    /// Unpause all operations. Admin only (#475).
-    pub fn unpause(env: Env) {
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&CredentialDataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
-        if !Self::is_paused(&env) {
-            panic!("not paused");
-        }
-        write_entry(&env, &CredentialDataKey::Paused, &false);
-    }
-
     /// Reject transfer of a credential.
     ///
     /// Credentials are soulbound (non-transferable) and permanently bound to the
@@ -769,14 +724,7 @@ impl CredentialNft {
             }
         }
 
-        env.events().publish(
-            (
-                Symbol::new(&env, "certificate_generated"),
-                learner.clone(),
-                course_id.clone(),
-            ),
-            (cert_uri.clone(),),
-        );
+        events::certificate_generated(&env, &learner, &course_id, &cert_uri);
 
         cert_uri
     }
@@ -1452,14 +1400,21 @@ mod tests {
 
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
+        // Learner and course_id are indexed topics (#548); the credential id,
+        // score and metadata URI stay in the payload (#101).
         assert_eq!(
             vec![&env, last],
             vec![
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "credential_minted"),).into_val(&env),
-                    (learner, course_id, cred_id, 85u32, uri).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_minted"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (cred_id, 85u32, uri.clone()).into_val(&env),
                 )
             ]
         );
@@ -1489,8 +1444,13 @@ mod tests {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "credential_revoked"),).into_val(&env),
-                    (learner, course_id, cred_id, admin).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_revoked"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (cred_id, admin).into_val(&env),
                 )
             ]
         );

@@ -24,15 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation improvements for soulbound credential enforcement
 - `contract_metadata()` on all three contracts, returning the contract's name and version, stored on `initialize()` (#107)
 - `course_exists()` on progress-tracker, letting other contracts validate a `course_id` cheaply (#108)
+- Unit tests for `update_credential_metadata`: URI replacement, preservation of untouched fields, repeated updates, and rejection of unknown/short/malformed/empty URIs plus missing admin auth (#542)
+- Unit tests for `verify_credential_with_display`: empty, partial, and fully-populated display properties, overwrite semantics, per-credential scoping, and survival across revocation (#543)
+- Unit tests for `get_credentials_by_course`: mint-order pagination, exclusion of other courses, empty and fully-revoked course results, and read-only behaviour (#544)
 
 ### Changed
 - credential-nft: `revoke_credential` and `revoke_credential_with_reason` share a single implementation and prune indexes with host-side `first_index_of` (#344)
+- credential-nft events now follow the learn-token topic convention: the event name is `topics[0]`, learner and course_id are indexed topics, and indexed fields move out of `data` instead of being duplicated. `credential_minted`/`credential_revoked` topic on `[event, learner, course_id]`; `credential_renewed`, `credential_metadata_updated`, and `credential_display_set` topic on `[event, credential_id]` (#548)
 - learn-token: whitelist-only restrictions now require a 48-hour proposal period, and the configurable admin-transfer delay cannot be set below one hour (#445, #447)
 
 ### Removed
 - Unused `check_allowance_expired_readonly` helper in learn-token storage (#344)
 
 ### Fixed
+- credential-nft no longer declares `is_paused`/`require_not_paused`/`emergency_pause`/`unpause` twice, which broke compilation of the whole workspace (#475)
+- `test_set_course_difficulty_emits_event` compares the event payload field-by-field instead of comparing `Val`s, which is not supported by the Soroban SDK
+- `create_course_and_submit_quiz` test helpers now complete the course module before submitting a quiz, so credential-mint error-message tests reach the panic under test instead of failing the eligibility gate (#479)
 - learn-token governance proposal creation, voting, and execution now respect the emergency pause (#446)
 - progress-tracker rejects zero-score quiz retakes before comparing them with the stored score (#444)
 - `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)

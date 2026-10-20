@@ -234,6 +234,7 @@ fn test_unauthorized_archive_course() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test archive_course WITHOUT admin auth
+    env.set_auths(&[]);
     client.archive_course(&course_id);
 }
 
@@ -246,6 +247,7 @@ fn test_unauthorized_set_course_content_hash() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test set_course_content_hash WITHOUT admin auth
+    env.set_auths(&[]);
     client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash1"));
 }
 
@@ -258,6 +260,7 @@ fn test_unauthorized_set_course_difficulty() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test set_course_difficulty WITHOUT admin auth
+    env.set_auths(&[]);
     client.set_course_difficulty(&course_id, &0);
 }
 
@@ -272,6 +275,7 @@ fn test_unauthorized_set_course_tags() {
     let mut tags = Vec::new(&env);
     tags.push_back(Symbol::new(&env, "tag1"));
     // Now test set_course_tags WITHOUT admin auth
+    env.set_auths(&[]);
     client.set_course_tags(&course_id, &tags);
 }
 
@@ -284,6 +288,7 @@ fn test_unauthorized_update_course_version() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test update_course_version WITHOUT admin auth
+    env.set_auths(&[]);
     client.update_course_version(&course_id, &2);
 }
 
@@ -344,7 +349,7 @@ fn test_unauthorized_mint_credential() {
 #[should_panic]
 fn test_unauthorized_revoke_credential() {
     let env = Env::default();
-    let (admin, _contract_id, client) = setup_credential_nft(&env);
+    let (_admin, _contract_id, client) = setup_credential_nft(&env);
     
     // First mint a credential with the real admin (using mock_all_auths for setup)
     let learner = Address::generate(&env);
@@ -364,7 +369,7 @@ fn test_unauthorized_revoke_credential() {
     pt_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
     pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     
-    let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+    let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
     
     // Now try to revoke WITHOUT admin authorization (no mock_all_auths)
     client.revoke_credential(&cred_id);
@@ -374,7 +379,7 @@ fn test_unauthorized_revoke_credential() {
 #[should_panic]
 fn test_unauthorized_renew_credential() {
     let env = Env::default();
-    let (admin, _contract_id, client) = setup_credential_nft(&env);
+    let (_admin, _contract_id, client) = setup_credential_nft(&env);
     
     // First mint a credential with the real admin (using mock_all_auths for setup)
     let learner = Address::generate(&env);
@@ -394,7 +399,7 @@ fn test_unauthorized_renew_credential() {
     pt_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
     pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     
-    let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+    let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
     
     // Now try to renew WITHOUT admin authorization (no mock_all_auths)
     client.renew_credential(&cred_id, &1000);
@@ -404,7 +409,7 @@ fn test_unauthorized_renew_credential() {
 #[should_panic]
 fn test_unauthorized_set_credential_display() {
     let env = Env::default();
-    let (admin, _contract_id, client) = setup_credential_nft(&env);
+    let (_admin, _contract_id, client) = setup_credential_nft(&env);
     
     // First mint a credential with the real admin (using mock_all_auths for setup)
     let learner = Address::generate(&env);
@@ -424,7 +429,7 @@ fn test_unauthorized_set_credential_display() {
     pt_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
     pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     
-    let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+    let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
     
     // Now try to set display WITHOUT admin authorization (no mock_all_auths)
     client.set_credential_display(&cred_id, &None, &None, &None);

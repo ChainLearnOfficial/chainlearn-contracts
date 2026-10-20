@@ -52,6 +52,23 @@ mod xcontract_call_tests {
         pt_client.submit_quiz_score(learner, course_id, quiz_id, &score);
     }
 
+    /// Create a one-module course with both quizzes and enroll the learner, for
+    /// tests that submit scores for two quizzes in the same course.
+    fn create_course_with_quizzes(
+        env: &Env,
+        pt_client: &ProgressTrackerClient,
+        learner: &Address,
+        course_id: &Symbol,
+    ) {
+        let mut module_ids = Vec::new(env);
+        module_ids.push_back(Symbol::new(env, "mod_1"));
+        let mut quiz_ids = Vec::new(env);
+        quiz_ids.push_back(Symbol::new(env, "quiz_1"));
+        quiz_ids.push_back(Symbol::new(env, "quiz_2"));
+        pt_client.create_course(course_id, &1, &2, &module_ids, &quiz_ids);
+        pt_client.enroll(learner, course_id);
+    }
+
     // ── Successful cross-contract calls ──────────────────────────────────
 
     #[test]
@@ -577,8 +594,9 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id_1 = Symbol::new(&env, "quiz_1");
         let quiz_id_2 = Symbol::new(&env, "quiz_2");
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_1, 85);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_2, 75);
+        create_course_with_quizzes(&env, &pt_client, &learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_1, &85);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_2, &75);
 
         // Grant admin the Pauser role so it can pause, then pause.
         token_client.grant_role(
@@ -612,8 +630,9 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id_1 = Symbol::new(&env, "quiz_1");
         let quiz_id_2 = Symbol::new(&env, "quiz_2");
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_1, 50);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_2, 60);
+        create_course_with_quizzes(&env, &pt_client, &learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_1, &50);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_2, &60);
 
         token_client.grant_role(
             &admin,

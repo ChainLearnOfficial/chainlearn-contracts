@@ -223,10 +223,14 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
     let (admin, info) = revoke_and_prune(env, credential_id);
 
     // Emit the learner, course and revoking admin alongside the ID so revocations
-    // can be audited without a follow-up state read (#100).
-    env.events().publish(
-        (Symbol::new(env, "credential_revoked"),),
-        (info.learner, info.course_id, credential_id, admin),
+    // can be audited without a follow-up state read (#100), with learner and
+    // course indexed as topics (#548).
+    crate::events::credential_revoked(
+        env,
+        &info.learner,
+        &info.course_id,
+        credential_id,
+        &admin,
     );
 }
 
@@ -245,9 +249,15 @@ pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symb
         &reason,
     );
 
-    env.events().publish(
-        (Symbol::new(env, "credential_revoked"),),
-        (info.learner, info.course_id, credential_id, admin, reason),
+    // Same indexed topics as the reason-less variant so a revocation query
+    // covers both shapes; the reason rides in the payload (#548).
+    crate::events::credential_revoked_with_reason(
+        env,
+        &info.learner,
+        &info.course_id,
+        credential_id,
+        &admin,
+        &reason,
     );
 }
 
@@ -292,8 +302,5 @@ pub fn renew_credential(env: &Env, credential_id: u64, new_expiry: u32) {
     info.expires_at = new_expiry;
     crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
 
-    env.events().publish(
-        (Symbol::new(env, "credential_renewed"),),
-        (credential_id, new_expiry),
-    );
+    crate::events::credential_renewed(env, credential_id, new_expiry);
 }
