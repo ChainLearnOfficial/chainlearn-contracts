@@ -8,7 +8,7 @@ on-chain upgradeability in mind.
 
 ### Prerequisites
 
-- Rust **1.70 or later** (the workspace minimum supported Rust version is 1.70)
+- Rust **1.81.0 or later** (the workspace minimum supported Rust version is 1.81.0)
 - The `wasm32-unknown-unknown` Rust target
 - Git
 - Soroban CLI **v21+** when you need to deploy or invoke a contract locally or
