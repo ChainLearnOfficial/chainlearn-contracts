@@ -234,6 +234,7 @@ fn test_unauthorized_archive_course() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test archive_course WITHOUT admin auth
+    env.set_auths(&[]);
     env.mock_auths(&[]);
     client.archive_course(&course_id);
 }
@@ -247,6 +248,7 @@ fn test_unauthorized_set_course_content_hash() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test set_course_content_hash WITHOUT admin auth
+    env.set_auths(&[]);
     env.mock_auths(&[]);
     client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash1"));
 }
@@ -260,6 +262,7 @@ fn test_unauthorized_set_course_difficulty() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test set_course_difficulty WITHOUT admin auth
+    env.set_auths(&[]);
     env.mock_auths(&[]);
     client.set_course_difficulty(&course_id, &0);
 }
@@ -275,6 +278,7 @@ fn test_unauthorized_set_course_tags() {
     let mut tags = Vec::new(&env);
     tags.push_back(Symbol::new(&env, "tag1"));
     // Now test set_course_tags WITHOUT admin auth
+    env.set_auths(&[]);
     env.mock_auths(&[]);
     client.set_course_tags(&course_id, &tags);
 }
@@ -288,6 +292,7 @@ fn test_unauthorized_update_course_version() {
     env.mock_all_auths();
     let course_id = create_test_course(&env, &client);
     // Now test update_course_version WITHOUT admin auth
+    env.set_auths(&[]);
     env.mock_auths(&[]);
     client.update_course_version(&course_id, &2);
 }

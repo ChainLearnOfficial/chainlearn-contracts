@@ -200,9 +200,12 @@ impl CredentialNft {
             &display,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "credential_display_set"),),
-            (credential_id,),
+        events::credential_display_set(
+            &env,
+            credential_id,
+            &display.image_url,
+            &display.description,
+            &display.issuer_name,
         );
     }
 
@@ -244,10 +247,7 @@ impl CredentialNft {
         info.metadata_uri = new_metadata_uri.clone();
         write_entry(&env, &CredentialDataKey::Credential(credential_id), &info);
 
-        env.events().publish(
-            (Symbol::new(&env, "credential_metadata_updated"),),
-            (credential_id, new_metadata_uri),
-        );
+        events::credential_metadata_updated(&env, credential_id, &new_metadata_uri);
     }
 
     /// Verify a credential and return its info.
@@ -739,14 +739,7 @@ impl CredentialNft {
             }
         }
 
-        env.events().publish(
-            (
-                Symbol::new(&env, "certificate_generated"),
-                learner.clone(),
-                course_id.clone(),
-            ),
-            (cert_uri.clone(),),
-        );
+        events::certificate_generated(&env, &learner, &course_id, &cert_uri);
 
         cert_uri
     }
@@ -1486,14 +1479,21 @@ mod tests {
 
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
+        // Learner and course_id are indexed topics (#548); the credential id,
+        // score and metadata URI stay in the payload (#101).
         assert_eq!(
             vec![&env, last],
             vec![
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "credential_minted"),).into_val(&env),
-                    (learner, course_id, cred_id, 85u32, uri).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_minted"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (cred_id, 85u32, uri.clone()).into_val(&env),
                 )
             ]
         );
@@ -1523,8 +1523,13 @@ mod tests {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "credential_revoked"),).into_val(&env),
-                    (learner, course_id, cred_id, admin).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_revoked"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (cred_id, admin).into_val(&env),
                 )
             ]
         );

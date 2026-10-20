@@ -4758,6 +4758,12 @@ mod tests {
             topics,
             (Symbol::new(&env, "course_difficulty_set"), course_id.clone()).into_val(&env)
         );
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 2);
+        let data_course: Symbol = data_vec.get(0).unwrap().into_val(&env);
+        let data_difficulty: u32 = data_vec.get(1).unwrap().into_val(&env);
+        assert_eq!(data_course, course_id);
+        assert_eq!(data_difficulty, 2);
         assert_eq!(*data, (2u32,).into_val(&env));
     }
 

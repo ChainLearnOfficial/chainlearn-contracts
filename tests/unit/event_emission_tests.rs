@@ -614,8 +614,12 @@ mod credential_nft_events {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "credential_minted"),).into_val(&env),
-                    (learner, course_id, cred_id, 85u32, uri).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_minted"),
+                        learner.clone(),
+                        course_id.clone()
+                    ).into_val(&env),
+                    (cred_id, 85u32, uri).into_val(&env),
                 )
             ]
         );
@@ -644,8 +648,12 @@ mod credential_nft_events {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "credential_revoked"),).into_val(&env),
-                    (learner, course_id, cred_id, admin).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_revoked"),
+                        learner.clone(),
+                        course_id.clone()
+                    ).into_val(&env),
+                    (cred_id, admin).into_val(&env),
                 )
             ]
         );
@@ -669,9 +677,15 @@ mod credential_nft_events {
         let all = env.events().all();
         let (_, topics, _) = all.last().expect("no events emitted");
         let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
-        assert_eq!(topics_vec.len(), 1);
+        // event name, learner, course_id -- the two dimensions an indexer
+        // filters on are server-side topic filters (#548), not payload fields.
+        assert_eq!(topics_vec.len(), 3);
         let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
+        let topic_learner: Address = topics_vec.get(1).unwrap().into_val(&env);
+        let topic_course: Symbol = topics_vec.get(2).unwrap().into_val(&env);
         assert_eq!(event_name, Symbol::new(&env, "credential_revoked"));
+        assert_eq!(topic_learner, learner);
+        assert_eq!(topic_course, course_id);
     }
 
     #[test]
@@ -689,13 +703,119 @@ mod credential_nft_events {
         let cred_id = client.mint_credential(&learner, &course_id, &90, &uri);
 
         let all = env.events().all();
-        let (_, _, data) = all.last().expect("no events emitted");
-        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
-        assert_eq!(data_vec.len(), 5);
-        let data_uri: Symbol = data_vec.get(4).unwrap().into_val(&env);
-        assert_eq!(data_uri, uri);
+        let (_, topics, data) = all.last().expect("no events emitted");
 
-        let data_cred_id: u64 = data_vec.get(2).unwrap().into_val(&env);
+        // Learner and course moved to topics (#548); the payload keeps the
+        // credential id, score and metadata URI (#101).
+        let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
+        assert_eq!(topics_vec.len(), 3);
+        let topic_learner: Address = topics_vec.get(1).unwrap().into_val(&env);
+        let topic_course: Symbol = topics_vec.get(2).unwrap().into_val(&env);
+        assert_eq!(topic_learner, learner);
+        assert_eq!(topic_course, course_id);
+
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 3);
+        let data_cred_id: u64 = data_vec.get(0).unwrap().into_val(&env);
+        let data_score: u32 = data_vec.get(1).unwrap().into_val(&env);
+        let data_uri: Symbol = data_vec.get(2).unwrap().into_val(&env);
         assert_eq!(data_cred_id, cred_id);
+        assert_eq!(data_score, 90);
+        assert_eq!(data_uri, uri);
+    }
+
+    #[test]
+    fn test_credential_metadata_updated_event_is_indexed() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        complete_course(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        let new_uri = Symbol::new(&env, "ipfs_QmUpdated");
+        client.update_credential_metadata(&cred_id, &new_uri);
+
+        let all = env.events().all();
+        let (_, topics, data) = all.last().expect("no events emitted");
+        let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
+        assert_eq!(topics_vec.len(), 2);
+        let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
+        let topic_cred_id: u64 = topics_vec.get(1).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "credential_metadata_updated"));
+        assert_eq!(topic_cred_id, cred_id);
+
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 1);
+        let data_uri: Symbol = data_vec.get(0).unwrap().into_val(&env);
+        assert_eq!(data_uri, new_uri);
+    }
+
+    #[test]
+    fn test_credential_display_set_event_is_indexed() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        complete_course(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        let image_url = Some(Symbol::new(&env, "ipfs_img"));
+        let description = Some(Symbol::new(&env, "rust_cert"));
+        let issuer_name = Some(Symbol::new(&env, "chainlearn"));
+        client.set_credential_display(&cred_id, &image_url, &description, &issuer_name);
+
+        let all = env.events().all();
+        let (_, topics, data) = all.last().expect("no events emitted");
+        let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
+        assert_eq!(topics_vec.len(), 2);
+        let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
+        let topic_cred_id: u64 = topics_vec.get(1).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "credential_display_set"));
+        assert_eq!(topic_cred_id, cred_id);
+
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 3);
+        let data_image: Symbol = data_vec.get(0).unwrap().into_val(&env);
+        let data_description: Symbol = data_vec.get(1).unwrap().into_val(&env);
+        let data_issuer: Symbol = data_vec.get(2).unwrap().into_val(&env);
+        assert_eq!(data_image, image_url.unwrap());
+        assert_eq!(data_description, description.unwrap());
+        assert_eq!(data_issuer, issuer_name.unwrap());
+    }
+
+    #[test]
+    fn test_credential_renewed_event_is_indexed() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        complete_course(&env, &tracker_id, &learner, &course_id, 85);
+        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+
+        client.renew_credential(&cred_id, &5_000);
+
+        let all = env.events().all();
+        let (_, topics, data) = all.last().expect("no events emitted");
+        let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
+        assert_eq!(topics_vec.len(), 2);
+        let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
+        let topic_cred_id: u64 = topics_vec.get(1).unwrap().into_val(&env);
+        assert_eq!(event_name, Symbol::new(&env, "credential_renewed"));
+        assert_eq!(topic_cred_id, cred_id);
+
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 1);
+        let data_expiry: u32 = data_vec.get(0).unwrap().into_val(&env);
+        assert_eq!(data_expiry, 5_000);
     }
 }

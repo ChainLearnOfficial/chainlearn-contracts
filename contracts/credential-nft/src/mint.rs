@@ -171,11 +171,16 @@ pub fn mint_credential(
         &course_creds,
     );
 
-    // Emit mint event. `metadata_uri` is included so indexers can reconstruct the
-    // full credential metadata from the event stream alone (#101).
-    env.events().publish(
-        (Symbol::new(env, "credential_minted"),),
-        (to, course_id, credential_id, score, metadata_uri),
+    // Emit mint event. The learner and course are indexed topics and
+    // `metadata_uri` stays in the payload, so indexers can reconstruct the
+    // full credential metadata from the event stream alone (#101, #548).
+    crate::events::credential_minted(
+        env,
+        to,
+        course_id,
+        credential_id,
+        score,
+        metadata_uri,
     );
 
     credential_id
