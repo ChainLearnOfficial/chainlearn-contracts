@@ -68,13 +68,15 @@ Common types and constants used across all contracts:
 
 - `MIN_CREDENTIAL_SCORE` (50): Minimum score to mint a credential
 - `MAX_QUIZ_SCORE` (100): Maximum possible quiz score
-- `TOKEN_DECIMALS` (7): Token decimal places
+- `TOKEN_DECIMALS` (7): Recommended token decimal places (reference value only; not enforced on-chain)
 - `BASE_REWARD_PER_POINT` (100): Tokens minted per quiz point
 - `MAX_CREDENTIALS_PAGE_SIZE` (50): Maximum credentials returned by one paginated read
 - `zero_address(env)` / `ZERO_ADDRESS_STR`: The all-zero account, rejected as a mint recipient or new admin
 
-Token decimals are defined as `TOKEN_DECIMALS` (7) and passed as the `decimal` argument to
-`learn-token`'s `initialize` (the deployment scripts use 7).
+Token decimals are configured at deployment time via the `decimal` argument to `learn-token`'s
+`initialize`. The value is stored as-is and returned by `decimals()`; the contract does not read or
+enforce `TOKEN_DECIMALS`. The deployment scripts (`scripts/initialize.sh`) pass `--decimal 7` to
+match the shared constant.
 
 ### Cross-Contract Dependencies
 
