@@ -577,8 +577,15 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id_1 = Symbol::new(&env, "quiz_1");
         let quiz_id_2 = Symbol::new(&env, "quiz_2");
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_1, 85);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_2, 75);
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut course_quiz_ids = Vec::new(&env);
+        course_quiz_ids.push_back(quiz_id_1.clone());
+        course_quiz_ids.push_back(quiz_id_2.clone());
+        pt_client.create_course(&course_id, &1, &2, &module_ids, &course_quiz_ids);
+        pt_client.enroll(&learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_1, &85);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_2, &75);
 
         // Grant admin the Pauser role so it can pause, then pause.
         token_client.grant_role(
@@ -612,8 +619,15 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id_1 = Symbol::new(&env, "quiz_1");
         let quiz_id_2 = Symbol::new(&env, "quiz_2");
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_1, 50);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_2, 60);
+        let mut module_ids = Vec::new(&env);
+        module_ids.push_back(Symbol::new(&env, "mod_1"));
+        let mut course_quiz_ids = Vec::new(&env);
+        course_quiz_ids.push_back(quiz_id_1.clone());
+        course_quiz_ids.push_back(quiz_id_2.clone());
+        pt_client.create_course(&course_id, &1, &2, &module_ids, &course_quiz_ids);
+        pt_client.enroll(&learner, &course_id);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_1, &50);
+        pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_2, &60);
 
         token_client.grant_role(
             &admin,
