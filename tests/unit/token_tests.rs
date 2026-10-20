@@ -931,6 +931,9 @@ mod token_unit_tests {
         );
     }
 
+    // Regression guard (#581): these three pause-path tests must stay at
+    // module scope so the Rust test harness registers each as an independent
+    // test. Keep them out of any other test function's body.
     #[test]
     #[should_panic(expected = "contract is paused")]
     fn test_create_proposal_fails_while_paused() {
