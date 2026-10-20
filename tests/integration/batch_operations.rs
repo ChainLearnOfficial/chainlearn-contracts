@@ -72,7 +72,7 @@ fn test_batch_claim_reward_processes_quizzes_independently() {
 }
 
 #[test]
-fn test_batch_module_completion() {
+fn test_sequential_module_completion_in_loop() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
     let learner = &setup.learner;
