@@ -429,7 +429,7 @@ impl CredentialNft {
     }
 
     /// Pause all state-changing operations. Admin only.
-    pub fn emergency_pause(env: Env) {
+    pub fn pause(env: Env) {
         let admin: Address = env
             .storage()
             .persistent()
@@ -810,7 +810,7 @@ mod tests {
     // ── Issue #422: pause/unpause must be observable ─────────────────────
 
     #[test]
-    fn test_emergency_pause_emits_paused_event() {
+    fn test_pause_emits_paused_event() {
         let env = Env::default();
         let (admin, _contract_id, _tracker_id) = setup_contract(&env);
         let contract_id = env.register_contract(None, CredentialNft);
@@ -820,7 +820,7 @@ mod tests {
         env.mock_all_auths();
         let now = env.ledger().timestamp();
 
-        client.emergency_pause();
+        client.pause();
 
         let all = env.events().all();
         let last = all.last().expect("no event emitted");
@@ -848,7 +848,7 @@ mod tests {
         env.mock_all_auths();
         let now = env.ledger().timestamp();
 
-        client.emergency_pause();
+        client.pause();
         env.events().all(); // discard the pause event
 
         client.unpause();
@@ -870,7 +870,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "already paused")]
-    fn test_emergency_pause_rejects_double_pause() {
+    fn test_pause_rejects_double_pause() {
         let env = Env::default();
         let (admin, _contract_id, _tracker_id) = setup_contract(&env);
         let contract_id = env.register_contract(None, CredentialNft);
@@ -878,8 +878,8 @@ mod tests {
         client.initialize(&admin, &Address::generate(&env));
         env.mock_all_auths();
 
-        client.emergency_pause();
-        client.emergency_pause();
+        client.pause();
+        client.pause();
     }
 
     #[test]

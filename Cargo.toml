@@ -86,8 +86,8 @@ name = "pause_event_consistency"
 path = "tests/integration/pause_event_consistency.rs"
 
 [[test]]
-name = "emergency_pause_flow"
-path = "tests/integration/emergency_pause_flow.rs"
+name = "pause_flow"
+path = "tests/integration/pause_flow.rs"
 
 [[test]]
 name = "token_vesting_flow"

@@ -68,15 +68,13 @@ Common types and constants used across all contracts:
 
 - `MIN_CREDENTIAL_SCORE` (50): Minimum score to mint a credential
 - `MAX_QUIZ_SCORE` (100): Maximum possible quiz score
-- `TOKEN_DECIMALS` (7): Recommended token decimal places (reference value only; not enforced on-chain)
+- `TOKEN_DECIMALS` (7): Token decimal places
 - `BASE_REWARD_PER_POINT` (100): Tokens minted per quiz point
 - `MAX_CREDENTIALS_PAGE_SIZE` (50): Maximum credentials returned by one paginated read
 - `zero_address(env)` / `ZERO_ADDRESS_STR`: The all-zero account, rejected as a mint recipient or new admin
 
-Token decimals are configured at deployment time via the `decimal` argument to `learn-token`'s
-`initialize`. The value is stored as-is and returned by `decimals()`; the contract does not read or
-enforce `TOKEN_DECIMALS`. The deployment scripts (`scripts/initialize.sh`) pass `--decimal 7` to
-match the shared constant.
+Token decimals are defined as `TOKEN_DECIMALS` (7) and passed as the `decimal` argument to
+`learn-token`'s `initialize` (the deployment scripts use 7).
 
 ### Cross-Contract Dependencies
 
@@ -332,111 +330,111 @@ A learner is eligible for a credential when:
 
 #### Initialization
 
-| Function     | Auth | Parameters       | Returns                     | Description                                      |
-| ------------ | ---- | ---------------- | --------------------------- | ------------------------------------------------ |
-| `initialize` | —    | `admin: Address` | `Result<(), ContractError>` | Initialize the tracker. Can only be called once. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `initialize` | — | `admin: Address` | `Result<(), ContractError>` | Initialize the tracker. Can only be called once. |
 
 #### Course Management (Admin)
 
-| Function                   | Auth  | Parameters                                                                                                  | Returns | Description                                                                                  |
-| -------------------------- | ----- | ----------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------- |
-| `create_course`            | Admin | `course_id: Symbol, total_modules: u32, total_quizzes: u32, module_ids: Vec<Symbol>, quiz_ids: Vec<Symbol>` | —       | Register a new course with modules and quizzes. Module IDs and quiz IDs must each be unique. |
-| `archive_course`           | Admin | `course_id: Symbol`                                                                                         | —       | Archive a course, preventing new enrollments.                                                |
-| `set_course_content_hash`  | Admin | `course_id: Symbol, content_hash: Symbol`                                                                   | —       | Set or update the content integrity hash.                                                    |
-| `set_course_difficulty`    | Admin | `course_id: Symbol, difficulty: u32`                                                                        | —       | Set difficulty (0=beginner, 1=intermediate, 2=advanced).                                     |
-| `set_course_tags`          | Admin | `course_id: Symbol, tags: Vec<Symbol>`                                                                      | —       | Set tags for course categorization.                                                          |
-| `update_course_version`    | Admin | `course_id: Symbol`                                                                                         | —       | Increment course content version.                                                            |
-| `set_course_prerequisites` | Admin | `course_id: Symbol, prerequisites: Vec<Symbol>`                                                             | —       | Set prerequisite courses.                                                                    |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `create_course` | Admin | `course_id: Symbol, total_modules: u32, total_quizzes: u32, module_ids: Vec<Symbol>, quiz_ids: Vec<Symbol>` | — | Register a new course with modules and quizzes. Module IDs and quiz IDs must each be unique. |
+| `archive_course` | Admin | `course_id: Symbol` | — | Archive a course, preventing new enrollments. |
+| `set_course_content_hash` | Admin | `course_id: Symbol, content_hash: Symbol` | — | Set or update the content integrity hash. |
+| `set_course_difficulty` | Admin | `course_id: Symbol, difficulty: u32` | — | Set difficulty (0=beginner, 1=intermediate, 2=advanced). |
+| `set_course_tags` | Admin | `course_id: Symbol, tags: Vec<Symbol>` | — | Set tags for course categorization. |
+| `update_course_version` | Admin | `course_id: Symbol` | — | Increment course content version. |
+| `set_course_prerequisites` | Admin | `course_id: Symbol, prerequisites: Vec<Symbol>` | — | Set prerequisite courses. |
 
 #### Learner Progress
 
-| Function                  | Auth    | Parameters                                                                   | Returns | Description                                             |
-| ------------------------- | ------- | ---------------------------------------------------------------------------- | ------- | ------------------------------------------------------- |
-| `enroll`                  | Learner | `learner: Address, course_id: Symbol`                                        | —       | Enroll in a course.                                     |
-| `enroll_checked`          | Learner | `learner: Address, course_id: Symbol, expected_content_hash: Option<Symbol>` | —       | Enroll with content hash verification.                  |
-| `complete_module`         | Learner | `learner: Address, course_id: Symbol, module_id: Symbol`                     | —       | Mark a module complete (sequential ordering enforced).  |
-| `batch_complete_module`   | Learner | `learner: Address, course_id: Symbol, module_ids: Vec<Symbol>`               | —       | Complete multiple modules atomically.                   |
-| `submit_quiz_score`       | Learner | `learner: Address, course_id: Symbol, quiz_id: Symbol, score: u32`           | —       | Submit a quiz score (0-100).                            |
-| `batch_submit_quiz_score` | Learner | `learner: Address, course_id: Symbol, quiz_scores: Vec<(Symbol, u32)>`       | —       | Submit multiple quiz scores (partial failures skipped). |
-| `retake_quiz`             | Learner | `learner: Address, course_id: Symbol, quiz_id: Symbol, new_score: u32`       | —       | Retake a quiz with a higher score.                      |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `enroll` | Learner | `learner: Address, course_id: Symbol` | — | Enroll in a course. |
+| `enroll_checked` | Learner | `learner: Address, course_id: Symbol, expected_content_hash: Option<Symbol>` | — | Enroll with content hash verification. |
+| `complete_module` | Learner | `learner: Address, course_id: Symbol, module_id: Symbol` | — | Mark a module complete (sequential ordering enforced). |
+| `batch_complete_module` | Learner | `learner: Address, course_id: Symbol, module_ids: Vec<Symbol>` | — | Complete multiple modules atomically. |
+| `submit_quiz_score` | Learner | `learner: Address, course_id: Symbol, quiz_id: Symbol, score: u32` | — | Submit a quiz score (0-100). |
+| `batch_submit_quiz_score` | Learner | `learner: Address, course_id: Symbol, quiz_scores: Vec<(Symbol, u32)>` | — | Submit multiple quiz scores (partial failures skipped). |
+| `retake_quiz` | Learner | `learner: Address, course_id: Symbol, quiz_id: Symbol, new_score: u32` | — | Retake a quiz with a higher score. |
 
 #### Queries
 
-| Function                     | Auth | Parameters                                             | Returns          | Description                                            |
-| ---------------------------- | ---- | ------------------------------------------------------ | ---------------- | ------------------------------------------------------ |
-| `get_progress`               | —    | `learner: Address, course_id: Symbol`                  | `ProgressInfo`   | Full progress for a learner in a course.               |
-| `get_completion_percentage`  | —    | `learner: Address, course_id: Symbol`                  | `u32`            | Progress percentage (0-100) only.                      |
-| `export_progress`            | —    | `learner: Address, course_id: Symbol`                  | `ProgressExport` | Complete progress snapshot including all quiz results. |
-| `get_quiz_score`             | —    | `learner: Address, course_id: Symbol, quiz_id: Symbol` | `u32`            | Verified score for one quiz.                           |
-| `get_course_score`           | —    | `learner: Address, course_id: Symbol`                  | `u32`            | Average quiz score across all submitted quizzes.       |
-| `is_eligible_for_credential` | —    | `learner: Address, course_id: Symbol`                  | `bool`           | Whether the learner qualifies for a credential.        |
-| `get_course`                 | —    | `course_id: Symbol`                                    | `Course`         | Course configuration.                                  |
-| `get_course_difficulty`      | —    | `course_id: Symbol`                                    | `u32`            | Difficulty level of a course.                          |
-| `get_course_created_at`      | —    | `course_id: Symbol`                                    | `u64`            | Immutable creation timestamp.                          |
-| `get_course_tags`            | —    | `course_id: Symbol`                                    | `Vec<Symbol>`    | Tags for a course.                                     |
-| `get_courses_by_tag`         | —    | `tag: Symbol`                                          | `Vec<Symbol>`    | All courses with a given tag.                          |
-| `get_learner_stats`          | —    | `learner: Address`                                     | `LearnerStats`   | Aggregate stats across all courses.                    |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `get_progress` | — | `learner: Address, course_id: Symbol` | `ProgressInfo` | Full progress for a learner in a course. |
+| `get_completion_percentage` | — | `learner: Address, course_id: Symbol` | `u32` | Progress percentage (0-100) only. |
+| `export_progress` | — | `learner: Address, course_id: Symbol` | `ProgressExport` | Complete progress snapshot including all quiz results. |
+| `get_quiz_score` | — | `learner: Address, course_id: Symbol, quiz_id: Symbol` | `u32` | Verified score for one quiz. |
+| `get_course_score` | — | `learner: Address, course_id: Symbol` | `u32` | Average quiz score across all submitted quizzes. |
+| `is_eligible_for_credential` | — | `learner: Address, course_id: Symbol` | `bool` | Whether the learner qualifies for a credential. |
+| `get_course` | — | `course_id: Symbol` | `Course` | Course configuration. |
+| `get_course_difficulty` | — | `course_id: Symbol` | `u32` | Difficulty level of a course. |
+| `get_course_created_at` | — | `course_id: Symbol` | `u64` | Immutable creation timestamp. |
+| `get_course_tags` | — | `course_id: Symbol` | `Vec<Symbol>` | Tags for a course. |
+| `get_courses_by_tag` | — | `tag: Symbol` | `Vec<Symbol>` | All courses with a given tag. |
+| `get_learner_stats` | — | `learner: Address` | `LearnerStats` | Aggregate stats across all courses. |
 
 #### Metadata
 
-| Function            | Auth | Parameters | Returns                     | Description                                |
-| ------------------- | ---- | ---------- | --------------------------- | ------------------------------------------ |
-| `contract_metadata` | —    | —          | `VersionedContractMetadata` | Contract name, version, and upgrade count. |
-| `contract_version`  | —    | —          | `u32`                       | On-chain upgrade counter.                  |
-| `is_initialized`    | —    | —          | `bool`                      | Whether `initialize()` has been called.    |
-| `get_storage_size`  | —    | —          | `u64`                       | Number of persistent storage entries.      |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `contract_metadata` | — | — | `VersionedContractMetadata` | Contract name, version, and upgrade count. |
+| `contract_version` | — | — | `u32` | On-chain upgrade counter. |
+| `is_initialized` | — | — | `bool` | Whether `initialize()` has been called. |
+| `get_storage_size` | — | — | `u64` | Number of persistent storage entries. |
 
 ### learn-token
 
 #### Initialization
 
-| Function     | Auth | Parameters                                                                                                              | Returns                     | Description                                    |
-| ------------ | ---- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------- |
-| `initialize` | —    | `admin: Address, name: SorobanString, symbol: SorobanString, decimal: u32, progress_tracker: Address, max_supply: i128` | `Result<(), ContractError>` | Initialize the token. Can only be called once. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `initialize` | — | `admin: Address, name: SorobanString, symbol: SorobanString, decimal: u32, progress_tracker: Address, max_supply: i128` | `Result<(), ContractError>` | Initialize the token. Can only be called once. |
 
 #### SEP-41 Standard Interface
 
-| Function                     | Auth    | Parameters                                                                          | Returns         | Description                                  |
-| ---------------------------- | ------- | ----------------------------------------------------------------------------------- | --------------- | -------------------------------------------- |
-| `name`                       | —       | —                                                                                   | `SorobanString` | Token name.                                  |
-| `symbol`                     | —       | —                                                                                   | `SorobanString` | Token symbol.                                |
-| `decimals`                   | —       | —                                                                                   | `u32`           | Number of decimal places.                    |
-| `total_supply`               | —       | —                                                                                   | `i128`          | Current total supply.                        |
-| `balance`                    | —       | `address: Address`                                                                  | `i128`          | Token balance of an address.                 |
-| `total_minted_to`            | —       | `address: Address`                                                                  | `i128`          | Cumulative amount ever minted to an address. |
-| `transfer`                   | Owner   | `from: Address, to: Address, amount: i128`                                          | —               | Transfer tokens.                             |
-| `transfer_from`              | Spender | `spender: Address, from: Address, to: Address, amount: i128`                        | —               | Transfer on behalf of another address.       |
-| `approve`                    | Owner   | `owner: Address, spender: Address, amount: i128, expiration_ledger: u32`            | —               | Approve a spender.                           |
-| `increase_allowance`         | Owner   | `owner: Address, spender: Address, additional_amount: i128, expiration_ledger: u32` | —               | Increase allowance (front-run safe).         |
-| `allowance`                  | —       | `owner: Address, spender: Address`                                                  | `i128`          | Remaining allowance.                         |
-| `burn`                       | Owner   | `from: Address, amount: i128`                                                       | —               | Burn tokens.                                 |
-| `burn_from`                  | Spender | `spender: Address, from: Address, amount: i128`                                     | —               | Burn via allowance.                          |
-| `mint`                       | Minter  | `caller: Address, to: Address, amount: i128`                                        | —               | Mint new tokens (admin/minter only).         |
-| `prune_expired_allowance`    | —       | `owner: Address, spender: Address`                                                  | `bool`          | Remove an expired allowance from storage.    |
-| `cleanup_expired_allowances` | —       | `owner: Address`                                                                    | `u32`           | Remove all expired allowances for an owner.  |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `name` | — | — | `SorobanString` | Token name. |
+| `symbol` | — | — | `SorobanString` | Token symbol. |
+| `decimals` | — | — | `u32` | Number of decimal places. |
+| `total_supply` | — | — | `i128` | Current total supply. |
+| `balance` | — | `address: Address` | `i128` | Token balance of an address. |
+| `total_minted_to` | — | `address: Address` | `i128` | Cumulative amount ever minted to an address. |
+| `transfer` | Owner | `from: Address, to: Address, amount: i128` | — | Transfer tokens. |
+| `transfer_from` | Spender | `spender: Address, from: Address, to: Address, amount: i128` | — | Transfer on behalf of another address. |
+| `approve` | Owner | `owner: Address, spender: Address, amount: i128, expiration_ledger: u32` | — | Approve a spender. |
+| `increase_allowance` | Owner | `owner: Address, spender: Address, additional_amount: i128, expiration_ledger: u32` | — | Increase allowance (front-run safe). |
+| `allowance` | — | `owner: Address, spender: Address` | `i128` | Remaining allowance. |
+| `burn` | Owner | `from: Address, amount: i128` | — | Burn tokens. |
+| `burn_from` | Spender | `spender: Address, from: Address, amount: i128` | — | Burn via allowance. |
+| `mint` | Minter | `caller: Address, to: Address, amount: i128` | — | Mint new tokens (admin/minter only). |
+| `prune_expired_allowance` | — | `owner: Address, spender: Address` | `bool` | Remove an expired allowance from storage. |
+| `cleanup_expired_allowances` | — | `owner: Address` | `u32` | Remove all expired allowances for an owner. |
 
 #### ChainLearn Rewards
 
-| Function             | Auth    | Parameters                                                   | Returns            | Description                                                   |
-| -------------------- | ------- | ------------------------------------------------------------ | ------------------ | ------------------------------------------------------------- |
-| `claim_reward`       | Learner | `learner: Address, course_id: Symbol, quiz_id: Symbol`       | —                  | Claim token reward for a quiz. Score verified on-chain.       |
-| `batch_claim_reward` | Learner | `learner: Address, course_id: Symbol, quiz_ids: Vec<Symbol>` | `Vec<Symbol>`      | Claim rewards for multiple quizzes. Partial failures skipped. |
-| `estimate_claim_gas` | —       | `learner: Address, course_id: Symbol, quiz_id: Symbol`       | `ClaimEstimate`    | Preview a claim without executing (read-only).                |
-| `get_claim_history`  | —       | `learner: Address`                                           | `Vec<ClaimRecord>` | Full reward claim history for a learner.                      |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `claim_reward` | Learner | `learner: Address, course_id: Symbol, quiz_id: Symbol` | — | Claim token reward for a quiz. Score verified on-chain. |
+| `batch_claim_reward` | Learner | `learner: Address, course_id: Symbol, quiz_ids: Vec<Symbol>` | `Vec<Symbol>` | Claim rewards for multiple quizzes. Partial failures skipped. |
+| `estimate_claim_gas` | — | `learner: Address, course_id: Symbol, quiz_id: Symbol` | `ClaimEstimate` | Preview a claim without executing (read-only). |
+| `get_claim_history` | — | `learner: Address` | `Vec<ClaimRecord>` | Full reward claim history for a learner. |
 
 #### Transfer Restrictions
 
-| Function                       | Auth  | Parameters                         | Returns                              | Description                                                                             |
-| ------------------------------ | ----- | ---------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------- |
-| `set_transfer_restriction`     | Admin | `restriction: TransferRestriction` | —                                    | Apply other restrictions immediately; stage `WhitelistOnly` for a 48-hour grace period. |
-| `propose_transfer_restriction` | Admin | `restriction: TransferRestriction` | —                                    | Explicitly stage `WhitelistOnly` for delayed activation.                                |
-| `accept_transfer_restriction`  | Admin | —                                  | —                                    | Activate a pending restriction after 48 hours.                                          |
-| `cancel_transfer_restriction`  | Admin | —                                  | —                                    | Cancel a pending restriction.                                                           |
-| `pending_transfer_restriction` | —     | —                                  | `Option<PendingTransferRestriction>` | Read the pending restriction and its proposal time.                                     |
-| `get_transfer_restriction`     | —     | —                                  | `TransferRestriction`                | Current transfer restriction.                                                           |
-| `add_to_whitelist`             | Admin | `address: Address`                 | —                                    | Add address to whitelist.                                                               |
-| `remove_from_whitelist`        | Admin | `address: Address`                 | —                                    | Remove address from whitelist.                                                          |
-| `is_whitelisted`               | —     | `address: Address`                 | `bool`                               | Check whitelist status.                                                                 |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `set_transfer_restriction` | Admin | `restriction: TransferRestriction` | — | Apply other restrictions immediately; stage `WhitelistOnly` for a 48-hour grace period. |
+| `propose_transfer_restriction` | Admin | `restriction: TransferRestriction` | — | Explicitly stage `WhitelistOnly` for delayed activation. |
+| `accept_transfer_restriction` | Admin | — | — | Activate a pending restriction after 48 hours. |
+| `cancel_transfer_restriction` | Admin | — | — | Cancel a pending restriction. |
+| `pending_transfer_restriction` | — | — | `Option<PendingTransferRestriction>` | Read the pending restriction and its proposal time. |
+| `get_transfer_restriction` | — | — | `TransferRestriction` | Current transfer restriction. |
+| `add_to_whitelist` | Admin | `address: Address` | — | Add address to whitelist. |
+| `remove_from_whitelist` | Admin | `address: Address` | — | Remove address from whitelist. |
+| `is_whitelisted` | — | `address: Address` | `bool` | Check whitelist status. |
 
 #### Snapshots
 
@@ -446,151 +444,149 @@ Workflow: (1) `snapshot(h)` to announce, (2) `record_balance_snapshot(addr, h)` 
 that matters (e.g. each voter) before its balance changes, (3) read with `balance_at(addr, h)`.
 `balance_at` returns 0 for any address that was not recorded at that height.
 
-| Function                  | Auth  | Parameters                             | Returns | Description                                                  |
-| ------------------------- | ----- | -------------------------------------- | ------- | ------------------------------------------------------------ |
-| `snapshot`                | Admin | `ledger_height: u32`                   | —       | Marker only: emits `snapshot_created`, stores no balances.   |
-| `record_balance_snapshot` | Admin | `address: Address, ledger_height: u32` | —       | Store the address's current balance under `ledger_height`.   |
-| `balance_at`              | —     | `address: Address, ledger_height: u32` | `i128`  | Balance recorded for the address at that height (0 if none). |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `snapshot` | Admin | `ledger_height: u32` | — | Marker only: emits `snapshot_created`, stores no balances. |
+| `record_balance_snapshot` | Admin | `address: Address, ledger_height: u32` | — | Store the address's current balance under `ledger_height`. |
+| `balance_at` | — | `address: Address, ledger_height: u32` | `i128` | Balance recorded for the address at that height (0 if none). |
 
 #### Admin
 
-| Function              | Auth        | Parameters                                                       | Returns              | Description                                        |
-| --------------------- | ----------- | ---------------------------------------------------------------- | -------------------- | -------------------------------------------------- |
-| `admin`               | —           | —                                                                | `Address`            | Admin address.                                     |
-| `has_role`            | —           | `address: Address, role: AdminRole`                              | `bool`               | Check role assignment.                             |
-| `grant_role`          | Admin       | `caller: Address, address: Address, role: AdminRole`             | —                    | Grant a role.                                      |
-| `revoke_role`         | Admin       | `caller: Address, address: Address, role: AdminRole`             | —                    | Revoke a role.                                     |
-| `add_admin`           | Admin       | `caller: Address, admin_info: AdminInfo`                         | —                    | Add admin with role.                               |
-| `remove_admin`        | Admin       | `caller: Address, admin_info: AdminInfo`                         | —                    | Remove admin.                                      |
-| `get_admins`          | —           | —                                                                | `Vec<AdminInfo>`     | List all admins and roles.                         |
-| `execute_multisig_op` | Multi-Admin | `caller: Address, co_signer: Address, operation: Symbol`         | —                    | Execute a critical operation requiring two admins. |
-| `upgrade_multisig`    | Multi-Admin | `caller: Address, co_signer: Address, new_wasm_hash: BytesN<32>` | —                    | Upgrade contract with multi-sig.                   |
-| `upgrade`             | Admin       | `new_wasm_hash: BytesN<32>`                                      | —                    | Upgrade contract WASM (single admin).              |
-| `wasm_hash`           | —           | —                                                                | `Option<BytesN<32>>` | Current WASM hash.                                 |
-| `upgrade_version`     | —           | —                                                                | `u32`                | Number of upgrades performed.                      |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `admin` | — | — | `Address` | Admin address. |
+| `has_role` | — | `address: Address, role: AdminRole` | `bool` | Check role assignment. |
+| `grant_role` | Admin | `caller: Address, address: Address, role: AdminRole` | — | Grant a role. |
+| `revoke_role` | Admin | `caller: Address, address: Address, role: AdminRole` | — | Revoke a role. |
+| `add_admin` | Admin | `caller: Address, admin_info: AdminInfo` | — | Add admin with role. |
+| `remove_admin` | Admin | `caller: Address, admin_info: AdminInfo` | — | Remove admin. |
+| `get_admins` | — | — | `Vec<AdminInfo>` | List all admins and roles. |
+| `execute_multisig_op` | Multi-Admin | `caller: Address, co_signer: Address, operation: Symbol` | — | Execute a critical operation requiring two admins. |
+| `upgrade_multisig` | Multi-Admin | `caller: Address, co_signer: Address, new_wasm_hash: BytesN<32>` | — | Upgrade contract with multi-sig. |
+| `upgrade` | Admin | `new_wasm_hash: BytesN<32>` | — | Upgrade contract WASM (single admin). |
+| `wasm_hash` | — | — | `Option<BytesN<32>>` | Current WASM hash. |
+| `upgrade_version` | — | — | `u32` | Number of upgrades performed. |
 
 #### Admin Transfer (Delayed)
 
-| Function                   | Auth    | Parameters           | Returns                        | Description                                          |
-| -------------------------- | ------- | -------------------- | ------------------------------ | ---------------------------------------------------- |
-| `transfer_admin`           | Admin   | `new_admin: Address` | —                              | Initiate delayed admin transfer.                     |
-| `accept_admin`             | Pending | —                    | —                              | Accept admin role after delay.                       |
-| `cancel_admin_transfer`    | Admin   | —                    | —                              | Cancel pending admin transfer.                       |
-| `pending_admin`            | —       | —                    | `Option<PendingAdminTransfer>` | Pending transfer details.                            |
-| `admin_transfer_delay`     | —       | —                    | `u64`                          | Current delay in seconds.                            |
-| `set_admin_transfer_delay` | Admin   | `delay_seconds: u64` | —                              | Set the delay (minimum 3,600 seconds; panics below). |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `transfer_admin` | Admin | `new_admin: Address` | — | Initiate delayed admin transfer. |
+| `accept_admin` | Pending | — | — | Accept admin role after delay. |
+| `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
+| `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
+| `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the delay (minimum 3,600 seconds; panics below). |
 
 #### Configuration
 
-| Function               | Auth  | Parameters                      | Returns            | Description                           |
-| ---------------------- | ----- | ------------------------------- | ------------------ | ------------------------------------- |
-| `progress_tracker`     | —     | —                               | `Address`          | Progress-tracker contract address.    |
-| `set_progress_tracker` | Admin | `new_progress_tracker: Address` | —                  | Update progress-tracker address.      |
-| `max_supply`           | —     | —                               | `i128`             | Maximum supply cap.                   |
-| `set_max_supply`       | Admin | `new_max_supply: i128`          | —                  | Update supply cap (max 2x increase).  |
-| `contract_metadata`    | —     | —                               | `ContractMetadata` | Contract name and version.            |
-| `is_initialized`       | —     | —                               | `bool`             | Whether initialized.                  |
-| `get_storage_size`     | —     | —                               | `u32`              | Number of persistent storage entries. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `progress_tracker` | — | — | `Address` | Progress-tracker contract address. |
+| `set_progress_tracker` | Admin | `new_progress_tracker: Address` | — | Update progress-tracker address. |
+| `max_supply` | — | — | `i128` | Maximum supply cap. |
+| `set_max_supply` | Admin | `new_max_supply: i128` | — | Update supply cap (max 2x increase). |
+| `contract_metadata` | — | — | `ContractMetadata` | Contract name and version. |
+| `is_initialized` | — | — | `bool` | Whether initialized. |
+| `get_storage_size` | — | — | `u32` | Number of persistent storage entries. |
 
 #### Emergency Controls
 
-| Function    | Auth   | Parameters        | Returns | Description                          |
-| ----------- | ------ | ----------------- | ------- | ------------------------------------ |
-| `pause`     | Pauser | `caller: Address` | —       | Pause all state-changing operations. |
-| `unpause`   | Pauser | `caller: Address` | —       | Resume operations.                   |
-| `is_paused` | —      | —                 | `bool`  | Whether paused.                      |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `pause` | Pauser | `caller: Address` | — | Pause all state-changing operations. |
+| `unpause` | Pauser | `caller: Address` | — | Resume operations. |
+| `is_paused` | — | — | `bool` | Whether paused. |
 
 #### Vesting
 
-| Function               | Auth        | Parameters                                                                              | Returns                   | Description                                         |
-| ---------------------- | ----------- | --------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------- |
-| `create_vesting`       | Admin       | `beneficiary: Address, total_amount: i128, cliff_timestamp: u64, duration_seconds: u64` | —                         | Create a vesting schedule.                          |
-| `claim_vested`         | Beneficiary | `beneficiary: Address`                                                                  | —                         | Claim vested tokens.                                |
-| `get_vesting_schedule` | —           | `beneficiary: Address`                                                                  | `Option<VestingSchedule>` | Vesting schedule details.                           |
-| `get_vesting_claimed`  | —           | `beneficiary: Address`                                                                  | `i128`                    | Total vested tokens already claimed by beneficiary. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `create_vesting` | Admin | `beneficiary: Address, total_amount: i128, cliff_timestamp: u64, duration_seconds: u64` | — | Create a vesting schedule. |
+| `claim_vested` | Beneficiary | `beneficiary: Address` | — | Claim vested tokens. |
+| `get_vesting_schedule` | — | `beneficiary: Address` | `Option<VestingSchedule>` | Vesting schedule details. |
 
 #### Governance
 
-| Function           | Auth         | Parameters                                                                                       | Returns            | Description                                                              |
-| ------------------ | ------------ | ------------------------------------------------------------------------------------------------ | ------------------ | ------------------------------------------------------------------------ |
-| `create_proposal`  | Admin        | `description: SorobanString, choices: u32, start_time: u64, end_time: u64, snapshot_ledger: u32` | `u64`              | Create a proposal using a past ledger for voting power.                  |
-| `vote`             | Token Holder | `voter: Address, proposal_id: u64, choice: u32`                                                  | —                  | Cast a vote using the voter's recorded balance at the proposal snapshot. |
-| `execute_proposal` | Admin        | `proposal_id: u64`                                                                               | `u32`              | Execute a passed proposal. Returns the winning choice index.             |
-| `get_proposal`     | —            | `proposal_id: u64`                                                                               | `Option<Proposal>` | Proposal details.                                                        |
-| `proposal_count`   | —            | —                                                                                                | `u64`              | Total number of governance proposals created.                            |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `create_proposal` | Admin | `description: String, choices: u32, start_time: u64, end_time: u64, snapshot_ledger: u32` | `u64` | Create a proposal using a past ledger for voting power. |
+| `vote` | Token Holder | `proposal_id: u64, choice: u32` | — | Cast a vote using the voter's recorded balance at the proposal snapshot. |
+| `execute_proposal` | Admin | `proposal_id: u64` | `u32` | Execute a passed proposal. Returns the winning choice index. |
+| `get_proposal` | — | `proposal_id: u64` | `Option<Proposal>` | Proposal details. |
 
 ### credential-nft
 
 #### Initialization
 
-| Function     | Auth | Parameters                                  | Returns                     | Description                                       |
-| ------------ | ---- | ------------------------------------------- | --------------------------- | ------------------------------------------------- |
-| `initialize` | —    | `admin: Address, progress_tracker: Address` | `Result<(), ContractError>` | Initialize the contract. Can only be called once. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `initialize` | — | `admin: Address, progress_tracker: Address` | `Result<(), ContractError>` | Initialize the contract. Can only be called once. |
 
 #### Credential Management
 
-| Function                         | Auth            | Parameters                                                         | Returns                  | Description                                                      |
-| -------------------------------- | --------------- | ------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------- |
-| `mint_credential`                | Admin + Learner | `to: Address, course_id: Symbol, score: u32, metadata_uri: Symbol` | `u64`                    | Mint a credential NFT. Score-gated (>=50) and verified on-chain. |
-| `verify_credential`              | —               | `credential_id: u64`                                               | `CredentialInfo`         | Verify a credential and return its info.                         |
-| `verify_credential_with_display` | —               | `credential_id: u64`                                               | `CredentialVerification` | Verify with optional display properties.                         |
-| `revoke_credential`              | Admin           | `credential_id: u64`                                               | —                        | Revoke a credential.                                             |
-| `revoke_credential_with_reason`  | Admin           | `credential_id: u64, reason: Symbol`                               | —                        | Revoke with a reason.                                            |
-| `get_revocation_reason`          | —               | `credential_id: u64`                                               | `Option<Symbol>`         | Revocation reason, if any.                                       |
-| `renew_credential`               | Admin           | `credential_id: u64, new_expiry: u32`                              | —                        | Renew expiration (0 = no expiration).                            |
-| `is_credential_valid`            | —               | `credential_id: u64`                                               | `bool`                   | Check if valid (exists, not revoked, not expired).               |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `mint_credential` | Admin + Learner | `to: Address, course_id: Symbol, score: u32, metadata_uri: Symbol` | `u64` | Mint a credential NFT. Score-gated (>=50) and verified on-chain. |
+| `verify_credential` | — | `credential_id: u64` | `CredentialInfo` | Verify a credential and return its info. |
+| `verify_credential_with_display` | — | `credential_id: u64` | `CredentialVerification` | Verify with optional display properties. |
+| `revoke_credential` | Admin | `credential_id: u64` | — | Revoke a credential. |
+| `revoke_credential_with_reason` | Admin | `credential_id: u64, reason: Symbol` | — | Revoke with a reason. |
+| `get_revocation_reason` | — | `credential_id: u64` | `Option<Symbol>` | Revocation reason, if any. |
+| `renew_credential` | Admin | `credential_id: u64, new_expiry: u32` | — | Renew expiration (0 = no expiration). |
+| `is_credential_valid` | — | `credential_id: u64` | `bool` | Check if valid (exists, not revoked, not expired). |
 
 #### Display Properties
 
-| Function                 | Auth  | Parameters                                                                                                | Returns                     | Description             |
-| ------------------------ | ----- | --------------------------------------------------------------------------------------------------------- | --------------------------- | ----------------------- |
-| `set_credential_display` | Admin | `credential_id: u64, image_url: Option<Symbol>, description: Option<Symbol>, issuer_name: Option<Symbol>` | —                           | Set display properties. |
-| `get_credential_display` | —     | `credential_id: u64`                                                                                      | `Option<CredentialDisplay>` | Get display properties. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `set_credential_display` | Admin | `credential_id: u64, image_url: Option<Symbol>, description: Option<Symbol>, issuer_name: Option<Symbol>` | — | Set display properties. |
+| `get_credential_display` | — | `credential_id: u64` | `Option<CredentialDisplay>` | Get display properties. |
 
 #### Lookups
 
-| Function                      | Auth | Parameters                                 | Returns    | Description                                   |
-| ----------------------------- | ---- | ------------------------------------------ | ---------- | --------------------------------------------- |
-| `get_credentials_for`         | —    | `learner: Address, start: u32, limit: u32` | `Vec<u64>` | Paginated credential IDs for a learner.       |
-| `get_credential_count`        | —    | `learner: Address`                         | `u32`      | Total credentials a learner holds.            |
-| `get_total_credentials_count` | —    | —                                          | `u64`      | Total credentials issued across all learners. |
-| `get_credentials_by_course`   | —    | `course_id: Symbol`                        | `Vec<u64>` | All credential IDs for a course.              |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `get_credentials_for` | — | `learner: Address, start: u32, limit: u32` | `Vec<u64>` | Paginated credential IDs for a learner. |
+| `get_credential_count` | — | `learner: Address` | `u32` | Total credentials a learner holds. |
+| `get_total_credentials_count` | — | — | `u64` | Total credentials issued across all learners. |
+| `get_credentials_by_course` | — | `course_id: Symbol` | `Vec<u64>` | All credential IDs for a course. |
 
 #### Soulbound Transfer
 
-| Function   | Auth | Parameters                                       | Returns                     | Description                                                        |
-| ---------- | ---- | ------------------------------------------------ | --------------------------- | ------------------------------------------------------------------ |
-| `transfer` | —    | `from: Address, to: Address, credential_id: u64` | `Result<(), ContractError>` | Always returns `Err(Soulbound)`. Credentials are non-transferable. |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `transfer` | — | `from: Address, to: Address, credential_id: u64` | `Result<(), ContractError>` | Always returns `Err(Soulbound)`. Credentials are non-transferable. |
 
 #### Certificate Generation
 
-| Function               | Auth    | Parameters                            | Returns          | Description                                   |
-| ---------------------- | ------- | ------------------------------------- | ---------------- | --------------------------------------------- |
-| `generate_certificate` | Learner | `learner: Address, course_id: Symbol` | `Symbol`         | Generate a course completion certificate URI. |
-| `get_certificate_uri`  | —       | `learner: Address, course_id: Symbol` | `Option<Symbol>` | Query a generated certificate URI.            |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `generate_certificate` | Learner | `learner: Address, course_id: Symbol` | `Symbol` | Generate a course completion certificate URI. |
+| `get_certificate_uri` | — | `learner: Address, course_id: Symbol` | `Option<Symbol>` | Query a generated certificate URI. |
 
 #### Admin
 
-| Function                   | Auth    | Parameters           | Returns                        | Description                                                   |
-| -------------------------- | ------- | -------------------- | ------------------------------ | ------------------------------------------------------------- |
-| `admin`                    | —       | —                    | `Address`                      | Admin address.                                                |
-| `progress_tracker`         | —       | —                    | `Address`                      | Progress-tracker address.                                     |
-| `transfer_admin`           | Admin   | `new_admin: Address` | —                              | Initiate delayed admin transfer.                              |
-| `accept_admin`             | Pending | —                    | —                              | Accept admin role after delay.                                |
-| `cancel_admin_transfer`    | Admin   | —                    | —                              | Cancel pending admin transfer.                                |
-| `pending_admin`            | —       | —                    | `Option<PendingAdminTransfer>` | Pending transfer details.                                     |
-| `admin_transfer_delay`     | —       | —                    | `u64`                          | Current delay in seconds.                                     |
-| `set_admin_transfer_delay` | Admin   | `delay_seconds: u64` | —                              | Set the transfer delay (minimum 3,600 seconds; panics below). |
-| `contract_metadata`        | —       | —                    | `ContractMetadata`             | Contract name and version.                                    |
-| `is_initialized`           | —       | —                    | `bool`                         | Whether initialized.                                          |
-| `get_storage_size`         | —       | —                    | `u64`                          | Number of persistent storage entries.                         |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `admin` | — | — | `Address` | Admin address. |
+| `progress_tracker` | — | — | `Address` | Progress-tracker address. |
+| `transfer_admin` | Admin | `new_admin: Address` | — | Initiate delayed admin transfer. |
+| `accept_admin` | Pending | — | — | Accept admin role after delay. |
+| `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
+| `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
+| `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the transfer delay (minimum 3,600 seconds; panics below). |
+| `contract_metadata` | — | — | `ContractMetadata` | Contract name and version. |
+| `is_initialized` | — | — | `bool` | Whether initialized. |
+| `get_storage_size` | — | — | `u64` | Number of persistent storage entries. |
 
 #### Emergency Controls
 
-| Function          | Auth  | Parameters | Returns | Description                          |
-| ----------------- | ----- | ---------- | ------- | ------------------------------------ |
-| `emergency_pause` | Admin | —          | —       | Pause all state-changing operations. |
-| `unpause`         | Admin | —          | —       | Resume operations.                   |
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `pause` | Admin | — | — | Pause all state-changing operations. |
+| `unpause` | Admin | — | — | Resume operations. |
 
 ## Data Types
 
@@ -695,70 +691,69 @@ struct ContractMetadata {
 
 ### progress-tracker
 
-| Event                    | Topics                                      | Data                                         | Description                             |
-| ------------------------ | ------------------------------------------- | -------------------------------------------- | --------------------------------------- |
-| `course_created`         | `[course_created, course_id]`               | `(total_modules, total_quizzes, module_ids)` | New course registered.                  |
-| `enrolled`               | `[enrolled, learner, course_id]`            | `(enrolled_at,)`                             | Learner enrolled.                       |
-| `module_completed`       | `[module_completed, learner, course_id]`    | `(module_id, overall_progress)`              | Module marked complete.                 |
-| `quiz_submitted`         | `[quiz_submitted, learner, course_id]`      | `(quiz_id, score)`                           | Quiz score submitted.                   |
-| `quiz_retaken`           | `[quiz_retaken, learner, course_id]`        | `(quiz_id, previous_score, new_score)`       | Quiz retaken with higher score.         |
-| `credential_eligible`    | `[credential_eligible, learner, course_id]` | `()`                                         | Learner became eligible for credential. |
-| `course_archived`        | `[course_archived, course_id]`              | `()`                                         | Course archived.                        |
-| `content_hash_set`       | `[content_hash_set, course_id]`             | `(content_hash,)`                            | Content hash updated.                   |
-| `course_difficulty_set`  | `[course_difficulty_set, course_id]`        | `(difficulty,)`                              | Difficulty updated.                     |
-| `course_tags_set`        | `[course_tags_set, course_id]`              | `(tags,)`                                    | Tags updated.                           |
-| `course_version_updated` | `[course_version_updated, course_id]`       | `(new_version,)`                             | Course version updated.                 |
-| `prerequisites_set`      | `[prerequisites_set, course_id]`            | `(prerequisites,)`                           | Prerequisites replaced.                 |
-| `achievement_earned`     | `[achievement_earned, learner]`             | `(achievement_type, course_id, timestamp)`   | Achievement awarded.                    |
-| `progress_delegated`     | `[progress_delegated, learner]`             | `(delegate,)`                                | Progress tracking delegated.            |
-| `delegation_revoked`     | `[delegation_revoked, learner]`             | `()`                                         | Delegation revoked.                     |
-| `paused`                 | `[paused]`                                  | `(admin, timestamp)`                         | Contract paused.                        |
-| `unpaused`               | `[unpaused]`                                | `(admin, timestamp)`                         | Contract unpaused.                      |
-| `upgraded`               | `[upgraded]`                                | `(new_wasm_hash, upgrade_version)`           | Contract upgraded in place.             |
+| Event | Topics | Data | Description |
+|---|---|---|---|
+| `course_created` | `[course_created, course_id]` | `(total_modules, total_quizzes, module_ids)` | New course registered. |
+| `enrolled` | `[enrolled, learner, course_id]` | `(enrolled_at,)` | Learner enrolled. |
+| `module_completed` | `[module_completed, learner, course_id]` | `(module_id, overall_progress)` | Module marked complete. |
+| `quiz_submitted` | `[quiz_submitted, learner, course_id]` | `(quiz_id, score)` | Quiz score submitted. |
+| `quiz_retaken` | `[quiz_retaken, learner, course_id]` | `(quiz_id, previous_score, new_score)` | Quiz retaken with higher score. |
+| `credential_eligible` | `[credential_eligible, learner, course_id]` | `()` | Learner became eligible for credential. |
+| `course_archived` | `[course_archived, course_id]` | `()` | Course archived. |
+| `content_hash_set` | `[content_hash_set, course_id]` | `(content_hash,)` | Content hash updated. |
+| `course_difficulty_set` | `[course_difficulty_set, course_id]` | `(difficulty,)` | Difficulty updated. |
+| `course_tags_set` | `[course_tags_set, course_id]` | `(tags,)` | Tags updated. |
+| `course_version_updated` | `[course_version_updated, course_id]` | `(new_version,)` | Course version updated. |
+| `prerequisites_set` | `[prerequisites_set, course_id]` | `(prerequisites,)` | Prerequisites replaced. |
+| `achievement_earned` | `[achievement_earned, learner]` | `(achievement_type, course_id, timestamp)` | Achievement awarded. |
+| `progress_delegated` | `[progress_delegated, learner]` | `(delegate,)` | Progress tracking delegated. |
+| `delegation_revoked` | `[delegation_revoked, learner]` | `()` | Delegation revoked. |
+| `paused` | `[paused]` | `(admin, timestamp)` | Contract paused. |
+| `unpaused` | `[unpaused]` | `(admin, timestamp)` | Contract unpaused. |
+| `upgraded` | `[upgraded]` | `(new_wasm_hash, upgrade_version)` | Contract upgraded in place. |
 
 ### learn-token
 
-| Event                          | Topics                                  | Data                                                | Description                                                    |
-| ------------------------------ | --------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
-| `reward`                       | `[reward, learner, course_id]`          | `(quiz_id, score, reward_amount)`                   | Reward claimed.                                                |
-| `transfer`                     | `[transfer, from, to]`                  | `(amount,)`                                         | Tokens transferred.                                            |
-| `transfer_from`                | `[transfer_from, from, to]`             | `(spender, amount)`                                 | Delegated transfer.                                            |
-| `burn`                         | `[burn, from]`                          | `(amount,)`                                         | Tokens burned.                                                 |
-| `burn_from`                    | `[burn_from, from]`                     | `(spender, amount)`                                 | Delegated burn.                                                |
-| `mint`                         | `[mint, to]`                            | `(amount,)`                                         | Tokens minted.                                                 |
-| `approve`                      | `[approve, owner, spender]`             | `(amount, expiration_ledger)`                       | Allowance set.                                                 |
-| `allowance_expired`            | `[allowance_expired, owner, spender]`   | `(expiration_ledger,)`                              | Expired allowance accessed.                                    |
-| `restriction_updated`          | `[restriction_updated]`                 | `(restriction,)`                                    | Transfer restriction changed.                                  |
-| `whitelist_updated`            | `[whitelist_updated, address]`          | `(added,)`                                          | Whitelist changed.                                             |
-| `snapshot_created`             | `[snapshot_created]`                    | `(ledger_height,)`                                  | Snapshot announced (marker; balances are recorded separately). |
-| `upgraded`                     | `[upgraded]`                            | `(new_wasm_hash, upgrade_version)`                  | Contract upgraded.                                             |
-| `role_granted`                 | `[role_granted, address]`               | `(role,)`                                           | Admin role granted.                                            |
-| `role_revoked`                 | `[role_revoked, address]`               | `(role,)`                                           | Admin role revoked.                                            |
-| `paused`                       | `[paused]`                              | `(admin, timestamp)`                                | Contract paused.                                               |
-| `unpaused`                     | `[unpaused]`                            | `(admin, timestamp)`                                | Contract unpaused.                                             |
-| `vesting_created`              | `[vesting_created, beneficiary]`        | `(total_amount, cliff_timestamp, duration_seconds)` | Vesting schedule created.                                      |
-| `vesting_claimed`              | `[vesting_claimed, beneficiary]`        | `(claimed_amount, total_claimed)`                   | Vested tokens claimed.                                         |
-| `proposal_created`             | `[proposal_created]`                    | `(proposal_id, start_time, end_time)`               | Governance proposal created.                                   |
-| `vote_cast`                    | `[vote_cast, voter]`                    | `(proposal_id, choice, voting_power)`               | Vote cast.                                                     |
-| `proposal_executed`            | `[proposal_executed]`                   | `(proposal_id, winning_choice, winning_votes)`      | Proposal executed.                                             |
-| `max_supply_updated`           | `[max_supply_updated]`                  | `(old_max_supply, new_max_supply)`                  | Supply cap changed.                                            |
-| `admin_transfer_initiated`     | `[admin_transfer_initiated, new_admin]` | `(current_admin, initiated_at, accept_after)`       | Admin transfer started.                                        |
-| `admin_transfer_accepted`      | `[admin_transfer_accepted, new_admin]`  | `(previous_admin,)`                                 | Admin transfer accepted.                                       |
-| `admin_transfer_cancelled`     | `[admin_transfer_cancelled, new_admin]` | `(current_admin,)`                                  | Admin transfer cancelled.                                      |
-| `admin_transfer_delay_updated` | `[admin_transfer_delay_updated]`        | `(old_delay_seconds, new_delay_seconds)`            | Delay changed.                                                 |
+| Event | Topics | Data | Description |
+|---|---|---|---|
+| `reward` | `[reward, learner, course_id]` | `(quiz_id, score, reward_amount)` | Reward claimed. |
+| `transfer` | `[transfer, from, to]` | `(amount,)` | Tokens transferred. |
+| `transfer_from` | `[transfer_from, from, to]` | `(spender, amount)` | Delegated transfer. |
+| `burn` | `[burn, from]` | `(amount,)` | Tokens burned. |
+| `burn_from` | `[burn_from, from]` | `(spender, amount)` | Delegated burn. |
+| `mint` | `[mint, to]` | `(amount,)` | Tokens minted. |
+| `approve` | `[approve, owner, spender]` | `(amount, expiration_ledger)` | Allowance set. |
+| `allowance_expired` | `[allowance_expired, owner, spender]` | `(expiration_ledger,)` | Expired allowance accessed. |
+| `restriction_updated` | `[restriction_updated]` | `(restriction,)` | Transfer restriction changed. |
+| `whitelist_updated` | `[whitelist_updated, address]` | `(added,)` | Whitelist changed. |
+| `snapshot_created` | `[snapshot_created]` | `(ledger_height,)` | Snapshot announced (marker; balances are recorded separately). |
+| `upgraded` | `[upgraded]` | `(new_wasm_hash, upgrade_version)` | Contract upgraded. |
+| `role_granted` | `[role_granted, address]` | `(role,)` | Admin role granted. |
+| `role_revoked` | `[role_revoked, address]` | `(role,)` | Admin role revoked. |
+| `paused` | `[paused]` | `(admin, timestamp)` | Contract paused. |
+| `unpaused` | `[unpaused]` | `(admin, timestamp)` | Contract unpaused. |
+| `vesting_created` | `[vesting_created, beneficiary]` | `(total_amount, cliff_timestamp, duration_seconds)` | Vesting schedule created. |
+| `vesting_claimed` | `[vesting_claimed, beneficiary]` | `(claimed_amount, total_claimed)` | Vested tokens claimed. |
+| `proposal_created` | `[proposal_created]` | `(proposal_id, start_time, end_time)` | Governance proposal created. |
+| `vote_cast` | `[vote_cast, voter]` | `(proposal_id, choice, voting_power)` | Vote cast. |
+| `proposal_executed` | `[proposal_executed]` | `(proposal_id, winning_choice, winning_votes)` | Proposal executed. |
+| `max_supply_updated` | `[max_supply_updated]` | `(old_max_supply, new_max_supply)` | Supply cap changed. |
+| `admin_transfer_initiated` | `[admin_transfer_initiated, new_admin]` | `(current_admin, initiated_at, accept_after)` | Admin transfer started. |
+| `admin_transfer_accepted` | `[admin_transfer_accepted, new_admin]` | `(previous_admin,)` | Admin transfer accepted. |
+| `admin_transfer_cancelled` | `[admin_transfer_cancelled, new_admin]` | `(current_admin,)` | Admin transfer cancelled. |
+| `admin_transfer_delay_updated` | `[admin_transfer_delay_updated]` | `(old_delay_seconds, new_delay_seconds)` | Delay changed. |
 
 ### credential-nft
 
-| Event                              | Topics                                         | Data                                    | Description                     |
-| ---------------------------------- | ---------------------------------------------- | --------------------------------------- | ------------------------------- |
-| `credential_minted`                | `[credential_minted, learner, course_id]`      | `(credential_id, score, metadata_uri)`  | Credential minted.              |
-| `credential_revoked`               | `[credential_revoked, learner, course_id]`     | `(credential_id, admin)`                | Credential revoked.             |
-| `credential_revoked` (with reason) | `[credential_revoked, learner, course_id]`     | `(credential_id, admin, reason)`        | Credential revoked with reason. |
-| `credential_renewed`               | `[credential_renewed, credential_id]`          | `(new_expiry,)`                         | Credential expiration renewed.  |
-| `credential_metadata_updated`      | `[credential_metadata_updated, credential_id]` | `(new_metadata_uri,)`                   | Metadata URI updated.           |
-| `credential_display_set`           | `[credential_display_set, credential_id]`      | `(image_url, description, issuer_name)` | Display properties set.         |
-| `certificate_generated`            | `[certificate_generated, learner, course_id]`  | `(cert_uri,)`                           | Certificate URI generated.      |
-
+| Event | Topics | Data | Description |
+|---|---|---|---|
+| `credential_minted` | `[credential_minted, learner, course_id]` | `(credential_id, score, metadata_uri)` | Credential minted. |
+| `credential_revoked` | `[credential_revoked, learner, course_id]` | `(credential_id, admin)` | Credential revoked. |
+| `credential_revoked` (with reason) | `[credential_revoked, learner, course_id]` | `(credential_id, admin, reason)` | Credential revoked with reason. |
+| `credential_renewed` | `[credential_renewed, credential_id]` | `(new_expiry,)` | Credential expiration renewed. |
+| `credential_metadata_updated` | `[credential_metadata_updated, credential_id]` | `(new_metadata_uri,)` | Metadata URI updated. |
+| `credential_display_set` | `[credential_display_set, credential_id]` | `(image_url, description, issuer_name)` | Display properties set. |
+| `certificate_generated` | `[certificate_generated, learner, course_id]` | `(cert_uri,)` | Certificate URI generated. |
 ## Documentation
 
 - [Architecture](./docs/architecture.md) - Contract relationships, data flow, and storage layout
@@ -783,7 +778,6 @@ Templates live in [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLATE). Keep th
 This project is licensed under the [MIT License](./LICENSE). Copyright (c) 2026 ChainLearn.
 
 ### Common Error Conditions
-
 - `AlreadyInitialized`: The contract has already been initialized.
 - `NotAuthorized`: The caller lacks the required administrative or ownership privileges.
 - `NotFound`: The requested resource (course, module, credential) does not exist.
@@ -791,9 +785,7 @@ This project is licensed under the [MIT License](./LICENSE). Copyright (c) 2026 
 - `InsufficientAllowance`: The spender is not approved for the required token amount.
 
 ### Examples
-
 For comprehensive integration examples, see the `examples/` directory in the repository root, which includes:
-
 - Rust client (`examples/rust_client_example.rs`)
 - JavaScript client (`examples/javascript_client_example.js`)
 - CLI examples (`examples/cli_usage_examples.sh`)

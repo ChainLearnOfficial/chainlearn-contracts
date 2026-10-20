@@ -1734,7 +1734,7 @@ mod progress_unit_tests {
         client.delegate_progress(&learner, &delegate);
         assert_eq!(client.delegated_to(&learner), Some(delegate));
 
-        client.emergency_pause();
+        client.pause();
 
         // delegate_progress must fail when paused
         let other = Address::generate(&env);
@@ -2494,7 +2494,7 @@ mod progress_unit_tests {
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
 
-        client.emergency_pause();
+        client.pause();
 
         // enroll_checked must fail when paused
         assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
@@ -2520,7 +2520,7 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &50);
 
-        client.emergency_pause();
+        client.pause();
 
         let caller = learner.clone();
         assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());

@@ -2,7 +2,7 @@
 //!
 //! Mirrors the `learn-token` event module so the three contracts emit a
 //! consistent set of operational events (#422). Pause events previously had no
-//! home here, so `emergency_pause`/`unpause` were the only admin operations in
+//! home here, so `pause`/`unpause` were the only admin operations in
 //! this contract that monitoring tooling could not observe.
 
 use soroban_sdk::{Address, BytesN, Env, Symbol, Vec};

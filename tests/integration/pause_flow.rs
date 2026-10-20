@@ -18,7 +18,7 @@ use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Into
 /// Unpause restores all operations. Read-only functions still work.
 /// Pause/unpause events are emitted.
 #[test]
-fn test_token_emergency_pause_prevents_state_changes() {
+fn test_token_pause_prevents_state_changes() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
     let admin = &setup.admin;
@@ -101,7 +101,7 @@ fn test_token_emergency_pause_prevents_state_changes() {
 /// Pause prevents enrollment, module completion, and quiz submissions.
 /// Unpause restores operations. Read-only functions still work.
 #[test]
-fn test_progress_tracker_emergency_pause() {
+fn test_progress_tracker_pause() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
     let learner = &setup.learner;
@@ -113,7 +113,7 @@ fn test_progress_tracker_emergency_pause() {
     let course_id = fixtures::create_sample_course(env, &progress_client);
 
     // ── Pause ──
-    progress_client.emergency_pause();
+    progress_client.pause();
 
     // ── Enrollment reverts when paused ──
     let new_learner = Address::generate(env);
@@ -128,7 +128,7 @@ fn test_progress_tracker_emergency_pause() {
     // Enroll a learner before pausing so we can test complete_module.
     progress_client.unpause();
     progress_client.enroll(learner, &course_id);
-    progress_client.emergency_pause();
+    progress_client.pause();
     assert!(progress_client
         .try_complete_module(learner, &course_id, &Symbol::new(env, "mod_basics"))
         .is_err());
@@ -160,7 +160,7 @@ fn test_progress_tracker_emergency_pause() {
 /// Pause prevents minting, revoking, and renewing credentials.
 /// Unpause restores operations. Read-only functions still work.
 #[test]
-fn test_credential_nft_emergency_pause() {
+fn test_credential_nft_pause() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
     let learner = &setup.learner;
@@ -187,7 +187,7 @@ fn test_credential_nft_emergency_pause() {
     let cred_id = credential_client.mint_credential(learner, &course_id, &85, &uri);
 
     // ── Pause ──
-    credential_client.emergency_pause();
+    credential_client.pause();
 
     // ── Minting reverts when paused ──
     let new_learner = Address::generate(env);

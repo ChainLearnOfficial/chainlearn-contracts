@@ -1814,7 +1814,7 @@ impl ProgressTracker {
     }
 
     /// Pause all state-changing operations. Admin only.
-    pub fn emergency_pause(env: Env) {
+    pub fn pause(env: Env) {
         let admin: Address = env
             .storage()
             .persistent()
@@ -2685,7 +2685,7 @@ mod tests {
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
 
-        client.emergency_pause();
+        client.pause();
         client.enroll_checked(&learner, &course_id, &None);
     }
 
@@ -3960,7 +3960,7 @@ mod tests {
     // ── Issue #422: pause/unpause must be observable ─────────────────────
 
     #[test]
-    fn test_emergency_pause_emits_paused_event() {
+    fn test_pause_emits_paused_event() {
         let env = Env::default();
         let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
@@ -3968,7 +3968,7 @@ mod tests {
         env.mock_all_auths();
         env.ledger().with_mut(|l| l.timestamp = 42_000);
 
-        client.emergency_pause();
+        client.pause();
 
         let all = env.events().all();
         let last = all.last().expect("no event emitted");
@@ -3994,7 +3994,7 @@ mod tests {
         env.mock_all_auths();
         env.ledger().with_mut(|l| l.timestamp = 43_500);
 
-        client.emergency_pause();
+        client.pause();
         env.events().all(); // discard the pause event
 
         client.unpause();
@@ -4016,14 +4016,14 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "already paused")]
-    fn test_emergency_pause_rejects_double_pause() {
+    fn test_pause_rejects_double_pause() {
         let env = Env::default();
         let (_admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
-        client.emergency_pause();
-        client.emergency_pause();
+        client.pause();
+        client.pause();
     }
 
     #[test]
@@ -4213,7 +4213,7 @@ mod tests {
         let client = ProgressTrackerClient::new(env, &contract_id);
         env.mock_all_auths();
         let course_id = create_test_course(env, &client);
-        client.emergency_pause();
+        client.pause();
         (contract_id, course_id)
     }
 
@@ -4299,7 +4299,7 @@ mod tests {
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
 
-        client.emergency_pause();
+        client.pause();
         // The learner has to be able to retry for real once the pause lifts
         // (covered below), so this must be the pause rejecting the call and
         // not some other guard firing first.
@@ -4323,7 +4323,7 @@ mod tests {
         client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
         client.delegate_progress(&learner, &delegate);
 
-        client.emergency_pause();
+        client.pause();
         client.retake_quiz_for(&delegate, &learner, &course_id, &quiz_1, &90);
     }
 
@@ -4341,7 +4341,7 @@ mod tests {
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
 
-        client.emergency_pause();
+        client.pause();
         client.unpause();
 
         // Unpaused retakes still work, so the new guard is not a blanket ban.
@@ -4383,7 +4383,7 @@ mod tests {
         let learner = Address::generate(&env);
         let delegate = Address::generate(&env);
 
-        client.emergency_pause();
+        client.pause();
         client.delegate_progress(&learner, &delegate);
     }
 
@@ -4400,7 +4400,7 @@ mod tests {
         client.delegate_progress(&learner, &delegate);
         assert_eq!(client.delegated_to(&learner), Some(delegate));
 
-        client.emergency_pause();
+        client.pause();
 
         let other = Address::generate(&env);
         assert!(client.try_delegate_progress(&learner, &other).is_err());

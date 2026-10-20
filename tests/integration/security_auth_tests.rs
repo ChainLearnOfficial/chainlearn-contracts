@@ -313,11 +313,11 @@ fn test_unauthorized_set_prerequisites() {
 
 #[test]
 #[should_panic]
-fn test_unauthorized_emergency_pause_progress_tracker() {
+fn test_unauthorized_pause_progress_tracker() {
     let env = Env::default();
     let (_admin, _contract_id, client) = setup_progress_tracker(&env);
     // Admin not authorized - should fail
-    client.emergency_pause();
+    client.pause();
 }
 
 // ── Credential NFT Admin Function Auth Tests ──
@@ -452,9 +452,9 @@ fn test_unauthorized_transfer_admin_credential_nft() {
 
 #[test]
 #[should_panic]
-fn test_unauthorized_emergency_pause_credential_nft() {
+fn test_unauthorized_pause_credential_nft() {
     let env = Env::default();
     let (_admin, _contract_id, client) = setup_credential_nft(&env);
     // Admin not authorized - should fail
-    client.emergency_pause();
+    client.pause();
 }

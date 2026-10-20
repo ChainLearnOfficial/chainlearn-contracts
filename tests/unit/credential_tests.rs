@@ -870,7 +870,7 @@ mod credential_unit_tests {
         let cred_id =
             client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
 
-        client.emergency_pause();
+        client.pause();
 
         client.update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_QmReplaced"));
     }

@@ -48,12 +48,12 @@ fn test_pause_events_consistent_across_contracts() {
         last_event(env, &setup.token_contract_id),
         (paused.clone(), expected.clone())
     );
-    progress.emergency_pause();
+    progress.pause();
     assert_eq!(
         last_event(env, &setup.progress_contract_id),
         (paused.clone(), expected.clone())
     );
-    credential.emergency_pause();
+    credential.pause();
     assert_eq!(
         last_event(env, &setup.credential_contract_id),
         (paused, expected.clone())
