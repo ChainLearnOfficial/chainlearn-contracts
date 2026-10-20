@@ -4545,7 +4545,8 @@ mod tests {
             )
                 .into_val(&env)
         );
-        assert_eq!(*data, (quiz_1, 55u32, 75u32).into_val(&env));
+        let decoded: (Symbol, u32, u32) = data.into_val(&env);
+        assert_eq!(decoded, (quiz_1, 55u32, 75u32));
     }
 
     #[test]
@@ -4753,18 +4754,13 @@ mod tests {
         client.set_course_difficulty(&course_id, &2);
 
         let events = env.events().all();
-        let (_, topics, _data) = events.last().unwrap();
+        let (_, topics, data) = events.last().unwrap();
         assert_eq!(
             topics,
             (Symbol::new(&env, "course_difficulty_set"), course_id.clone()).into_val(&env)
         );
-        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
-        assert_eq!(data_vec.len(), 2);
-        let data_course: Symbol = data_vec.get(0).unwrap().into_val(&env);
-        let data_difficulty: u32 = data_vec.get(1).unwrap().into_val(&env);
-        assert_eq!(data_course, course_id);
-        assert_eq!(data_difficulty, 2);
-        assert_eq!(*data, (2u32,).into_val(&env));
+        let decoded: (u32,) = data.into_val(&env);
+        assert_eq!(decoded, (2u32,));
     }
 
     #[test]
@@ -4944,5 +4940,128 @@ mod tests {
             assert_eq!(current_version, initial_version + i);
         }
     }
-}
 
+    // ── Issue #589: negative tests for progress-tracker delegation auth ──────
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_complete_module_for_panics_for_non_delegated_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.complete_module_for(
+            &unauthorized,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "mod_1"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_submit_quiz_score_for_panics_for_non_delegated_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score_for(
+            &unauthorized,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            &85,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_retake_quiz_for_panics_for_non_delegated_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+        let quiz_1 = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_1, &60);
+        client.retake_quiz_for(&unauthorized, &learner, &course_id, &quiz_1, &90);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_batch_complete_module_for_panics_for_non_delegated_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        let modules = vec![&env, Symbol::new(&env, "mod_1"), Symbol::new(&env, "mod_2")];
+        client.batch_complete_module_for(&unauthorized, &learner, &course_id, &modules);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_batch_submit_quiz_score_for_panics_for_non_delegated_caller() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        let scores = vec![
+            &env,
+            (Symbol::new(&env, "quiz_1"), 80u32),
+            (Symbol::new(&env, "quiz_2"), 90u32),
+        ];
+        client.batch_submit_quiz_score_for(&unauthorized, &learner, &course_id, &scores);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_former_delegate_rejected_after_revoke_delegation() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+        client.complete_module_for(&delegate, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+
+        client.revoke_delegation(&learner);
+        assert_eq!(client.delegated_to(&learner), None);
+
+        // Former delegate must be rejected once delegation is revoked.
+        client.complete_module_for(&delegate, &learner, &course_id, &Symbol::new(&env, "mod_2"));
+    }
+}
