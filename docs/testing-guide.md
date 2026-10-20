@@ -63,3 +63,19 @@ To ensure robustness, the following coverage requirements must be met:
 3. **Integration Tests**: Tests verifying the interactions between `learn-token`, `credential-nft`, and `progress-tracker` must be included.
 
 Run coverage tools (e.g., `tarpaulin`) locally before submitting a pull request to verify requirements are met.
+
+## Gas Regression Thresholds
+
+Execution cost is guarded by `./scripts/estimate-gas.sh`, which runs the
+benchmarks in `tests/benchmarks/gas_benchmarks.rs` and compares each operation's
+CPU instruction count against a per-operation threshold. CI runs this script on
+every pull request and fails if any operation exceeds its threshold.
+
+Thresholds are defined in `scripts/gas-thresholds.env`. To update one:
+
+1. Run `./scripts/estimate-gas.sh` and note the reported `CPU INSNS` for the
+   operation.
+2. Set `GAS_LIMIT_<operation>` with headroom above the observed cost (the
+   in-test baselines use roughly 2x the observed cost).
+3. Commit the changed threshold together with the change that moved the cost,
+   and explain the increase in the pull request.

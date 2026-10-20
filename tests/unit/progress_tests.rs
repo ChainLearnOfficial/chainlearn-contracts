@@ -549,8 +549,13 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (soroban_sdk::symbol_short!("enrolled"),).into_val(&env),
-                    (learner, course_id, 12345u64).into_val(&env),
+                    (
+                        soroban_sdk::symbol_short!("enrolled"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (12345u64,).into_val(&env),
                 )
             ]
         );
@@ -582,14 +587,13 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "module_completed"),).into_val(&env),
                     (
+                        Symbol::new(&env, "module_completed"),
                         learner.clone(),
-                        course_id.clone(),
-                        Symbol::new(&env, "mod_2"),
-                        46u32,
+                        course_id.clone()
                     )
                         .into_val(&env),
+                    (Symbol::new(&env, "mod_2"), 46u32).into_val(&env),
                 )
             ]
         );
@@ -609,8 +613,13 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
-                    (learner, course_id).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_eligible"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    ().into_val(&env),
                 )
             ]
         );
@@ -990,8 +999,13 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "quiz_retaken"),).into_val(&env),
-                    (learner, course_id, quiz_id, 40u32, 90u32).into_val(&env),
+                    (
+                        Symbol::new(&env, "quiz_retaken"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (quiz_id, 40u32, 90u32).into_val(&env),
                 )
             ]
         );
@@ -1033,8 +1047,13 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
-                    (learner, course_id).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_eligible"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    ().into_val(&env),
                 )
             ]
         );
@@ -1604,8 +1623,8 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "progress_delegated"),).into_val(&env),
-                    (learner, delegate).into_val(&env),
+                    (Symbol::new(&env, "progress_delegated"), learner.clone()).into_val(&env),
+                    (delegate,).into_val(&env),
                 )
             ]
         );
@@ -1681,8 +1700,8 @@ mod progress_unit_tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "delegation_revoked"),).into_val(&env),
-                    (learner,).into_val(&env),
+                    (Symbol::new(&env, "delegation_revoked"), learner.clone()).into_val(&env),
+                    ().into_val(&env),
                 )
             ]
         );
@@ -2253,7 +2272,7 @@ mod progress_unit_tests {
         assert_eq!(client.get_storage_size(), before_version_update);
 
         // Test transfer_admin and accept_admin
-        client.set_admin_transfer_delay(&0);
+        client.set_admin_transfer_delay(&3_600);
         let before_transfer = client.get_storage_size();
         let new_admin = Address::generate(&env);
 
@@ -2261,6 +2280,8 @@ mod progress_unit_tests {
         // PendingAdmin added (+1)
         assert_eq!(client.get_storage_size(), before_transfer + 1);
 
+        // Advance past the configured one-hour minimum delay.
+        env.ledger().with_mut(|l| l.timestamp += 3_600);
         client.accept_admin();
         // PendingAdmin removed (-1), Admin overwritten (+0)
         assert_eq!(client.get_storage_size(), before_transfer);

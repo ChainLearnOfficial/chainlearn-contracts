@@ -313,7 +313,7 @@ contract.accept_admin();
 | `cancel_admin_transfer` | Admin | — | Clear the pending transfer. |
 | `pending_admin` | — | `Option<PendingAdminTransfer>` | Inspect the in-flight transfer. |
 | `admin_transfer_delay` | — | `u64` | Current delay in seconds. |
-| `set_admin_transfer_delay` | Admin | — | Set the delay for future transfers. |
+| `set_admin_transfer_delay` | Admin | — | Set the delay for future transfers (minimum 3,600 seconds). |
 
 Notes for integrators:
 
@@ -322,7 +322,17 @@ Notes for integrators:
 - Calling `transfer_admin` again before acceptance **overwrites** the candidate
   and restarts the delay; it does not queue a second transfer.
 - `set_admin_transfer_delay` only affects transfers started after the call — it
-  never shortens or extends a transfer that is already pending.
+  never shortens or extends a transfer that is already pending. It panics with
+  `admin transfer delay is below the minimum` unless `delay_seconds` is at
+  least 3,600s (one hour): a zero or near-zero delay would collapse the
+  two-step handoff into a single-step one, defeating the point of the guard.
+- Every progress-tracker event indexes the acting addresses/ids as topic
+  slots, not just in its data payload: learner/course events use
+  `[event_name, learner, course_id]`, course-admin events use
+  `[event_name, course_id]`, and learner-only events use
+  `[event_name, learner]`. Filters match server-side, so e.g. "every module
+  completed by learner X" or "every event for course Y" never needs a
+  full scan-and-decode of the payload.
 - A client can watch `admin_transfer_initiated`, `admin_transfer_accepted` and
   `admin_transfer_cancelled` events to follow the lifecycle of one candidate.
   All three share the pending address in the second topic slot.
