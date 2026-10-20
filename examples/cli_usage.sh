@@ -249,6 +249,7 @@ invoke "$TOKEN_ID" get_claim_history \
 echo "[18] Minting credential NFT (score must match verified average: 88)..."
 
 invoke "$CREDENTIAL_ID" mint_credential \
+    --caller "$ADMIN_ADDRESS" \
     --to "$LEARNER_ADDRESS" \
     --course_id "rust_101" \
     --score 88 \

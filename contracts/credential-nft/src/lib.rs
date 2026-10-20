@@ -11,9 +11,10 @@ use metadata::{
     remove_entry, write_entry, CredentialDataKey, CredentialDisplay, CredentialInfo,
     CredentialVerification,
 };
+use metadata::AdminRole;
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, panic_with_error, Address, BytesN, Env, Symbol, Vec};
 
 /// Subset of the progress-tracker interface used to verify course completion
 /// and the score a credential claims.
@@ -33,6 +34,8 @@ pub enum ContractError {
     /// permanently bound to the learner who earned them, so no transfer is
     /// ever permitted, regardless of caller or state (#242, duplicate: #227).
     Soulbound = 1,
+    /// Caller does not have the required role (#551).
+    NotAuthorized = 2,
 }
 
 /// NFT credential contract for ChainLearn course certificates.
@@ -66,6 +69,8 @@ impl CredentialNft {
             &CredentialDataKey::Metadata,
             &ContractMetadata::new(&env, "credential-nft"),
         );
+        // Grant Admin role to the initial admin (#551).
+        metadata::grant_role(&env, &admin, &AdminRole::Admin);
         Ok(())
     }
 
@@ -88,6 +93,47 @@ impl CredentialNft {
     /// storage entries at runtime. Read-only and O(1): reads one counter entry.
     pub fn get_storage_size(env: Env) -> u64 {
         metadata::get_storage_size(&env)
+    }
+
+    // ── Role-Based Access Control (#551) ──────────────────────────────────────
+
+    /// Grant a role to an address. Admin only.
+    ///
+    /// # Arguments
+    /// * `caller` - The admin granting the role (must authorize)
+    /// * `role` - The role to grant
+    /// * `address` - The address to receive the role
+    pub fn grant_role(env: Env, caller: Address, role: AdminRole, address: Address) {
+        caller.require_auth();
+        if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
+        metadata::grant_role(&env, &address, &role);
+        events::role_granted(&env, &address, &role);
+    }
+
+    /// Revoke a role from an address. Admin only.
+    ///
+    /// # Arguments
+    /// * `caller` - The admin revoking the role (must authorize)
+    /// * `role` - The role to revoke
+    /// * `address` - The address to lose the role
+    pub fn revoke_role(env: Env, caller: Address, role: AdminRole, address: Address) {
+        caller.require_auth();
+        if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
+        metadata::revoke_role(&env, &address, &role);
+        events::role_revoked(&env, &address, &role);
+    }
+
+    /// Check whether an address has a specific role.
+    ///
+    /// # Arguments
+    /// * `role` - The role to check
+    /// * `address` - The address to check
+    pub fn has_role(env: Env, role: AdminRole, address: Address) -> bool {
+        metadata::has_role(&env, &address, &role)
     }
 
     /// Get the contract's on-chain name and version (#107).
@@ -136,23 +182,22 @@ impl CredentialNft {
     /// tracker_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     ///
     /// // Mint the credential
-    /// let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    /// let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
     /// assert_eq!(cred_id, 1);
     /// ```
     pub fn mint_credential(
         env: Env,
+        caller: Address,
         to: Address,
         course_id: Symbol,
         score: u32,
         metadata_uri: Symbol,
     ) -> u64 {
         Self::require_not_paused(&env);
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&CredentialDataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+        caller.require_auth();
+        if !metadata::has_role(&env, &caller, &AdminRole::Minter) {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
         to.require_auth();
         mint::mint_credential(&env, &to, &course_id, score, &metadata_uri)
     }
@@ -264,7 +309,7 @@ impl CredentialNft {
     /// env.mock_all_auths();
     ///
     /// // After completing course and minting credential...
-    /// let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+    /// let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &uri);
     ///
     /// let info = client.verify_credential(&cred_id);
     /// assert_eq!(info.learner, learner);
@@ -307,7 +352,7 @@ impl CredentialNft {
     /// env.mock_all_auths();
     ///
     /// // Complete course and mint credential...
-    /// client.mint_credential(&learner, &course_id, &85, &uri);
+    /// client.mint_credential(&admin, &learner, &course_id, &85, &uri);
     ///
     /// let count = client.get_credential_count(&learner);
     /// assert_eq!(count, 1);
@@ -331,7 +376,7 @@ impl CredentialNft {
     /// assert_eq!(client.get_credential_count(&learner), 0);
     ///
     /// // After completing a course and minting...
-    /// client.mint_credential(&learner, &course_id, &85, &uri);
+    /// client.mint_credential(&admin, &learner, &course_id, &85, &uri);
     /// assert_eq!(client.get_credential_count(&learner), 1);
     /// ```
     pub fn get_credential_count(env: Env, learner: Address) -> u32 {
@@ -428,34 +473,30 @@ impl CredentialNft {
         }
     }
 
-    /// Pause all state-changing operations. Admin only.
-    pub fn pause(env: Env) {
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&CredentialDataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+    /// Pause all state-changing operations. Admin or Pauser role required.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        if !metadata::has_role(&env, &caller, &AdminRole::Pauser) {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
         if Self::is_paused(&env) {
             panic!("already paused");
         }
         metadata::write_entry(&env, &CredentialDataKey::Paused, &true);
-        events::paused(&env, &admin, env.ledger().timestamp());
+        events::paused(&env, &caller, env.ledger().timestamp());
     }
 
-    /// Unpause state-changing operations. Admin only.
-    pub fn unpause(env: Env) {
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&CredentialDataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+    /// Unpause state-changing operations. Admin or Pauser role required.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        if !metadata::has_role(&env, &caller, &AdminRole::Pauser) {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
         if !Self::is_paused(&env) {
             panic!("not paused");
         }
         metadata::write_entry(&env, &CredentialDataKey::Paused, &false);
-        events::unpaused(&env, &admin, env.ledger().timestamp());
+        events::unpaused(&env, &caller, env.ledger().timestamp());
     }
 
     /// Returns the admin address.
@@ -755,15 +796,14 @@ impl CredentialNft {
     /// Upgrade the contract to a new Wasm code.
     ///
     /// # Arguments
+    /// * `caller` - The admin performing the upgrade (must authorize, Admin role required)
     /// * `new_wasm_hash` - Hash of the already-uploaded wasm to install
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         Self::require_not_paused(&env);
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&CredentialDataKey::Admin)
-            .expect("not initialized");
-        admin.require_auth();
+        caller.require_auth();
+        if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
 
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
@@ -820,7 +860,7 @@ mod tests {
         env.mock_all_auths();
         let now = env.ledger().timestamp();
 
-        client.pause();
+        client.pause(&admin);
 
         let all = env.events().all();
         let last = all.last().expect("no event emitted");
@@ -848,10 +888,10 @@ mod tests {
         env.mock_all_auths();
         let now = env.ledger().timestamp();
 
-        client.pause();
+        client.pause(&admin);
         env.events().all(); // discard the pause event
 
-        client.unpause();
+        client.unpause(&admin);
 
         let all = env.events().all();
         let last = all.last().expect("no event emitted");
@@ -878,8 +918,8 @@ mod tests {
         client.initialize(&admin, &Address::generate(&env));
         env.mock_all_auths();
 
-        client.pause();
-        client.pause();
+        client.pause(&admin);
+        client.pause(&admin);
     }
 
     #[test]
@@ -892,7 +932,7 @@ mod tests {
         client.initialize(&admin, &Address::generate(&env));
         env.mock_all_auths();
 
-        client.unpause();
+        client.unpause(&admin);
     }
 
     // ── Issue #423: delayed two-step admin transfer ──────────────────────
@@ -1150,7 +1190,7 @@ mod tests {
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
         enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
         assert_eq!(cred_id, 1);
 
         let info = client.verify_credential(&cred_id);
@@ -1175,8 +1215,8 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course1, 90);
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course2, 75);
 
-        let cred1 = client.mint_credential(&learner, &course1, &90, &uri);
-        let cred2 = client.mint_credential(&learner, &course2, &75, &uri);
+        let cred1 = client.mint_credential(&admin, &learner, &course1, &90, &uri);
+        let cred2 = client.mint_credential(&admin, &learner, &course2, &75, &uri);
 
         assert_eq!(client.get_credential_count(&learner), 2);
 
@@ -1203,9 +1243,9 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course2, 75);
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course3, 80);
 
-        let cred1 = client.mint_credential(&learner, &course1, &90, &uri);
-        let cred2 = client.mint_credential(&learner, &course2, &75, &uri);
-        let cred3 = client.mint_credential(&learner, &course3, &80, &uri);
+        let cred1 = client.mint_credential(&admin, &learner, &course1, &90, &uri);
+        let cred2 = client.mint_credential(&admin, &learner, &course2, &75, &uri);
+        let cred3 = client.mint_credential(&admin, &learner, &course3, &80, &uri);
 
         // First page.
         let page = client.get_credentials_for(&learner, &0, &2);
@@ -1275,7 +1315,7 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 50);
 
         // Claiming 100 must be rejected, not silently recorded.
-        client.mint_credential(&learner, &course_id, &100, &uri);
+        client.mint_credential(&admin, &learner, &course_id, &100, &uri);
     }
 
     #[test]
@@ -1293,7 +1333,7 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
 
         // A credential must record what the tracker recorded, in either direction.
-        client.mint_credential(&learner, &course_id, &80, &uri);
+        client.mint_credential(&admin, &learner, &course_id, &80, &uri);
     }
 
     #[test]
@@ -1309,7 +1349,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 72);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &72, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &72, &uri);
         assert_eq!(client.verify_credential(&cred_id).score, 72);
     }
 
@@ -1341,7 +1381,7 @@ mod tests {
 
         assert_eq!(tracker.get_course_score(&learner, &course_id), 85);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &uri);
         assert_eq!(client.verify_credential(&cred_id).score, 85);
     }
 
@@ -1362,7 +1402,7 @@ mod tests {
         complete_course_with_score(&env, &tracker_id, &weak_learner, &course_id, 60);
 
         // Borrowing the strong learner's score for the weak learner must fail.
-        client.mint_credential(&weak_learner, &course_id, &95, &uri);
+        client.mint_credential(&admin, &weak_learner, &course_id, &95, &uri);
     }
 
     // ── Issue #105: reverse lookup from course_id to credentials ──────────
@@ -1370,7 +1410,7 @@ mod tests {
     #[test]
     fn test_get_credentials_by_course_returns_minted() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner1 = Address::generate(&env);
@@ -1387,9 +1427,9 @@ mod tests {
         complete_course_with_score(&env, &tracker_id, &learner2, &course, 90);
         enrolled_and_completed_with_score(&env, &tracker_id, &learner1, &other_course, 70);
 
-        let id1 = client.mint_credential(&learner1, &course, &80, &uri);
-        let id2 = client.mint_credential(&learner2, &course, &90, &uri);
-        client.mint_credential(&learner1, &other_course, &70, &uri);
+        let id1 = client.mint_credential(&admin, &learner1, &course, &80, &uri);
+        let id2 = client.mint_credential(&admin, &learner2, &course, &90, &uri);
+        client.mint_credential(&admin, &learner1, &other_course, &70, &uri);
 
         let course_creds = client.get_credentials_by_course(&course);
         assert_eq!(course_creds.len(), 2);
@@ -1426,8 +1466,8 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_a, 85);
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_b, 75);
 
-        let id_a = client.mint_credential(&learner, &course_a, &85, &uri);
-        let id_b = client.mint_credential(&learner, &course_b, &75, &uri);
+        let id_a = client.mint_credential(&admin, &learner, &course_a, &85, &uri);
+        let id_b = client.mint_credential(&admin, &learner, &course_b, &75, &uri);
 
         let a_creds = client.get_credentials_by_course(&course_a);
         assert_eq!(a_creds.len(), 1);
@@ -1459,7 +1499,7 @@ mod tests {
                 .set(&CredentialDataKey::CredentialCounter, &u64::MAX);
         });
 
-        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
+        client.mint_credential(&_admin, &learner, &course_id, &90, &uri); // should panic
     }
 
     #[test]
@@ -1475,7 +1515,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_Qm123");
         enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+        let cred_id = client.mint_credential(&_admin, &learner, &course_id, &85, &uri);
 
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
@@ -1512,7 +1552,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
 
         let all = env.events().all();
@@ -1539,7 +1579,7 @@ mod tests {
     #[should_panic(expected = "score 40 below minimum threshold 50")]
     fn test_mint_rejects_low_score() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1549,14 +1589,14 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
 
-        client.mint_credential(&learner, &course_id, &40, &uri);
+        client.mint_credential(&admin, &learner, &course_id, &40, &uri);
     }
 
     #[test]
     #[should_panic(expected = "credential already exists for this learner and course")]
     fn test_mint_prevents_duplicates() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1566,15 +1606,15 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
 
-        client.mint_credential(&learner, &course_id, &90, &uri);
-        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
+        client.mint_credential(&admin, &learner, &course_id, &90, &uri);
+        client.mint_credential(&admin, &learner, &course_id, &90, &uri); // should panic
     }
 
     #[test]
     #[should_panic(expected = "course does not exist")]
     fn test_mint_rejects_unknown_course() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1584,14 +1624,14 @@ mod tests {
         let course_id = Symbol::new(&env, "ghost_course");
         let uri = Symbol::new(&env, "ipfs_meta");
 
-        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
+        client.mint_credential(&admin, &learner, &course_id, &90, &uri); // should panic
     }
 
     #[test]
     #[should_panic(expected = "learner has not completed the course requirements")]
     fn test_mint_rejects_ineligible_learner() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let tracker_client = progress_tracker::ProgressTrackerClient::new(&env, &tracker_id);
 
@@ -1605,14 +1645,14 @@ mod tests {
         create_course(&env, &tracker_id, &course_id);
         tracker_client.enroll(&learner, &course_id);
 
-        client.mint_credential(&learner, &course_id, &100, &uri); // should panic
+        client.mint_credential(&admin, &learner, &course_id, &100, &uri); // should panic
     }
 
     #[test]
     #[should_panic(expected = "learner has not completed the course requirements")]
     fn test_mint_rejects_incomplete_modules() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let tracker_client = progress_tracker::ProgressTrackerClient::new(&env, &tracker_id);
 
@@ -1628,14 +1668,14 @@ mod tests {
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         tracker_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &95);
 
-        client.mint_credential(&learner, &course_id, &95, &uri); // should panic
+        client.mint_credential(&admin, &learner, &course_id, &95, &uri); // should panic
     }
 
     #[test]
     #[should_panic(expected = "learner has not completed the course requirements")]
     fn test_mint_rejects_missing_quiz() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let tracker_client = progress_tracker::ProgressTrackerClient::new(&env, &tracker_id);
 
@@ -1651,13 +1691,13 @@ mod tests {
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
 
-        client.mint_credential(&learner, &course_id, &90, &uri); // should panic
+        client.mint_credential(&admin, &learner, &course_id, &90, &uri); // should panic
     }
 
     #[test]
     fn test_revoke_credential() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1667,7 +1707,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &80, &uri);
         assert!(client.is_credential_valid(&cred_id));
 
         client.revoke_credential(&cred_id);
@@ -1691,7 +1731,7 @@ mod tests {
     #[test]
     fn test_revoke_sets_dedicated_revoked_flag() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1701,7 +1741,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
 
         env.as_contract(&contract_id, || {
@@ -1719,7 +1759,7 @@ mod tests {
     #[test]
     fn test_get_total_credentials_count_returns_counter() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         assert_eq!(client.get_total_credentials_count(), 0);
@@ -1732,12 +1772,12 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 80);
 
-        client.mint_credential(&learner, &course, &80, &uri);
+        client.mint_credential(&admin, &learner, &course, &80, &uri);
         assert_eq!(client.get_total_credentials_count(), 1);
 
         let learner2 = Address::generate(&env);
         complete_course_with_score(&env, &tracker_id, &learner2, &course, 90);
-        client.mint_credential(&learner2, &course, &90, &uri);
+        client.mint_credential(&admin, &learner2, &course, &90, &uri);
         assert_eq!(client.get_total_credentials_count(), 2);
     }
 
@@ -1746,7 +1786,7 @@ mod tests {
     #[test]
     fn test_revoke_prunes_learner_credentials_list() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1757,7 +1797,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 80);
 
-        let cred_id = client.mint_credential(&learner, &course, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course, &80, &uri);
 
         // Before revoke, the credential appears in the learner's list.
         let before = client.get_credentials_for(&learner, &0, &10);
@@ -1774,7 +1814,7 @@ mod tests {
     #[test]
     fn test_revoke_prunes_course_credentials_index() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1785,7 +1825,7 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 80);
 
-        let cred_id = client.mint_credential(&learner, &course, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course, &80, &uri);
 
         let before = client.get_credentials_by_course(&course);
         assert_eq!(before.len(), 1);
@@ -1801,7 +1841,7 @@ mod tests {
     #[test]
     fn test_generate_certificate() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1819,7 +1859,7 @@ mod tests {
         );
 
         // Mint credential and check that metadata_uri gets updated with generated certificate URI
-        let cred_id = client.mint_credential(&learner, &course, &85, &cert_uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course, &85, &cert_uri);
         let info = client.verify_credential(&cred_id);
         assert_eq!(info.metadata_uri, cert_uri);
     }
@@ -1981,7 +2021,7 @@ mod tests {
     #[should_panic(expected = "metadata_uri cannot be empty")]
     fn test_mint_rejects_empty_metadata_uri() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1991,14 +2031,14 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
 
         let empty_uri = Symbol::new(&env, "");
-        client.mint_credential(&learner, &course, &85, &empty_uri);
+        client.mint_credential(&admin, &learner, &course, &85, &empty_uri);
     }
 
     #[test]
     #[should_panic(expected = "metadata_uri too short: minimum length is 8")]
     fn test_mint_rejects_too_short_metadata_uri() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -2008,14 +2048,14 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
 
         let short_uri = Symbol::new(&env, "ipfs_1");
-        client.mint_credential(&learner, &course, &85, &short_uri);
+        client.mint_credential(&admin, &learner, &course, &85, &short_uri);
     }
 
     #[test]
     #[should_panic(expected = "metadata_uri is malformed: must start with a valid URI scheme")]
     fn test_mint_rejects_malformed_metadata_uri() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -2025,13 +2065,13 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
 
         let invalid_uri = Symbol::new(&env, "ftp_metadata_hash");
-        client.mint_credential(&learner, &course, &85, &invalid_uri);
+        client.mint_credential(&admin, &learner, &course, &85, &invalid_uri);
     }
 
     #[test]
     fn test_mint_accepts_valid_schemes() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -2041,7 +2081,7 @@ mod tests {
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
 
         let uri = Symbol::new(&env, "ipfs_hash12345");
-        let id = client.mint_credential(&learner, &course, &85, &uri);
+        let id = client.mint_credential(&admin, &learner, &course, &85, &uri);
         assert_eq!(id, 1);
         let info = client.verify_credential(&id);
         assert_eq!(info.metadata_uri, uri);
@@ -2052,7 +2092,7 @@ mod tests {
     #[test]
     fn test_verify_credential_with_display_defaults_to_none_set() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -2060,7 +2100,7 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
-        let id = client.mint_credential(&learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+        let id = client.mint_credential(&admin, &learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
 
         // No display properties were ever set for this credential.
         let verification = client.verify_credential_with_display(&id);
@@ -2071,7 +2111,7 @@ mod tests {
     #[test]
     fn test_verify_credential_with_display_returns_set_properties() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -2079,7 +2119,7 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
-        let id = client.mint_credential(&learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+        let id = client.mint_credential(&admin, &learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
 
         let image_url = Some(Symbol::new(&env, "ipfs_img"));
         let description = Some(Symbol::new(&env, "rust_cert"));
@@ -2102,4 +2142,242 @@ mod tests {
     // `test_transfer_rejects_even_without_auth_or_existing_credential`, and
     // `test_transfer_does_not_mutate_credential_state` in
     // `tests/unit/credential_tests.rs`, so no new tests are added here.
+
+    // ── Issue #551: RBAC tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_has_role_returns_false_before_grant() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minter = Address::generate(&env);
+        assert!(!client.has_role(&AdminRole::Minter, &minter));
+    }
+
+    #[test]
+    fn test_grant_role_minter_enables_has_role() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minter = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Minter, &minter);
+        assert!(client.has_role(&AdminRole::Minter, &minter));
+    }
+
+    #[test]
+    fn test_revoke_role_removes_has_role() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minter = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Minter, &minter);
+        assert!(client.has_role(&AdminRole::Minter, &minter));
+
+        client.revoke_role(&admin, &AdminRole::Minter, &minter);
+        assert!(!client.has_role(&AdminRole::Minter, &minter));
+    }
+
+    #[test]
+    fn test_admin_always_has_all_roles() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        assert!(client.has_role(&AdminRole::Admin, &admin));
+        assert!(client.has_role(&AdminRole::Minter, &admin));
+        assert!(client.has_role(&AdminRole::Pauser, &admin));
+    }
+
+    #[test]
+    fn test_admin_can_grant_minter_who_can_mint() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minter = Address::generate(&env);
+        let learner = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Minter, &minter);
+
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        let cred_id = client.mint_credential(&minter, &learner, &course_id, &85, &uri);
+        assert_eq!(cred_id, 1);
+    }
+
+    #[test]
+    fn test_admin_role_holder_can_grant_roles() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let sub_admin = Address::generate(&env);
+        let other = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Admin, &sub_admin);
+        // sub_admin can now grant Minter to another
+        client.grant_role(&sub_admin, &AdminRole::Minter, &other);
+        assert!(client.has_role(&AdminRole::Minter, &other));
+    }
+
+    #[test]
+    fn test_mint_requires_minter_or_admin_role() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let nobody = Address::generate(&env);
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        assert!(client
+            .try_mint_credential(&nobody, &learner, &course_id, &85, &uri)
+            .is_err());
+    }
+
+    #[test]
+    fn test_admin_can_mint_without_explicit_minter_grant() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let uri = Symbol::new(&env, "ipfs_Qm123");
+        enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &uri);
+        assert_eq!(cred_id, 1);
+    }
+
+    #[test]
+    fn test_pause_requires_pauser_role() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let nobody = Address::generate(&env);
+        assert!(client.try_pause(&nobody).is_err());
+    }
+
+    #[test]
+    fn test_unpause_requires_pauser_role() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        client.pause(&admin);
+        let nobody = Address::generate(&env);
+        assert!(client.try_unpause(&nobody).is_err());
+    }
+
+    #[test]
+    fn test_pauser_can_pause_and_unpause() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let pauser = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Pauser, &pauser);
+
+        client.pause(&pauser);
+        assert!(env
+            .storage()
+            .persistent()
+            .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+            .unwrap_or(false));
+
+        env.as_contract(&contract_id, || {
+            assert!(
+                env.storage()
+                    .persistent()
+                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                    .unwrap_or(false)
+            );
+        });
+
+        client.unpause(&pauser);
+        env.as_contract(&contract_id, || {
+            assert!(
+                !env.storage()
+                    .persistent()
+                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                    .unwrap_or(false)
+            );
+        });
+    }
+
+    #[test]
+    fn test_admin_can_pause_without_explicit_pauser_grant() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        client.pause(&admin);
+        env.as_contract(&contract_id, || {
+            assert!(
+                env.storage()
+                    .persistent()
+                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                    .unwrap_or(false)
+            );
+        });
+    }
+
+    #[test]
+    fn test_upgrade_requires_admin_role() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let nobody = Address::generate(&env);
+        let wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+        assert!(client.try_upgrade(&nobody, &wasm_hash).is_err());
+    }
+
+    #[test]
+    fn test_non_admin_cannot_grant_role() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minter = Address::generate(&env);
+        let other = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Minter, &minter);
+        // minter cannot grant roles (not an Admin)
+        assert!(client
+            .try_grant_role(&minter, &AdminRole::Minter, &other)
+            .is_err());
+    }
+
+    #[test]
+    fn test_non_admin_cannot_revoke_role() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let minter = Address::generate(&env);
+        client.grant_role(&admin, &AdminRole::Minter, &minter);
+        let nobody = Address::generate(&env);
+        // nobody cannot revoke roles
+        assert!(client
+            .try_revoke_role(&nobody, &AdminRole::Minter, &minter)
+            .is_err());
+    }
 }

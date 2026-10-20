@@ -595,7 +595,7 @@ mod credential_nft_events {
     #[test]
     fn test_mint_credential_emits_credential_minted_event() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup(&env);
+        let (admin, contract_id, tracker_id) = setup(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -604,7 +604,7 @@ mod credential_nft_events {
         let uri = Symbol::new(&env, "ipfs_Qm123");
         complete_course(&env, &tracker_id, &learner, &course_id, 85);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &uri);
 
         let all = env.events().all();
         let last = all.last().expect("no events emitted");
@@ -637,7 +637,7 @@ mod credential_nft_events {
         let uri = Symbol::new(&env, "ipfs_meta");
         complete_course(&env, &tracker_id, &learner, &course_id, 80);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
 
         let all = env.events().all();
@@ -662,7 +662,7 @@ mod credential_nft_events {
     #[test]
     fn test_credential_revoked_event_is_indexed() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup(&env);
+        let (admin, contract_id, tracker_id) = setup(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -671,7 +671,7 @@ mod credential_nft_events {
         let uri = Symbol::new(&env, "ipfs_meta");
         complete_course(&env, &tracker_id, &learner, &course_id, 80);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &80, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
 
         let all = env.events().all();
@@ -691,7 +691,7 @@ mod credential_nft_events {
     #[test]
     fn test_credential_minted_event_data_contains_metadata_uri() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup(&env);
+        let (admin, contract_id, tracker_id) = setup(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -700,7 +700,7 @@ mod credential_nft_events {
         let uri = Symbol::new(&env, "ipfs_QmUniqueURI");
         complete_course(&env, &tracker_id, &learner, &course_id, 90);
 
-        let cred_id = client.mint_credential(&learner, &course_id, &90, &uri);
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &90, &uri);
 
         let all = env.events().all();
         let (_, topics, data) = all.last().expect("no events emitted");
@@ -727,14 +727,14 @@ mod credential_nft_events {
     #[test]
     fn test_credential_metadata_updated_event_is_indexed() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup(&env);
+        let (admin, contract_id, tracker_id) = setup(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         complete_course(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
 
         let new_uri = Symbol::new(&env, "ipfs_QmUpdated");
         client.update_credential_metadata(&cred_id, &new_uri);
@@ -757,14 +757,14 @@ mod credential_nft_events {
     #[test]
     fn test_credential_display_set_event_is_indexed() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup(&env);
+        let (admin, contract_id, tracker_id) = setup(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         complete_course(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
 
         let image_url = Some(Symbol::new(&env, "ipfs_img"));
         let description = Some(Symbol::new(&env, "rust_cert"));
@@ -793,14 +793,14 @@ mod credential_nft_events {
     #[test]
     fn test_credential_renewed_event_is_indexed() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup(&env);
+        let (admin, contract_id, tracker_id) = setup(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         complete_course(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id = client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
 
         client.renew_credential(&cred_id, &5_000);
 

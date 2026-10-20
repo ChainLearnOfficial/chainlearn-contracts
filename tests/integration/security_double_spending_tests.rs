@@ -161,7 +161,7 @@ fn test_double_claim_in_batch_is_skipped() {
 #[should_panic(expected = "credential already exists for this learner and course")]
 fn test_double_mint_credential_is_prevented() {
     let env = Env::default();
-    let (_admin, _token_client, credential_client, progress_client) = setup_env(&env);
+    let (admin, _token_client, credential_client, progress_client) = setup_env(&env);
     let learner = Address::generate(&env);
     env.mock_all_auths();
 
@@ -170,16 +170,16 @@ fn test_double_mint_credential_is_prevented() {
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 85);
 
     // First mint succeeds
-    credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
 
     // Second mint for the same learner+course must be rejected
-    credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
 }
 
 #[test]
 fn test_double_mint_credential_does_not_corrupt_state() {
     let env = Env::default();
-    let (_admin, _token_client, credential_client, progress_client) = setup_env(&env);
+    let (admin, _token_client, credential_client, progress_client) = setup_env(&env);
     let learner = Address::generate(&env);
     env.mock_all_auths();
 
@@ -187,12 +187,12 @@ fn test_double_mint_credential_does_not_corrupt_state() {
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 85);
 
-    let cred_id = credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
     let total_before = credential_client.get_total_credentials_count();
 
     // Second mint reverts — state must be unchanged
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+        credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
     }));
     assert!(result.is_err(), "double mint should revert");
 
@@ -205,7 +205,7 @@ fn test_double_mint_credential_does_not_corrupt_state() {
 #[test]
 fn test_mint_different_courses_succeeds() {
     let env = Env::default();
-    let (_admin, _token_client, credential_client, progress_client) = setup_env(&env);
+    let (admin, _token_client, credential_client, progress_client) = setup_env(&env);
     let learner = Address::generate(&env);
     env.mock_all_auths();
 
@@ -226,8 +226,8 @@ fn test_mint_different_courses_succeeds() {
     progress_client.submit_quiz_score(&learner, &course_b, &Symbol::new(&env, "quiz_1"), &90);
 
     // Two different courses — not double-spending
-    credential_client.mint_credential(&learner, &course_a, &85, &metadata_uri);
-    credential_client.mint_credential(&learner, &course_b, &90, &metadata_uri);
+    credential_client.mint_credential(&admin, &learner, &course_a, &85, &metadata_uri);
+    credential_client.mint_credential(&admin, &learner, &course_b, &90, &metadata_uri);
 
     assert_eq!(credential_client.get_credential_count(&learner), 2);
 }
@@ -371,7 +371,7 @@ fn test_double_submit_quiz_is_prevented() {
 #[should_panic(expected = "credential already revoked")]
 fn test_double_revoke_credential_is_prevented() {
     let env = Env::default();
-    let (_admin, _token_client, credential_client, progress_client) = setup_env(&env);
+    let (admin, _token_client, credential_client, progress_client) = setup_env(&env);
     let learner = Address::generate(&env);
     env.mock_all_auths();
 
@@ -379,7 +379,7 @@ fn test_double_revoke_credential_is_prevented() {
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 85);
 
-    let cred_id = credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
 
     // First revocation succeeds
     credential_client.revoke_credential(&cred_id);
@@ -406,7 +406,7 @@ fn test_claim_reward_then_mint_credential_are_independent() {
     assert_eq!(token_client.balance(&learner), 8500);
 
     // Mint credential (mints NFT) — independent operation, not double-spending
-    credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
     assert!(credential_client.is_credential_valid(&1));
 
     // Both succeeded — they are different contract surfaces

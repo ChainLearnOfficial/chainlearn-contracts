@@ -34,7 +34,7 @@ mod progress_unit_tests {
     #[test]
     fn test_enrollment_creates_zero_progress() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -54,7 +54,7 @@ mod progress_unit_tests {
     #[test]
     fn test_module_completion_updates_progress() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -72,7 +72,7 @@ mod progress_unit_tests {
     #[test]
     fn test_quiz_submission_updates_progress() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -90,7 +90,7 @@ mod progress_unit_tests {
     #[test]
     fn test_eligibility_requires_full_completion() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -115,7 +115,7 @@ mod progress_unit_tests {
     #[test]
     fn test_eligibility_fails_with_low_quiz_scores() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -140,7 +140,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "already enrolled")]
     fn test_double_enrollment_rejected() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -155,7 +155,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "module already completed")]
     fn test_double_module_completion_rejected() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -171,7 +171,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "quiz already submitted")]
     fn test_double_quiz_submission_rejected() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -187,7 +187,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "score exceeds maximum")]
     fn test_quiz_score_above_max_rejected() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -202,7 +202,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_get_progress_not_enrolled() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -215,7 +215,7 @@ mod progress_unit_tests {
     #[test]
     fn test_admin_can_create_course() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -229,7 +229,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "module_ids length must match total_modules")]
     fn test_course_creation_rejects_mismatch() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -249,7 +249,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "total_modules must be greater than zero")]
     fn test_create_course_rejects_zero_modules() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -266,7 +266,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "course has no modules")]
     fn test_enroll_rejects_course_with_no_modules() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -310,7 +310,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "previous module not completed")]
     fn test_complete_module_rejects_out_of_order() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -326,7 +326,7 @@ mod progress_unit_tests {
     #[test]
     fn test_complete_module_first_module_requires_no_prerequisite() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -345,7 +345,7 @@ mod progress_unit_tests {
     #[test]
     fn test_complete_module_sequential_order_succeeds() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -373,7 +373,7 @@ mod progress_unit_tests {
         // eligible_for_credential. Module completion is tracked solely via
         // the ModuleCompleted storage key -- never duplicated into a Vec (#113).
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -398,7 +398,7 @@ mod progress_unit_tests {
         // only the aggregates derived from it. If the struct still carried a
         // quiz_scores Vec, this wouldn't compile.
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -422,7 +422,7 @@ mod progress_unit_tests {
     #[test]
     fn test_quiz_aggregates_accumulate_across_submissions() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -448,7 +448,7 @@ mod progress_unit_tests {
         // storage key rather than cloning them. Behaviour is unchanged; this
         // pins it so the clone-free reads stay correct.
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -472,7 +472,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "quiz not submitted")]
     fn test_get_quiz_score_rejects_unsubmitted_quiz() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -489,7 +489,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_eligibility_rejects_unenrolled_learner() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -503,7 +503,7 @@ mod progress_unit_tests {
     #[test]
     fn test_eligibility_for_enrolled_learner() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -528,7 +528,7 @@ mod progress_unit_tests {
     #[test]
     fn test_enroll_event_includes_timestamp() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -566,7 +566,7 @@ mod progress_unit_tests {
     #[test]
     fn test_credential_eligible_event_emitted_on_flip_to_true() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -632,7 +632,7 @@ mod progress_unit_tests {
     #[test]
     fn test_course_carries_module_ids_for_single_read() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -674,7 +674,7 @@ mod progress_unit_tests {
         // every read. Pin that by mutating the stored ProgressInfo directly
         // and confirming the getter reflects it without any further writes.
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -706,7 +706,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "module not found in course")]
     fn test_complete_module_non_existent_module_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -723,7 +723,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_submit_quiz_score_without_enrollment_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -738,7 +738,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "quiz not submitted")]
     fn test_get_quiz_score_mismatched_course_id_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -782,7 +782,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_completion_percentage_matches_overall_progress() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -807,7 +807,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_get_completion_percentage_without_enrollment_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -823,7 +823,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_learner_courses_empty_for_new_learner() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -833,7 +833,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_learner_courses_tracks_enrollment_order() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -858,7 +858,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_learner_stats_all_zero_for_new_learner() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -875,7 +875,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_learner_stats_aggregates_across_courses() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -923,7 +923,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_learner_stats_average_divides_by_quizzes_not_courses() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -954,7 +954,7 @@ mod progress_unit_tests {
     #[test]
     fn test_retake_quiz_replaces_score_without_double_counting() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -977,7 +977,7 @@ mod progress_unit_tests {
     #[test]
     fn test_retake_quiz_emits_quiz_retaken_event() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1014,7 +1014,7 @@ mod progress_unit_tests {
     #[test]
     fn test_retake_quiz_flips_eligibility_and_emits_credential_eligible() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1063,7 +1063,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "new score must be higher")]
     fn test_retake_quiz_rejects_non_improving_score() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1080,7 +1080,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "score exceeds maximum")]
     fn test_retake_quiz_rejects_score_above_max() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1097,7 +1097,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "quiz not submitted")]
     fn test_retake_quiz_without_prior_submission_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1114,7 +1114,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_retake_quiz_without_enrollment_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1130,7 +1130,7 @@ mod progress_unit_tests {
     #[test]
     fn test_export_progress_returns_complete_data() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1159,7 +1159,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_export_progress_not_enrolled_panics() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1174,7 +1174,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_complete_module_completes_every_module_in_order() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1196,7 +1196,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_complete_module_matches_sequential_single_calls() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1237,7 +1237,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "module not found in course")]
     fn test_batch_complete_module_aborts_whole_batch_on_invalid_module() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1260,7 +1260,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_complete_module_reverts_all_on_partial_failure() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1286,7 +1286,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_batch_complete_module_requires_enrollment() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1302,7 +1302,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "module already completed")]
     fn test_batch_complete_module_rejects_duplicate_within_batch() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1320,7 +1320,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_complete_module_emits_module_completed_events() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1350,7 +1350,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_submits_every_quiz() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1384,7 +1384,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_skips_invalid_entries_independently() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1415,7 +1415,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_skips_already_submitted_quiz() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1444,7 +1444,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_skips_score_above_maximum() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1465,7 +1465,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_returns_empty_when_all_entries_invalid() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1487,7 +1487,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_matches_sequential_single_calls() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1532,7 +1532,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "not enrolled")]
     fn test_batch_submit_quiz_score_requires_enrollment() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1547,7 +1547,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_can_unlock_credential_eligibility() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1581,7 +1581,7 @@ mod progress_unit_tests {
     #[test]
     fn test_delegated_to_is_none_by_default() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1591,7 +1591,7 @@ mod progress_unit_tests {
     #[test]
     fn test_delegate_progress_sets_delegated_to() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1606,7 +1606,7 @@ mod progress_unit_tests {
     #[test]
     fn test_delegate_progress_emits_event() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1634,7 +1634,7 @@ mod progress_unit_tests {
     #[should_panic]
     fn test_delegate_progress_requires_learner_auth() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1648,7 +1648,7 @@ mod progress_unit_tests {
     #[test]
     fn test_delegate_progress_replaces_previous_delegate() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1665,7 +1665,7 @@ mod progress_unit_tests {
     #[test]
     fn test_revoke_delegation_clears_delegated_to() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1682,7 +1682,7 @@ mod progress_unit_tests {
     #[test]
     fn test_revoke_delegation_emits_event() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1710,7 +1710,7 @@ mod progress_unit_tests {
     #[test]
     fn test_revoke_delegation_without_active_delegation_is_a_no_op() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1724,7 +1724,7 @@ mod progress_unit_tests {
     #[test]
     fn test_revoke_delegation_succeeds_when_paused() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1734,7 +1734,7 @@ mod progress_unit_tests {
         client.delegate_progress(&learner, &delegate);
         assert_eq!(client.delegated_to(&learner), Some(delegate));
 
-        client.pause();
+        client.pause(&admin);
 
         // delegate_progress must fail when paused
         let other = Address::generate(&env);
@@ -1749,7 +1749,7 @@ mod progress_unit_tests {
     #[should_panic]
     fn test_revoke_delegation_requires_learner_auth() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1760,7 +1760,7 @@ mod progress_unit_tests {
     #[test]
     fn test_complete_module_for_allows_delegate_to_act() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1782,7 +1782,7 @@ mod progress_unit_tests {
     #[test]
     fn test_complete_module_for_allows_learner_to_act_as_their_own_caller() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1802,7 +1802,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "caller is not the learner or their delegate")]
     fn test_complete_module_for_rejects_non_delegate_caller() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1819,7 +1819,7 @@ mod progress_unit_tests {
     #[test]
     fn test_complete_module_for_rejects_former_delegate_after_revocation() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1844,7 +1844,7 @@ mod progress_unit_tests {
     #[should_panic]
     fn test_complete_module_for_requires_caller_auth() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1864,7 +1864,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_complete_module_for_allows_delegate() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1887,7 +1887,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "caller is not the learner or their delegate")]
     fn test_batch_complete_module_for_rejects_non_delegate_caller() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1904,7 +1904,7 @@ mod progress_unit_tests {
     #[test]
     fn test_submit_quiz_score_for_allows_delegate_to_act() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1931,7 +1931,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "caller is not the learner or their delegate")]
     fn test_submit_quiz_score_for_rejects_non_delegate_caller() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1952,7 +1952,7 @@ mod progress_unit_tests {
     #[test]
     fn test_batch_submit_quiz_score_for_allows_delegate() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1975,7 +1975,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "caller is not the learner or their delegate")]
     fn test_batch_submit_quiz_score_for_rejects_non_delegate_caller() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1992,7 +1992,7 @@ mod progress_unit_tests {
     #[test]
     fn test_retake_quiz_for_allows_delegate_to_act() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -2021,7 +2021,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "caller is not the learner or their delegate")]
     fn test_retake_quiz_for_rejects_non_delegate_caller() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -2043,7 +2043,7 @@ mod progress_unit_tests {
     #[test]
     fn test_delegate_for_matches_learner_direct_call_outcome() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -2096,7 +2096,7 @@ mod progress_unit_tests {
     #[test]
     fn test_contract_version_starts_at_zero() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         assert_eq!(client.contract_version(), 0);
@@ -2105,7 +2105,7 @@ mod progress_unit_tests {
     #[test]
     fn test_contract_metadata_includes_version() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let metadata = client.contract_metadata();
@@ -2122,7 +2122,7 @@ mod progress_unit_tests {
     #[test]
     fn test_archive_course_rejects_new_enrollments_but_preserves_progress() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2164,7 +2164,7 @@ mod progress_unit_tests {
     #[test]
     fn test_is_initialized_true_after_initialize() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         assert!(client.is_initialized());
@@ -2173,7 +2173,7 @@ mod progress_unit_tests {
     #[test]
     fn test_is_initialized_does_not_mutate_state() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         let before = client.contract_metadata();
@@ -2198,7 +2198,7 @@ mod progress_unit_tests {
     #[test]
     fn test_storage_size_increases_after_initialize() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         // initialize() writes Admin, Metadata, and Version -- 3 distinct new keys.
@@ -2208,7 +2208,7 @@ mod progress_unit_tests {
     #[test]
     fn test_storage_size_increases_on_new_entry() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2222,7 +2222,7 @@ mod progress_unit_tests {
     #[test]
     fn test_storage_size_unchanged_on_overwrite() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2242,7 +2242,7 @@ mod progress_unit_tests {
     #[test]
     fn test_storage_size_tracks_enrollment_writes() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2260,7 +2260,7 @@ mod progress_unit_tests {
     #[test]
     fn test_storage_size_tracks_update_course_version_and_achievements() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2302,7 +2302,7 @@ mod progress_unit_tests {
     #[test]
     fn test_get_courses_by_tag_empty_when_no_courses() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2314,7 +2314,7 @@ mod progress_unit_tests {
     #[test]
     fn test_tag_reverse_index_single_tag() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2333,7 +2333,7 @@ mod progress_unit_tests {
     #[test]
     fn test_tag_reverse_index_multiple_tags_per_course() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2360,7 +2360,7 @@ mod progress_unit_tests {
     #[test]
     fn test_tag_reverse_index_multiple_courses_per_tag() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2393,7 +2393,7 @@ mod progress_unit_tests {
     #[test]
     fn test_tag_reverse_index_tag_removal_and_update() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2429,7 +2429,7 @@ mod progress_unit_tests {
     #[should_panic(expected = "duplicate prerequisite found")]
     fn test_set_prerequisites_rejects_duplicates() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2452,7 +2452,7 @@ mod progress_unit_tests {
     #[test]
     fn test_set_prerequisites_success() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2487,27 +2487,27 @@ mod progress_unit_tests {
     #[test]
     fn test_enroll_checked_paused_reverts() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let course_id = create_test_course(&env, &client);
         let learner = Address::generate(&env);
 
-        client.pause();
+        client.pause(&admin);
 
         // enroll_checked must fail when paused
         assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
 
         // Unpause and verify enroll_checked succeeds
-        client.unpause();
+        client.unpause(&admin);
         assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
     }
 
     #[test]
     fn test_retake_quiz_for_paused_reverts() {
         let env = Env::default();
-        let (_admin, contract_id) = setup_contract(&env);
+        let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
         env.mock_all_auths();
 
@@ -2520,12 +2520,12 @@ mod progress_unit_tests {
         client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_3"));
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &50);
 
-        client.pause();
+        client.pause(&admin);
 
         let caller = learner.clone();
         assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
 
-        client.unpause();
+        client.unpause(&admin);
         assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
     }
 }

@@ -329,7 +329,7 @@ fn bench_mint_credential() {
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
 
     env.budget().reset_default();
-    bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    bench.credential_client.mint_credential(&bench.admin, &learner, &course_id, &85, &metadata_uri);
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench mint_credential: {cost} CPU insns");
@@ -346,7 +346,7 @@ fn bench_verify_credential() {
     let learner = Address::generate(env);
     let (course_id, _quiz_id) = setup_completed_course_for_credential(&bench, &learner, 85);
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
-    let cred_id = bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = bench.credential_client.mint_credential(&bench.admin, &learner, &course_id, &85, &metadata_uri);
 
     env.budget().reset_default();
     let _info = bench.credential_client.verify_credential(&cred_id);
@@ -366,7 +366,7 @@ fn bench_revoke_credential() {
     let learner = Address::generate(env);
     let (course_id, _quiz_id) = setup_completed_course_for_credential(&bench, &learner, 85);
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
-    let cred_id = bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = bench.credential_client.mint_credential(&bench.admin, &learner, &course_id, &85, &metadata_uri);
 
     env.budget().reset_default();
     bench.credential_client.revoke_credential(&cred_id);
@@ -496,7 +496,7 @@ fn bench_e2e_enroll_complete_claim_mint() {
     bench.token_client.claim_reward(&learner, &course_id, &quiz_id);
 
     let metadata_uri = Symbol::new(env, "ipfs_Qm123");
-    bench.credential_client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    bench.credential_client.mint_credential(&bench.admin, &learner, &course_id, &85, &metadata_uri);
 
     let total_cost = env.budget().cpu_instruction_cost();
 

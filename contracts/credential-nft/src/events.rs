@@ -7,6 +7,8 @@
 
 use soroban_sdk::{Address, Env, Symbol};
 
+use crate::metadata::AdminRole;
+
 // ── Event Indexing Convention (#548) ─────────────────────────────────────────
 //
 // Every event below puts its event-name `Symbol` in `topics[0]` (unchanged
@@ -229,4 +231,36 @@ pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, new_admin: &
         new_admin.clone(),
     );
     env.events().publish(topics, (current_admin.clone(),));
+}
+
+// ── Role Management Events (#551) ────────────────────────────────────────────
+
+/// Emitted when a role is granted to an address (#551).
+///
+/// Topics: ["role_granted", address]
+/// Data: (role_symbol,)
+pub fn role_granted(env: &Env, address: &Address, role: &AdminRole) {
+    let role_str = match role {
+        AdminRole::Admin => "Admin",
+        AdminRole::Minter => "Minter",
+        AdminRole::Pauser => "Pauser",
+    };
+    let topics = (Symbol::new(env, "role_granted"), address.clone());
+    env.events()
+        .publish(topics, (Symbol::new(env, role_str),));
+}
+
+/// Emitted when a role is revoked from an address (#551).
+///
+/// Topics: ["role_revoked", address]
+/// Data: (role_symbol,)
+pub fn role_revoked(env: &Env, address: &Address, role: &AdminRole) {
+    let role_str = match role {
+        AdminRole::Admin => "Admin",
+        AdminRole::Minter => "Minter",
+        AdminRole::Pauser => "Pauser",
+    };
+    let topics = (Symbol::new(env, "role_revoked"), address.clone());
+    env.events()
+        .publish(topics, (Symbol::new(env, role_str),));
 }
