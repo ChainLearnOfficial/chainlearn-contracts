@@ -1,4 +1,31 @@
-# Security Audit Checklist
+# Security Policy
+
+## How to Report Vulnerabilities
+
+Please do **not** disclose a suspected vulnerability in a public issue, pull request, or discussion.
+
+1. **Report privately** using GitHub's private vulnerability reporting: open the
+   [Security tab](https://github.com/ChainLearnOfficial/chainlearn-contracts/security/advisories/new)
+   of the repository and choose **Report a vulnerability**.
+2. If that is unavailable, open a public issue that only asks for a private channel (do not include any
+   details) or mention a maintainer such as `@Abidoyesimze`, who will arrange one.
+3. Include the affected contract and function, a description of the impact, steps or a test to reproduce,
+   and any suggested fix.
+
+**What to expect**
+
+- Acknowledgement of your report within 3 business days.
+- An initial assessment and severity rating within 7 days.
+- Regular status updates until the issue is resolved, and credit in the release notes if you want it.
+
+Please give maintainers reasonable time to fix and release a patch before any public disclosure.
+Reporters acting in good faith will not be pursued for their research. See also the
+[Code of Conduct](CODE_OF_CONDUCT.md), which covers responsible disclosure and reporting, and
+[docs/security.md](docs/security.md) for the security design.
+
+---
+
+## Security Audit Checklist
 
 This document provides a structured security audit checklist for reviewing the ChainLearn Soroban smart contracts. It covers the three contracts (`learn-token`, `credential-nft`, `progress-tracker`) and the shared utilities package.
 

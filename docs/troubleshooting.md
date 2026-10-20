@@ -16,7 +16,7 @@ soroban --version
 cargo test --workspace
 ```
 
-The project requires Rust 1.70+, the `wasm32-unknown-unknown` target, and
+The project requires Rust 1.81.0+, the `wasm32-unknown-unknown` target, and
 Soroban CLI v21+ for deployment and network interaction. For deployed
 environments, run `./scripts/monitor.sh testnet` or
 `./scripts/monitor.sh mainnet` to check RPC reachability, contract
@@ -41,7 +41,7 @@ toolchain.
 
 Use the repository lockfile and the supported Rust version rather than updating
 dependencies ad hoc. Check the active compiler with `rustc --version`; the
-workspace declares Rust 1.70 as its minimum. After switching toolchains, run:
+workspace declares Rust 1.81.0 as its minimum. After switching toolchains, run:
 
 ```bash
 cargo clean

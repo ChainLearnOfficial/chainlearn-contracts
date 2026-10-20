@@ -1,0 +1,19 @@
+# Default owner for anything not matched below
+*                   @Abidoyesimze
+
+# Smart contracts and shared code (security review)
+/contracts/         @Abidoyesimze
+/packages/          @Abidoyesimze
+/tests/             @Abidoyesimze
+/SECURITY.md        @Abidoyesimze
+
+# Documentation
+/docs/              @Abidoyesimze
+*.md                @Abidoyesimze
+
+# Scripts, CI, and tooling (DevOps)
+/scripts/           @Abidoyesimze
+/.github/           @Abidoyesimze
+/Cargo.toml         @Abidoyesimze
+/Cargo.lock         @Abidoyesimze
+/deny.toml          @Abidoyesimze
