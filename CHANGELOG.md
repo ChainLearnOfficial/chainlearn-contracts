@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `.github/PULL_REQUEST_TEMPLATE.md` mirroring the `CONTRIBUTING.md` pull request
+  requirements (summary, changes, testing, breaking changes, security checklist) (#565)
+- Gas benchmark regression check in CI: `scripts/estimate-gas.sh` now compares
+  each operation against per-operation CPU instruction thresholds from
+  `scripts/gas-thresholds.env`, and CI fails when any operation exceeds its
+  threshold (#562)
 - MIT `LICENSE` file, referenced from the README and declared in Cargo metadata (#341)
 - `CODE_OF_CONDUCT.md` with community standards, reporting and enforcement guidelines (#342)
 - GitHub issue templates for bug reports and feature requests, linked from the README (#343)
@@ -26,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `course_exists()` on progress-tracker, letting other contracts validate a `course_id` cheaply (#108)
 
 ### Changed
+- Deploy workflow now runs `scripts/optimize-wasm.sh` before deploying and uploads
+  the `.optimized.wasm` artifacts, so CI-deployed contract sizes match
+  `deploy.sh` (#563); it also runs `scripts/initialize.sh` after deployment and
+  verifies initialization, so contracts are usable immediately (#564)
 - credential-nft: `revoke_credential` and `revoke_credential_with_reason` share a single implementation and prune indexes with host-side `first_index_of` (#344)
 - learn-token: whitelist-only restrictions now require a 48-hour proposal period, and the configurable admin-transfer delay cannot be set below one hour (#445, #447)
 

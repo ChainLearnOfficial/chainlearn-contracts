@@ -106,8 +106,11 @@ chainlearn-contracts/
 ├── scripts/
 │   ├── deploy.sh             # Deployment script
 │   ├── initialize.sh         # Post-deploy initialization
+│   ├── estimate-gas.sh       # Gas benchmark regression check
+│   ├── gas-thresholds.env    # Per-operation CPU instruction thresholds
 │   └── optimize-wasm.sh      # WASM size optimization
 ├── .github/
+│   ├── PULL_REQUEST_TEMPLATE.md # PR description template
 │   ├── ISSUE_TEMPLATE/       # Bug report & feature request templates
 │   └── workflows/            # CI and deploy pipelines
 ├── Cargo.toml                # Workspace root
@@ -179,6 +182,24 @@ Run with output:
 ```bash
 cargo test -- --nocapture
 ```
+
+### Gas benchmark regression check
+
+`./scripts/estimate-gas.sh` runs the gas benchmarks and fails if any measured
+operation exceeds its CPU instruction threshold. Thresholds live in
+[`scripts/gas-thresholds.env`](./scripts/gas-thresholds.env) and CI enforces them
+on every pull request:
+
+```bash
+./scripts/estimate-gas.sh                              # use scripts/gas-thresholds.env
+./scripts/estimate-gas.sh --thresholds my-limits.env   # custom thresholds
+./scripts/estimate-gas.sh 100000000                    # single limit for all operations
+```
+
+Each `GAS_LIMIT_<operation>=<insns>` line caps one operation; `DEFAULT_GAS_LIMIT`
+is the fallback for unlisted operations (`0` disables that fallback). To update a
+threshold, run the script, read the reported cost, and set the value with enough
+headroom to catch real regressions without flaking on host-version variance.
 
 ## Deploy
 

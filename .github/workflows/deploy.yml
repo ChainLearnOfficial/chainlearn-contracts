@@ -9,6 +9,8 @@ jobs:
   deploy:
     name: Deploy to Soroban
     runs-on: ubuntu-latest
+    env:
+      NETWORK: testnet
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,6 +29,9 @@ jobs:
       - name: Build Contracts
         run: cargo build --target wasm32-unknown-unknown --release --workspace
 
+      - name: Optimize WASM
+        run: ./scripts/optimize-wasm.sh
+
       - name: Deploy Contracts
         env:
           SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
@@ -38,7 +43,7 @@ jobs:
 
           echo "Deploying learn-token..."
           LEARN_TOKEN_ID=$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/learn_token.wasm \
+            --wasm target/wasm32-unknown-unknown/release/learn_token.optimized.wasm \
             --source "$STELLAR_SECRET_KEY" \
             --rpc-url "$SOROBAN_RPC_URL" \
             --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE")
@@ -47,7 +52,7 @@ jobs:
 
           echo "Deploying credential-nft..."
           CREDENTIAL_NFT_ID=$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/credential_nft.wasm \
+            --wasm target/wasm32-unknown-unknown/release/credential_nft.optimized.wasm \
             --source "$STELLAR_SECRET_KEY" \
             --rpc-url "$SOROBAN_RPC_URL" \
             --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE")
@@ -56,7 +61,7 @@ jobs:
 
           echo "Deploying progress-tracker..."
           PROGRESS_TRACKER_ID=$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/progress_tracker.wasm \
+            --wasm target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm \
             --source "$STELLAR_SECRET_KEY" \
             --rpc-url "$SOROBAN_RPC_URL" \
             --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE")
@@ -64,6 +69,20 @@ jobs:
           echo "progress-tracker deployed: $PROGRESS_TRACKER_ID"
 
           echo "All contracts deployed successfully."
+
+          echo "Writing deployment info to deployments-${NETWORK}.json..."
+          jq -n \
+            --arg network "$NETWORK" \
+            --arg deployed_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg learn_token "$LEARN_TOKEN_ID" \
+            --arg credential_nft "$CREDENTIAL_NFT_ID" \
+            --arg progress_tracker "$PROGRESS_TRACKER_ID" \
+            '{network: $network, deployed_at: $deployed_at,
+              contracts: {learn_token: $learn_token,
+                          credential_nft: $credential_nft,
+                          progress_tracker: $progress_tracker}}' \
+            > "deployments-${NETWORK}.json"
+          echo "Wrote deployments-${NETWORK}.json:"
 
       - name: Verify Deployment
         env:
@@ -74,9 +93,9 @@ jobs:
           echo "Verifying deployment status..."
 
           contracts=(
-            "learn-token:$LEARN_TOKEN_ID:target/wasm32-unknown-unknown/release/learn_token.wasm"
-            "credential-nft:$CREDENTIAL_NFT_ID:target/wasm32-unknown-unknown/release/credential_nft.wasm"
-            "progress-tracker:$PROGRESS_TRACKER_ID:target/wasm32-unknown-unknown/release/progress_tracker.wasm"
+            "learn-token:$LEARN_TOKEN_ID:target/wasm32-unknown-unknown/release/learn_token.optimized.wasm"
+            "credential-nft:$CREDENTIAL_NFT_ID:target/wasm32-unknown-unknown/release/credential_nft.optimized.wasm"
+            "progress-tracker:$PROGRESS_TRACKER_ID:target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm"
           )
 
           for entry in "${contracts[@]}"; do
@@ -113,3 +132,15 @@ jobs:
           done
 
           echo "Verification completed successfully."
+
+      - name: Initialize Contracts
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          echo "Initializing contracts on ${NETWORK}..."
+          # initialize.sh resolves the admin via the default soroban identity, so
+          # register it from the secret key before running.
+          soroban keys add default --secret-key "$STELLAR_SECRET_KEY" >/dev/null
+          ./scripts/initialize.sh "${NETWORK}" 2>&1 | tee initialize-output.log
+          echo "Initialization completed successfully."
