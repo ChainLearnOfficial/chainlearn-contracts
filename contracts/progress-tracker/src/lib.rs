@@ -6,7 +6,7 @@ pub mod types;
 
 use chainlearn_shared::ContractMetadata;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec,
+    contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec,
 };
 pub use types::{
     Achievement, AchievementType, Course, LearnerStats, ProgressExport, ProgressInfo,
@@ -228,10 +228,7 @@ impl ProgressTracker {
             Self::add_course_to_tag_index(&env, &tag, &course_id);
         }
 
-        env.events().publish(
-            (Symbol::new(&env, "course_created"),),
-            (&course_id, total_modules, total_quizzes, module_ids.clone()),
-        );
+        events::course_created(&env, &course_id, total_modules, total_quizzes, module_ids.clone());
     }
 
     /// Enroll a learner in a course.
@@ -336,10 +333,7 @@ impl ProgressTracker {
         courses.push_back(course_id.clone());
         types::write_entry(&env, &courses_key, &courses);
 
-        env.events().publish(
-            (symbol_short!("enrolled"),),
-            (&learner, &course_id, progress.enrolled_at),
-        );
+        events::enrolled(&env, &learner, &course_id, progress.enrolled_at);
     }
 
     /// Mark a module as completed for a learner.
@@ -544,18 +538,12 @@ impl ProgressTracker {
             progress,
         );
 
-        env.events().publish(
-            (Symbol::new(env, "module_completed"),),
-            (learner, course_id, &module_id, progress.overall_progress),
-        );
+        events::module_completed(env, learner, course_id, &module_id, progress.overall_progress);
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
-            env.events().publish(
-                (Symbol::new(env, "credential_eligible"),),
-                (learner, course_id),
-            );
+            events::credential_eligible(env, learner, course_id);
 
             // Award FirstCourse achievement when learner becomes eligible for credential
             Self::earn_achievement(
@@ -816,18 +804,12 @@ impl ProgressTracker {
             progress,
         );
 
-        env.events().publish(
-            (Symbol::new(env, "quiz_submitted"),),
-            (learner, course_id, &quiz_id, score),
-        );
+        events::quiz_submitted(env, learner, course_id, &quiz_id, score);
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
-            env.events().publish(
-                (Symbol::new(env, "credential_eligible"),),
-                (learner, course_id),
-            );
+            events::credential_eligible(env, learner, course_id);
         }
 
         true
@@ -953,18 +935,19 @@ impl ProgressTracker {
             &progress,
         );
 
-        env.events().publish(
-            (Symbol::new(env, "quiz_retaken"),),
-            (learner, course_id, &quiz_id, previous_score, new_score),
+        events::quiz_retaken(
+            env,
+            learner,
+            course_id,
+            &quiz_id,
+            previous_score,
+            new_score,
         );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
         if !was_eligible && progress.eligible_for_credential {
-            env.events().publish(
-                (Symbol::new(env, "credential_eligible"),),
-                (learner, course_id),
-            );
+            events::credential_eligible(env, learner, course_id);
         }
     }
 
@@ -1258,8 +1241,7 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events()
-            .publish((Symbol::new(&env, "course_archived"),), (&course_id,));
+        events::course_archived(&env, &course_id);
     }
 
     /// Set or update the content hash for a course. Admin only (#235).
@@ -1294,10 +1276,7 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "content_hash_set"),),
-            (&course_id, &content_hash),
-        );
+        events::content_hash_set(&env, &course_id, &content_hash);
     }
 
     /// Set the difficulty level for a course. Admin only (#259).
@@ -1336,10 +1315,7 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "course_difficulty_set"),),
-            (&course_id, difficulty),
-        );
+        events::course_difficulty_set(&env, &course_id, difficulty);
     }
 
     /// Get the difficulty level for a course (#259).
@@ -1469,8 +1445,7 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events()
-            .publish((Symbol::new(&env, "course_tags_set"),), (&course_id, tags));
+        events::course_tags_set(&env, &course_id, tags);
     }
 
     /// Get the tags for a course (#260).
@@ -1533,10 +1508,7 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "course_version_updated"),),
-            (&course_id, new_version),
-        );
+        events::course_version_updated(&env, &course_id, new_version);
     }
 
     /// Returns the content hash for a course (#235).
@@ -1625,10 +1597,7 @@ impl ProgressTracker {
             &course,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "prerequisites_set"),),
-            (&course_id, prerequisites),
-        );
+        events::prerequisites_set(&env, &course_id, prerequisites);
     }
 
     /// Get the prerequisite courses for a course (#231).
@@ -1779,10 +1748,7 @@ impl ProgressTracker {
         types::write_entry(env, &achievements_key, &achievements);
 
         // Emit achievement earned event
-        env.events().publish(
-            (Symbol::new(env, "achievement_earned"),),
-            (learner, achievement_type, course_id, timestamp),
-        );
+        events::achievement_earned(env, learner, achievement_type, course_id, timestamp);
     }
 
     /// Get all achievements earned by a learner.
@@ -2010,11 +1976,16 @@ impl ProgressTracker {
     }
 
     /// Returns the current admin-transfer delay, in seconds (#423).
+    ///
+    /// Clamped to [`types::MIN_ADMIN_TRANSFER_DELAY_SECONDS`] so a value
+    /// stored before the minimum was enforced can never shorten the handoff
+    /// guard below one hour, matching `learn-token` (#547).
     pub fn admin_transfer_delay(env: Env) -> u64 {
         env.storage()
             .persistent()
             .get(&ProgressTrackerDataKey::AdminTransferDelay)
             .unwrap_or(types::DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS)
+            .max(types::MIN_ADMIN_TRANSFER_DELAY_SECONDS)
     }
 
     /// Set the admin-transfer delay, in seconds. Admin only (#423).
@@ -2024,6 +1995,11 @@ impl ProgressTracker {
     ///
     /// # Panics
     /// * If the caller is not the current admin
+    /// * If `delay_seconds` is below
+    ///   [`types::MIN_ADMIN_TRANSFER_DELAY_SECONDS`] (3,600s): a zero or
+    ///   near-zero delay would let a compromised admin key hand control to an
+    ///   attacker before anyone monitoring the contract could react, which is
+    ///   exactly what the two-step transfer exists to prevent (#547)
     pub fn set_admin_transfer_delay(env: Env, delay_seconds: u64) {
         let admin: Address = env
             .storage()
@@ -2031,6 +2007,10 @@ impl ProgressTracker {
             .get(&ProgressTrackerDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+
+        if delay_seconds < types::MIN_ADMIN_TRANSFER_DELAY_SECONDS {
+            panic!("admin transfer delay is below the minimum");
+        }
 
         types::write_entry(
             &env,
@@ -2076,10 +2056,7 @@ impl ProgressTracker {
             &delegate,
         );
 
-        env.events().publish(
-            (Symbol::new(&env, "progress_delegated"),),
-            (&learner, &delegate),
-        );
+        events::progress_delegated(&env, &learner, &delegate);
     }
 
     /// Revoke `learner`'s active progress delegation, if any. Learner only.
@@ -2107,8 +2084,7 @@ impl ProgressTracker {
             &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
         );
 
-        env.events()
-            .publish((Symbol::new(&env, "delegation_revoked"),), (&learner,));
+        events::delegation_revoked(&env, &learner);
     }
 
     /// Returns the address `learner` has delegated progress tracking to, if
@@ -2447,8 +2423,7 @@ impl ProgressTracker {
         version += 1;
         types::write_entry(&env, &ProgressTrackerDataKey::Version, &version);
 
-        env.events()
-            .publish((Symbol::new(&env, "upgraded"),), (new_wasm_hash, version));
+        events::upgraded(&env, &new_wasm_hash, version);
     }
 
     /// Wasm hash the contract was most recently upgraded to, or `None` if
@@ -3259,8 +3234,13 @@ mod tests {
                 &env,
                 (
                     contract_id,
-                    (symbol_short!("enrolled"),).into_val(&env),
-                    (learner, course_id, 12345u64).into_val(&env),
+                    (
+                        Symbol::new(&env, "enrolled"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (12345u64,).into_val(&env),
                 )
             ]
         );
@@ -3292,14 +3272,13 @@ mod tests {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "module_completed"),).into_val(&env),
                     (
+                        Symbol::new(&env, "module_completed"),
                         learner.clone(),
-                        course_id.clone(),
-                        Symbol::new(&env, "mod_2"),
-                        46u32,
+                        course_id.clone()
                     )
                         .into_val(&env),
+                    (Symbol::new(&env, "mod_2"), 46u32).into_val(&env),
                 )
             ]
         );
@@ -3319,8 +3298,13 @@ mod tests {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
-                    (learner, course_id).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_eligible"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    ().into_val(&env),
                 )
             ]
         );
@@ -3465,7 +3449,7 @@ mod tests {
         let (_, topics, _) = events.last().unwrap();
         assert_eq!(
             topics,
-            (Symbol::new(&env, "prerequisites_set"),).into_val(&env)
+            (Symbol::new(&env, "prerequisites_set"), advanced).into_val(&env)
         );
     }
 
@@ -4127,7 +4111,7 @@ mod tests {
         let new_admin = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_admin_transfer_delay(&0);
+        client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         client.cancel_admin_transfer();
         client.accept_admin();
@@ -4158,6 +4142,68 @@ mod tests {
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         assert_eq!(client.admin_transfer_delay(), 172_800);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay is below the minimum")]
+    fn test_set_admin_transfer_delay_rejects_zero() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        // Zero would collapse the two-step transfer into a single-step one,
+        // defeating the handoff guard the delay exists for (#547).
+        client.set_admin_transfer_delay(&0);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay is below the minimum")]
+    fn test_set_admin_transfer_delay_rejects_below_one_hour() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_599);
+    }
+
+    #[test]
+    fn test_set_admin_transfer_delay_accepts_one_hour_minimum() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_600);
+        assert_eq!(client.admin_transfer_delay(), 3_600);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay has not elapsed")]
+    fn test_accept_admin_honors_the_configured_minimum_delay() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_600);
+        client.transfer_admin(&new_admin);
+        // One second short of the configured minimum must still be rejected.
+        env.ledger().with_mut(|l| l.timestamp += 3_599);
+        client.accept_admin();
+    }
+
+    #[test]
+    fn test_set_admin_transfer_delay_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        // No authorization is mocked, so the admin-only call must be rejected
+        // before the minimum-delay check ever runs.
+        assert!(client.try_set_admin_transfer_delay(&3_600).is_err());
     }
 
     // ── Issue #457: course mutations must respect the pause state ───────
@@ -4489,8 +4535,17 @@ mod tests {
         client.retake_quiz(&learner, &course_id, &quiz_1, &75);
 
         let events = env.events().all();
-        let (_, topics, _) = events.last().unwrap();
-        assert_eq!(topics, (Symbol::new(&env, "quiz_retaken"),).into_val(&env));
+        let (_, topics, data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (
+                Symbol::new(&env, "quiz_retaken"),
+                learner.clone(),
+                course_id.clone()
+            )
+                .into_val(&env)
+        );
+        assert_eq!(*data, (quiz_1, 55u32, 75u32).into_val(&env));
     }
 
     #[test]
@@ -4698,10 +4753,10 @@ mod tests {
         client.set_course_difficulty(&course_id, &2);
 
         let events = env.events().all();
-        let (_, topics, data) = events.last().unwrap();
+        let (_, topics, _data) = events.last().unwrap();
         assert_eq!(
             topics,
-            (Symbol::new(&env, "course_difficulty_set"),).into_val(&env)
+            (Symbol::new(&env, "course_difficulty_set"), course_id.clone()).into_val(&env)
         );
         let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
         assert_eq!(data_vec.len(), 2);
@@ -4709,6 +4764,7 @@ mod tests {
         let data_difficulty: u32 = data_vec.get(1).unwrap().into_val(&env);
         assert_eq!(data_course, course_id);
         assert_eq!(data_difficulty, 2);
+        assert_eq!(*data, (2u32,).into_val(&env));
     }
 
     #[test]
@@ -4732,4 +4788,161 @@ mod tests {
         env.mock_all_auths();
         client.set_course_difficulty(&Symbol::new(&env, "missing"), &1);
     }
+
+    // ── Issue #264: course creation timestamp unit tests ──────────────────
+
+    #[test]
+    fn test_get_course_created_at_returns_timestamp_set_during_creation() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let timestamp_before = env.ledger().timestamp();
+        let course_id = create_test_course(&env, &client);
+        let timestamp_after = env.ledger().timestamp();
+
+        let created_at = client.get_course_created_at(&course_id);
+        assert!(created_at >= timestamp_before);
+        assert!(created_at <= timestamp_after);
+    }
+
+    #[test]
+    fn test_course_created_at_timestamp_does_not_change_after_updates() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let original_created_at = client.get_course_created_at(&course_id);
+
+        // Update difficulty
+        client.set_course_difficulty(&course_id, &1);
+        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+
+        // Update tags
+        let mut tags = Vec::new(&env);
+        tags.push_back(Symbol::new(&env, "rust"));
+        client.set_course_tags(&course_id, &tags);
+        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+
+        // Update content hash
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash1"));
+        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_get_course_created_at_panics_for_nonexistent_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.get_course_created_at(&Symbol::new(&env, "missing"));
+    }
+
+    #[test]
+    fn test_get_course_created_at_is_read_only() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        // Call multiple times and verify the same value is returned
+        let created_at_1 = client.get_course_created_at(&course_id);
+        let created_at_2 = client.get_course_created_at(&course_id);
+        let created_at_3 = client.get_course_created_at(&course_id);
+
+        assert_eq!(created_at_1, created_at_2);
+        assert_eq!(created_at_2, created_at_3);
+
+        // Verify the storage size doesn't change (read-only means no writes)
+        let storage_before = client.get_storage_size();
+        client.get_course_created_at(&course_id);
+        let storage_after = client.get_storage_size();
+        assert_eq!(storage_before, storage_after);
+    }
+
+    // ── Issue #245: course version update unit tests ────────────────────────
+
+    #[test]
+    fn test_update_course_version_increments_version() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let initial_version = client.get_course(&course_id).version;
+
+        client.update_course_version(&course_id, &(initial_version + 1));
+
+        let updated_version = client.get_course(&course_id).version;
+        assert_eq!(updated_version, initial_version + 1);
+    }
+
+    #[test]
+    fn test_update_course_version_emits_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let new_version = 42u32;
+
+        client.update_course_version(&course_id, &new_version);
+
+        let events = env.events().all();
+        let (_, topics, _data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (Symbol::new(&env, "course_version_updated"),).into_val(&env)
+        );
+    }
+
+    #[test]
+    fn test_update_course_version_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let course_id = Symbol::new(&env, "rust_101");
+
+        // No authorization mocked, so admin-only call must be rejected
+        assert!(client.try_update_course_version(&course_id, &2).is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_update_course_version_panics_for_nonexistent_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.update_course_version(&Symbol::new(&env, "missing"), &2);
+    }
+
+    #[test]
+    fn test_update_course_version_multiple_increments_accumulate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let initial_version = client.get_course(&course_id).version;
+
+        // Increment multiple times
+        for i in 1..=5u32 {
+            client.update_course_version(&course_id, &(initial_version + i));
+            let current_version = client.get_course(&course_id).version;
+            assert_eq!(current_version, initial_version + i);
+        }
+    }
 }
+

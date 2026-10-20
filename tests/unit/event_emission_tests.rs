@@ -63,8 +63,8 @@ mod progress_tracker_events {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "course_created"),).into_val(&env),
-                    (course_id.clone(), 2u32, 1u32, module_ids.clone()).into_val(&env),
+                    (Symbol::new(&env, "course_created"), course_id.clone()).into_val(&env),
+                    (2u32, 1u32, module_ids.clone()).into_val(&env),
                 )
             ]
         );
@@ -91,8 +91,13 @@ mod progress_tracker_events {
                 &env,
                 (
                     contract_id,
-                    (soroban_sdk::symbol_short!("enrolled"),).into_val(&env),
-                    (learner, course_id, 99999u64).into_val(&env),
+                    (
+                        soroban_sdk::symbol_short!("enrolled"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (99999u64,).into_val(&env),
                 )
             ]
         );
@@ -115,17 +120,17 @@ mod progress_tracker_events {
         let (_, topics, data) = last;
 
         let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
-        assert_eq!(topics_vec.len(), 1);
+        assert_eq!(topics_vec.len(), 3);
         let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
+        let topic_learner: Address = topics_vec.get(1).unwrap().into_val(&env);
+        let topic_course: Symbol = topics_vec.get(2).unwrap().into_val(&env);
         assert_eq!(event_name, Symbol::new(&env, "module_completed"));
+        assert_eq!(topic_learner, learner);
+        assert_eq!(topic_course, course_id);
 
         let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
-        assert_eq!(data_vec.len(), 4);
-        let data_learner: Address = data_vec.get(0).unwrap().into_val(&env);
-        let data_course: Symbol = data_vec.get(1).unwrap().into_val(&env);
-        let data_module: Symbol = data_vec.get(2).unwrap().into_val(&env);
-        assert_eq!(data_learner, learner);
-        assert_eq!(data_course, course_id);
+        assert_eq!(data_vec.len(), 2);
+        let data_module: Symbol = data_vec.get(0).unwrap().into_val(&env);
         assert_eq!(data_module, Symbol::new(&env, "mod_1"));
     }
 
@@ -146,13 +151,17 @@ mod progress_tracker_events {
         let (_, topics, data) = last;
 
         let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = topics.clone();
-        assert_eq!(topics_vec.len(), 1);
+        assert_eq!(topics_vec.len(), 3);
         let event_name: Symbol = topics_vec.get(0).unwrap().into_val(&env);
+        let topic_learner: Address = topics_vec.get(1).unwrap().into_val(&env);
+        let topic_course: Symbol = topics_vec.get(2).unwrap().into_val(&env);
         assert_eq!(event_name, Symbol::new(&env, "quiz_submitted"));
+        assert_eq!(topic_learner, learner);
+        assert_eq!(topic_course, course_id);
 
         let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
-        assert_eq!(data_vec.len(), 4);
-        let data_score: u32 = data_vec.get(3).unwrap().into_val(&env);
+        assert_eq!(data_vec.len(), 2);
+        let data_score: u32 = data_vec.get(1).unwrap().into_val(&env);
         assert_eq!(data_score, 85);
     }
 
@@ -181,8 +190,13 @@ mod progress_tracker_events {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "credential_eligible"),).into_val(&env),
-                    (learner, course_id).into_val(&env),
+                    (
+                        Symbol::new(&env, "credential_eligible"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    ().into_val(&env),
                 )
             ]
         );
@@ -210,8 +224,13 @@ mod progress_tracker_events {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "quiz_retaken"),).into_val(&env),
-                    (learner, course_id, quiz_id, 40u32, 90u32).into_val(&env),
+                    (
+                        Symbol::new(&env, "quiz_retaken"),
+                        learner.clone(),
+                        course_id.clone()
+                    )
+                        .into_val(&env),
+                    (quiz_id, 40u32, 90u32).into_val(&env),
                 )
             ]
         );
@@ -235,8 +254,8 @@ mod progress_tracker_events {
                 &env,
                 (
                     contract_id,
-                    (Symbol::new(&env, "course_archived"),).into_val(&env),
-                    (course_id,).into_val(&env),
+                    (Symbol::new(&env, "course_archived"), course_id).into_val(&env),
+                    ().into_val(&env),
                 )
             ]
         );

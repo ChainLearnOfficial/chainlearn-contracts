@@ -235,6 +235,7 @@ fn test_unauthorized_archive_course() {
     let course_id = create_test_course(&env, &client);
     // Now test archive_course WITHOUT admin auth
     env.set_auths(&[]);
+    env.mock_auths(&[]);
     client.archive_course(&course_id);
 }
 
@@ -248,6 +249,7 @@ fn test_unauthorized_set_course_content_hash() {
     let course_id = create_test_course(&env, &client);
     // Now test set_course_content_hash WITHOUT admin auth
     env.set_auths(&[]);
+    env.mock_auths(&[]);
     client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash1"));
 }
 
@@ -261,6 +263,7 @@ fn test_unauthorized_set_course_difficulty() {
     let course_id = create_test_course(&env, &client);
     // Now test set_course_difficulty WITHOUT admin auth
     env.set_auths(&[]);
+    env.mock_auths(&[]);
     client.set_course_difficulty(&course_id, &0);
 }
 
@@ -276,6 +279,7 @@ fn test_unauthorized_set_course_tags() {
     tags.push_back(Symbol::new(&env, "tag1"));
     // Now test set_course_tags WITHOUT admin auth
     env.set_auths(&[]);
+    env.mock_auths(&[]);
     client.set_course_tags(&course_id, &tags);
 }
 
@@ -289,6 +293,7 @@ fn test_unauthorized_update_course_version() {
     let course_id = create_test_course(&env, &client);
     // Now test update_course_version WITHOUT admin auth
     env.set_auths(&[]);
+    env.mock_auths(&[]);
     client.update_course_version(&course_id, &2);
 }
 
@@ -321,13 +326,13 @@ fn test_unauthorized_emergency_pause_progress_tracker() {
 #[should_panic]
 fn test_unauthorized_mint_credential() {
     let env = Env::default();
-    let (admin, _contract_id, client) = setup_credential_nft(&env);
+    let (_admin, _contract_id, client) = setup_credential_nft(&env);
     let learner = Address::generate(&env);
     let course_id = Symbol::new(&env, "rust_101");
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     
     // First set up a course and complete it with admin auth
-    let (pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
+    let (_pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
     env.mock_all_auths();
     let mut module_ids = Vec::new(&env);
     module_ids.push_back(Symbol::new(&env, "mod_1"));
@@ -356,7 +361,7 @@ fn test_unauthorized_revoke_credential() {
     let course_id = Symbol::new(&env, "rust_101");
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     
-    let (pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
+    let (_pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
     env.mock_all_auths();
     let mut module_ids = Vec::new(&env);
     module_ids.push_back(Symbol::new(&env, "mod_1"));
@@ -386,7 +391,7 @@ fn test_unauthorized_renew_credential() {
     let course_id = Symbol::new(&env, "rust_101");
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     
-    let (pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
+    let (_pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
     env.mock_all_auths();
     let mut module_ids = Vec::new(&env);
     module_ids.push_back(Symbol::new(&env, "mod_1"));
@@ -416,7 +421,7 @@ fn test_unauthorized_set_credential_display() {
     let course_id = Symbol::new(&env, "rust_101");
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     
-    let (pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
+    let (_pt_admin, _pt_contract_id, pt_client) = setup_progress_tracker(&env);
     env.mock_all_auths();
     let mut module_ids = Vec::new(&env);
     module_ids.push_back(Symbol::new(&env, "mod_1"));

@@ -411,8 +411,9 @@ impl CredentialNft {
         verify::renew_credential(&env, credential_id, new_expiry);
     }
 
-    // ── Emergency Pause (#189) ────────────────────────────────────────────
+    // ── Emergency Pause (#189, #475) ─────────────────────────────────────────
 
+    /// Check if the contract is paused.
     fn is_paused(env: &Env) -> bool {
         env.storage()
             .persistent()
@@ -420,14 +421,14 @@ impl CredentialNft {
             .unwrap_or(false)
     }
 
+    /// Require that the contract is not paused, panicking otherwise.
     fn require_not_paused(env: &Env) {
         if Self::is_paused(env) {
             panic!("contract is paused");
         }
     }
 
-    /// Pause all state-changing operations.
-    /// Admin only.
+    /// Pause all state-changing operations. Admin only.
     pub fn emergency_pause(env: Env) {
         let admin: Address = env
             .storage()
@@ -599,11 +600,16 @@ impl CredentialNft {
     }
 
     /// Returns the current admin-transfer delay, in seconds (#423).
+    ///
+    /// Clamped to [`metadata::MIN_ADMIN_TRANSFER_DELAY_SECONDS`] so a value
+    /// stored before the minimum was enforced can never shorten the handoff
+    /// guard below one hour, matching `learn-token` (#546).
     pub fn admin_transfer_delay(env: Env) -> u64 {
         env.storage()
             .persistent()
             .get(&CredentialDataKey::AdminTransferDelay)
             .unwrap_or(metadata::DEFAULT_ADMIN_TRANSFER_DELAY_SECONDS)
+            .max(metadata::MIN_ADMIN_TRANSFER_DELAY_SECONDS)
     }
 
     /// Set the admin-transfer delay, in seconds. Admin only (#423).
@@ -613,6 +619,11 @@ impl CredentialNft {
     ///
     /// # Panics
     /// * If the caller is not the current admin
+    /// * If `delay_seconds` is below
+    ///   [`metadata::MIN_ADMIN_TRANSFER_DELAY_SECONDS`] (3,600s): a zero or
+    ///   near-zero delay would let a compromised admin key hand control to an
+    ///   attacker before anyone monitoring the contract could react, which is
+    ///   exactly what the two-step transfer exists to prevent (#546)
     pub fn set_admin_transfer_delay(env: Env, delay_seconds: u64) {
         let admin: Address = env
             .storage()
@@ -620,6 +631,10 @@ impl CredentialNft {
             .get(&CredentialDataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+
+        if delay_seconds < metadata::MIN_ADMIN_TRANSFER_DELAY_SECONDS {
+            panic!("admin transfer delay is below the minimum");
+        }
 
         write_entry(&env, &CredentialDataKey::AdminTransferDelay, &delay_seconds);
     }
@@ -906,8 +921,10 @@ mod tests {
         let new_admin = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_admin_transfer_delay(&0);
+        client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
+        // Advance past the configured one-hour minimum.
+        env.ledger().with_mut(|l| l.timestamp += 3_600);
         client.accept_admin();
 
         assert_eq!(client.admin(), new_admin);
@@ -936,7 +953,7 @@ mod tests {
         let new_admin = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_admin_transfer_delay(&0);
+        client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         client.cancel_admin_transfer();
 
@@ -953,10 +970,72 @@ mod tests {
         let new_admin = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_admin_transfer_delay(&0);
+        client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         client.cancel_admin_transfer();
         client.accept_admin();
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay is below the minimum")]
+    fn test_set_admin_transfer_delay_rejects_zero() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        // Zero would collapse the two-step transfer into a single-step one,
+        // defeating the handoff guard the delay exists for (#546).
+        client.set_admin_transfer_delay(&0);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay is below the minimum")]
+    fn test_set_admin_transfer_delay_rejects_below_one_hour() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_599);
+    }
+
+    #[test]
+    fn test_set_admin_transfer_delay_accepts_one_hour_minimum() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_600);
+        assert_eq!(client.admin_transfer_delay(), 3_600);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin transfer delay has not elapsed")]
+    fn test_accept_admin_honors_the_configured_minimum_delay() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_600);
+        client.transfer_admin(&new_admin);
+        // One second short of the configured minimum must still be rejected.
+        env.ledger().with_mut(|l| l.timestamp += 3_599);
+        client.accept_admin();
+    }
+
+    #[test]
+    fn test_set_admin_transfer_delay_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        // No authorization is mocked, so the admin-only call must be rejected
+        // before the minimum-delay check ever runs.
+        assert!(client.try_set_admin_transfer_delay(&3_600).is_err());
     }
 
     #[test]
@@ -1743,6 +1822,157 @@ mod tests {
         let cred_id = client.mint_credential(&learner, &course, &85, &cert_uri);
         let info = client.verify_credential(&cred_id);
         assert_eq!(info.metadata_uri, cert_uri);
+    }
+
+    #[test]
+    fn test_get_certificate_uri_is_none_before_generation() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+
+        // Completing the course does not by itself create a certificate URI;
+        // only generate_certificate does (#545).
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+        assert_eq!(client.get_certificate_uri(&learner, &course), None);
+    }
+
+    #[test]
+    fn test_get_certificate_uri_returns_generated_uri() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+        let cert_uri = client.generate_certificate(&learner, &course);
+
+        // The stored URI is exactly what generate_certificate returned.
+        assert_eq!(
+            client.get_certificate_uri(&learner, &course),
+            Some(cert_uri)
+        );
+    }
+
+    #[test]
+    fn test_get_certificate_uri_is_stable_across_repeated_generation() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+
+        let first = client.generate_certificate(&learner, &course);
+        assert_eq!(client.get_certificate_uri(&learner, &course), Some(first.clone()));
+
+        // generate_certificate is idempotent: it returns the stored URI
+        // instead of minting a new one, so get_certificate_uri keeps
+        // reporting the same value.
+        let second = client.generate_certificate(&learner, &course);
+        assert_eq!(first, second);
+        assert_eq!(client.get_certificate_uri(&learner, &course), Some(second));
+    }
+
+    #[test]
+    fn test_get_certificate_uri_is_scoped_per_learner() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner1 = Address::generate(&env);
+        let learner2 = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+
+        enrolled_and_completed(&env, &tracker_id, &learner1, &course);
+        enrolled_and_completed(&env, &tracker_id, &learner2, &course);
+
+        let uri1 = client.generate_certificate(&learner1, &course);
+        // learner2 has not generated theirs yet, and learner1's URI must not
+        // leak into learner2's slot.
+        assert_eq!(client.get_certificate_uri(&learner2, &course), None);
+
+        let uri2 = client.generate_certificate(&learner2, &course);
+        assert_ne!(uri1, uri2);
+        assert_eq!(client.get_certificate_uri(&learner1, &course), Some(uri1));
+        assert_eq!(client.get_certificate_uri(&learner2, &course), Some(uri2));
+    }
+
+    #[test]
+    fn test_get_certificate_uri_is_scoped_per_course() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course1 = Symbol::new(&env, "rust_101");
+        let course2 = Symbol::new(&env, "sol_201");
+
+        enrolled_and_completed(&env, &tracker_id, &learner, &course1);
+        enrolled_and_completed(&env, &tracker_id, &learner, &course2);
+
+        let uri1 = client.generate_certificate(&learner, &course1);
+        // Generating a certificate for one course must not create one for
+        // another course the same learner completed.
+        assert_eq!(client.get_certificate_uri(&learner, &course2), None);
+
+        let uri2 = client.generate_certificate(&learner, &course2);
+        assert_ne!(uri1, uri2);
+        assert_eq!(client.get_certificate_uri(&learner, &course1), Some(uri1));
+        assert_eq!(client.get_certificate_uri(&learner, &course2), Some(uri2));
+    }
+
+    #[test]
+    fn test_get_certificate_uri_is_none_for_unknown_learner_and_course() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+
+        // Querying a pair that was never generated returns None rather than
+        // panicking, so indexers can probe safely (#545).
+        let learner = Address::generate(&env);
+        let course = Symbol::new(&env, "rust_101");
+        assert_eq!(client.get_certificate_uri(&learner, &course), None);
+    }
+
+    #[test]
+    fn test_get_certificate_uri_uses_the_cert_prefix_format() {
+        let env = Env::default();
+        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+        let course = Symbol::new(&env, "rust_101");
+
+        enrolled_and_completed(&env, &tracker_id, &learner, &course);
+        let cert_uri = client.generate_certificate(&learner, &course);
+
+        // The generated URI follows the documented on-chain format:
+        // "cert_" + 12 lowercase hex characters of the learner/course hash.
+        let uri = cert_uri.to_string();
+        assert_eq!(uri.len(), 17);
+        assert!(uri.starts_with("cert_"));
+        assert!(
+            uri[5..]
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "suffix must be lowercase hex, got: {uri}"
+        );
+        assert_eq!(client.get_certificate_uri(&learner, &course), Some(cert_uri));
     }
 
     // ── Metadata URI Validation Tests ───────────────────────────────────────────

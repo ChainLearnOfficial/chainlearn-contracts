@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `.github/PULL_REQUEST_TEMPLATE.md` mirroring the `CONTRIBUTING.md` pull request
+  requirements (summary, changes, testing, breaking changes, security checklist) (#565)
+- Gas benchmark regression check in CI: `scripts/estimate-gas.sh` now compares
+  each operation against per-operation CPU instruction thresholds from
+  `scripts/gas-thresholds.env`, and CI fails when any operation exceeds its
+  threshold (#562)
+- Unit tests for `get_certificate_uri`: unset, generated, idempotent, learner- and
+  course-scoped, and `cert_`-prefixed format coverage (#545)
+- Minimum-delay validation on credential-nft `set_admin_transfer_delay`: values below the
+  one-hour `MIN_ADMIN_TRANSFER_DELAY_SECONDS` are rejected, and `admin_transfer_delay` is
+  clamped to that minimum (#546)
+- Minimum-delay validation on progress-tracker `set_admin_transfer_delay`, matching
+  credential-nft and learn-token (#547)
+- progress-tracker events now index `learner`/`course_id` as topic slots
+  (`[event_name, learner, course_id]`, `[event_name, course_id]`, or `[event_name, learner]`)
+  so indexers can filter server-side instead of scanning every payload (#549)
 - MIT `LICENSE` file, referenced from the README and declared in Cargo metadata (#341)
 - `CODE_OF_CONDUCT.md` with community standards, reporting and enforcement guidelines (#342)
 - GitHub issue templates for bug reports and feature requests, linked from the README (#343)
@@ -29,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for `get_credentials_by_course`: mint-order pagination, exclusion of other courses, empty and fully-revoked course results, and read-only behaviour (#544)
 
 ### Changed
+- Deploy workflow now runs `scripts/optimize-wasm.sh` before deploying and uploads
+  the `.optimized.wasm` artifacts, so CI-deployed contract sizes match
+  `deploy.sh` (#563); it also runs `scripts/initialize.sh` after deployment and
+  verifies initialization, so contracts are usable immediately (#564)
 - credential-nft: `revoke_credential` and `revoke_credential_with_reason` share a single implementation and prune indexes with host-side `first_index_of` (#344)
 - credential-nft events now follow the learn-token topic convention: the event name is `topics[0]`, learner and course_id are indexed topics, and indexed fields move out of `data` instead of being duplicated. `credential_minted`/`credential_revoked` topic on `[event, learner, course_id]`; `credential_renewed`, `credential_metadata_updated`, and `credential_display_set` topic on `[event, credential_id]` (#548)
 - learn-token: whitelist-only restrictions now require a 48-hour proposal period, and the configurable admin-transfer delay cannot be set below one hour (#445, #447)
@@ -40,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - credential-nft no longer declares `is_paused`/`require_not_paused`/`emergency_pause`/`unpause` twice, which broke compilation of the whole workspace (#475)
 - `test_set_course_difficulty_emits_event` compares the event payload field-by-field instead of comparing `Val`s, which is not supported by the Soroban SDK
 - `create_course_and_submit_quiz` test helpers now complete the course module before submitting a quiz, so credential-mint error-message tests reach the panic under test instead of failing the eligibility gate (#479)
+- credential-nft: removed a duplicated Emergency Pause block (duplicate `is_paused`,
+  `require_not_paused`, `emergency_pause` and `unpause` definitions) that prevented the
+  crate from compiling
 - learn-token governance proposal creation, voting, and execution now respect the emergency pause (#446)
 - progress-tracker rejects zero-score quiz retakes before comparing them with the stored score (#444)
 - `mint_credential()` now rejects `course_id`s that were never registered via `create_course`, instead of only failing indirectly through the eligibility check (#108)

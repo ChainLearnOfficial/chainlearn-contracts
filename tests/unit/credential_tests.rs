@@ -3,7 +3,7 @@
 use credential_nft::{CredentialNft, CredentialNftClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     Address, Env, IntoVal, Symbol,
 };
 
@@ -594,13 +594,15 @@ mod credential_unit_tests {
         let initial_size = client.get_storage_size();
         let new_admin = Address::generate(&env);
 
-        client.set_admin_transfer_delay(&0);
+        client.set_admin_transfer_delay(&3_600);
         assert_eq!(client.get_storage_size(), initial_size + 1);
 
         let before_transfer = client.get_storage_size();
         client.transfer_admin(&new_admin);
         assert_eq!(client.get_storage_size(), before_transfer + 1);
 
+        // Advance past the configured one-hour minimum delay.
+        env.ledger().with_mut(|l| l.timestamp += 3_600);
         client.accept_admin();
         assert_eq!(client.get_storage_size(), before_transfer);
 
