@@ -79,7 +79,8 @@ fn bench_create_course() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench create_course: {cost} CPU insns");
-    assert!(cost > 0, "create_course must have nonzero cost");
+    // Baseline: ~450,000 instructions. Threshold at 2x baseline to catch regressions.
+    assert!(cost < 1_000_000, "create_course gas regression: {cost} >= 1_000_000");
 }
 
 #[test]
@@ -102,7 +103,8 @@ fn bench_enroll() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench enroll: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~180,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 400_000, "enroll gas regression: {cost} >= 400_000");
 }
 
 #[test]
@@ -126,7 +128,8 @@ fn bench_complete_module() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench complete_module: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~220,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 500_000, "complete_module gas regression: {cost} >= 500_000");
 }
 
 #[test]
@@ -150,7 +153,8 @@ fn bench_submit_quiz_score() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench submit_quiz_score: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~190,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 400_000, "submit_quiz_score gas regression: {cost} >= 400_000");
 }
 
 #[test]
@@ -174,7 +178,8 @@ fn bench_get_progress() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench get_progress: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~25,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 60_000, "get_progress gas regression: {cost} >= 60_000");
 }
 
 // ── Learn Token Benchmarks ──────────────────────────────────────────────────
@@ -207,7 +212,8 @@ fn bench_claim_reward() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench claim_reward: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~420,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 900_000, "claim_reward gas regression: {cost} >= 900_000");
     assert_eq!(bench.token_client.balance(&learner), 8000);
 }
 
@@ -226,7 +232,8 @@ fn bench_transfer() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench transfer: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~110,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 250_000, "transfer gas regression: {cost} >= 250_000");
 }
 
 #[test]
@@ -250,8 +257,9 @@ fn bench_approve_and_transfer_from() {
 
     println!("bench approve: {approve_cost} CPU insns");
     println!("bench transfer_from: {transfer_from_cost} CPU insns");
-    assert!(approve_cost > 0);
-    assert!(transfer_from_cost > 0);
+    // Baseline: approve ~130,000, transfer_from ~140,000. Threshold at 2x baseline.
+    assert!(approve_cost < 300_000, "approve gas regression: {approve_cost} >= 300_000");
+    assert!(transfer_from_cost < 300_000, "transfer_from gas regression: {transfer_from_cost} >= 300_000");
 }
 
 #[test]
@@ -267,7 +275,8 @@ fn bench_mint() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench mint: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~180,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 400_000, "mint gas regression: {cost} >= 400_000");
 }
 
 #[test]
@@ -284,7 +293,8 @@ fn bench_burn() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench burn: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~120,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 250_000, "burn gas regression: {cost} >= 250_000");
     assert_eq!(bench.token_client.balance(&user), 5000);
 }
 
@@ -323,7 +333,8 @@ fn bench_mint_credential() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench mint_credential: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~380,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 800_000, "mint_credential gas regression: {cost} >= 800_000");
 }
 
 #[test]
@@ -342,7 +353,8 @@ fn bench_verify_credential() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench verify_credential: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~45,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 100_000, "verify_credential gas regression: {cost} >= 100_000");
 }
 
 #[test]
@@ -361,7 +373,8 @@ fn bench_revoke_credential() {
     let cost = env.budget().cpu_instruction_cost();
 
     println!("bench revoke_credential: {cost} CPU insns");
-    assert!(cost > 0);
+    // Baseline: ~180,000 instructions. Threshold at 2x baseline.
+    assert!(cost < 400_000, "revoke_credential gas regression: {cost} >= 400_000");
 }
 
 // ── Regression Detection ────────────────────────────────────────────────────
@@ -450,6 +463,8 @@ fn bench_regression_batch_vs_individual_claim() {
 
     // Ratio should not regress beyond 0.9 (90% of individual) — if batch
     // approaches individual cost, an optimization was lost.
+    // This threshold is derived from current measurements where batch is ~0.6x individual.
+    // A regression to >0.9x would indicate the batch optimization was lost.
     assert!(
         ratio < 0.9,
         "batch claim ratio {ratio:.3} exceeds 0.9 regression threshold — possible optimization regression"
@@ -486,7 +501,8 @@ fn bench_e2e_enroll_complete_claim_mint() {
     let total_cost = env.budget().cpu_instruction_cost();
 
     println!("bench e2e enroll→complete→claim→mint: {total_cost} CPU insns");
-    assert!(total_cost > 0);
+    // Baseline: ~1,300,000 instructions. Threshold at 2x baseline.
+    assert!(total_cost < 3_000_000, "e2e flow gas regression: {total_cost} >= 3_000_000");
     assert_eq!(bench.token_client.balance(&learner), 8500);
     assert!(bench.credential_client.is_credential_valid(&1));
 }
