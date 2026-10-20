@@ -560,6 +560,81 @@ mod xcontract_call_tests {
         assert_eq!(token_client.total_supply(), 5000);
     }
 
+    /// When the learn-token contract is paused, `batch_claim_reward` must be blocked
+    /// with "contract is paused" before the cross-contract score fetch even
+    /// occurs. The progress-tracker state and token state must be unaffected.
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_paused_contract_blocks_cross_contract_batch_claim_reward() {
+        let env = Env::default();
+        let (admin, token_id, pt_id) = setup(&env);
+        let token_client = LearnTokenClient::new(&env, &token_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id_1 = Symbol::new(&env, "quiz_1");
+        let quiz_id_2 = Symbol::new(&env, "quiz_2");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_1, 85);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_2, 75);
+
+        // Grant admin the Pauser role so it can pause, then pause.
+        token_client.grant_role(
+            &admin,
+            &admin,
+            &AdminRole::Pauser,
+        );
+        token_client.pause(&admin);
+        assert!(token_client.is_paused());
+
+        // This must panic with "contract is paused" before reaching the
+        // cross-contract score fetch.
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(quiz_id_1);
+        quiz_ids.push_back(quiz_id_2);
+        token_client.batch_claim_reward(&learner, &course_id, &quiz_ids);
+    }
+
+    /// After unpausing, the cross-contract batch reward claim must succeed as normal,
+    /// confirming the pause guard was the only obstacle (not a corrupted state).
+    #[test]
+    fn test_unpause_restores_cross_contract_batch_claim_reward() {
+        let env = Env::default();
+        let (admin, token_id, pt_id) = setup(&env);
+        let token_client = LearnTokenClient::new(&env, &token_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_id);
+
+        let learner = Address::generate(&env);
+        env.mock_all_auths();
+
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id_1 = Symbol::new(&env, "quiz_1");
+        let quiz_id_2 = Symbol::new(&env, "quiz_2");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_1, 50);
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id_2, 60);
+
+        token_client.grant_role(
+            &admin,
+            &admin,
+            &AdminRole::Pauser,
+        );
+        token_client.pause(&admin);
+        token_client.unpause(&admin);
+        assert!(!token_client.is_paused());
+
+        // Cross-contract batch claim must work normally after unpausing.
+        let mut quiz_ids = Vec::new(&env);
+        quiz_ids.push_back(quiz_id_1);
+        quiz_ids.push_back(quiz_id_2);
+        let claimed = token_client.batch_claim_reward(&learner, &course_id, &quiz_ids);
+        assert_eq!(claimed.len(), 2);
+        // Score (50 + 60) * 100 = 11000
+        assert_eq!(token_client.balance(&learner), 11000);
+        assert_eq!(token_client.total_supply(), 11000);
+    }
+
     // ── Double-claim: claimed flag persists through cross-contract read ───
 
     /// After a successful cross-contract claim the "reward claimed" flag must
