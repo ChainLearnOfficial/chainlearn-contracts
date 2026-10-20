@@ -4647,6 +4647,25 @@ mod tests {
 
     // ── Issue #639: i128 boundary tests for token operations ────────────────
 
+    fn setup_with_max_supply(env: &Env, max_supply: i128) -> (Address, Address) {
+        let admin = Address::generate(env);
+        let pt_contract_id = env.register_contract(None, progress_tracker::ProgressTracker);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(env, &pt_contract_id);
+        pt_client.initialize(&admin);
+
+        let lt_contract_id = env.register_contract(None, LearnToken);
+        let lt_client = LearnTokenClient::new(env, &lt_contract_id);
+        lt_client.initialize(
+            &admin,
+            &SorobanString::from_str(env, "CLearn"),
+            &SorobanString::from_str(env, "CLRN"),
+            &7,
+            &pt_contract_id,
+            &max_supply,
+        );
+        (admin, lt_contract_id)
+    }
+
     #[test]
     fn test_approve_with_i128_max_amount() {
         let env = Env::default();
@@ -4664,13 +4683,12 @@ mod tests {
     #[test]
     fn test_transfer_exact_balance_at_i128_max_leaves_zero() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup(&env);
+        let (admin, contract_id) = setup_with_max_supply(&env, i128::MAX);
         let client = LearnTokenClient::new(&env, &contract_id);
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_max_supply(&i128::MAX);
         client.mint(&admin, &alice, &i128::MAX);
         assert_eq!(client.balance(&alice), i128::MAX);
 
@@ -4682,12 +4700,11 @@ mod tests {
     #[test]
     fn test_burn_exact_balance_at_i128_max_leaves_zero() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup(&env);
+        let (admin, contract_id) = setup_with_max_supply(&env, i128::MAX);
         let client = LearnTokenClient::new(&env, &contract_id);
         let alice = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_max_supply(&i128::MAX);
         client.mint(&admin, &alice, &i128::MAX);
         assert_eq!(client.balance(&alice), i128::MAX);
         assert_eq!(client.total_supply(), i128::MAX);
@@ -4700,13 +4717,12 @@ mod tests {
     #[test]
     fn test_mint_to_i128_max_supply_cap() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup(&env);
+        let (admin, contract_id) = setup_with_max_supply(&env, i128::MAX);
         let client = LearnTokenClient::new(&env, &contract_id);
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_max_supply(&i128::MAX);
         client.mint(&admin, &alice, &(i128::MAX - 1));
         client.mint(&admin, &bob, &1);
 
@@ -4719,14 +4735,13 @@ mod tests {
     #[test]
     fn test_allowance_operations_at_i128_max() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup(&env);
+        let (admin, contract_id) = setup_with_max_supply(&env, i128::MAX);
         let client = LearnTokenClient::new(&env, &contract_id);
         let owner = Address::generate(&env);
         let spender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
         env.mock_all_auths();
-        client.set_max_supply(&i128::MAX);
         client.mint(&admin, &owner, &i128::MAX);
 
         let exp = env.ledger().sequence() + 100;
