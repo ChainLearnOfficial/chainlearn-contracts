@@ -6,7 +6,10 @@ mod fixtures;
 
 use learn_token::LearnTokenClient;
 use progress_tracker::ProgressTrackerClient;
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Env, Symbol, Vec,
+};
 
 /// Create a minimal course (one module, just the given quiz ids) and enroll
 /// `learner` in it. `claim_reward` only requires enrollment plus a submitted
@@ -150,4 +153,94 @@ fn test_total_supply_consistency() {
     token_client.claim_reward(&learner2, &course_id, &q2); // 5000
 
     assert_eq!(token_client.total_supply(), 13000);
+}
+
+#[test]
+fn test_transfer_from_after_approve() {
+    let setup = fixtures::setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    let spender = Address::generate(env);
+    let recipient = Address::generate(env);
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = Symbol::new(env, "course_1");
+    let quiz_id = Symbol::new(env, "quiz_1");
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
+    token_client.claim_reward(learner, &course_id, &quiz_id); // 8000
+
+    token_client.approve(learner, &spender, &5_000, &999_999);
+
+    // The approved spender moves tokens on the learner's behalf.
+    token_client.transfer_from(&spender, learner, &recipient, &3_000);
+
+    assert_eq!(token_client.balance(learner), 5_000);
+    assert_eq!(token_client.balance(&recipient), 3_000);
+    assert_eq!(token_client.allowance(learner, &spender), 2_000);
+    assert_eq!(token_client.total_supply(), 8_000);
+}
+
+#[test]
+fn test_transfer_from_deducts_allowance_correctly() {
+    let setup = fixtures::setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    let spender = Address::generate(env);
+    let recipient = Address::generate(env);
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = Symbol::new(env, "course_1");
+    let quiz_id = Symbol::new(env, "quiz_1");
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &100);
+    token_client.claim_reward(learner, &course_id, &quiz_id); // 10000
+
+    token_client.approve(learner, &spender, &6_000, &999_999);
+
+    // Each spend reduces the remaining allowance by exactly its amount.
+    token_client.transfer_from(&spender, learner, &recipient, &2_000);
+    assert_eq!(token_client.allowance(learner, &spender), 4_000);
+
+    token_client.transfer_from(&spender, learner, &recipient, &4_000);
+    assert_eq!(token_client.allowance(learner, &spender), 0);
+    assert_eq!(token_client.balance(learner), 4_000);
+    assert_eq!(token_client.balance(&recipient), 6_000);
+}
+
+#[test]
+fn test_transfer_from_with_expired_allowance_fails() {
+    let setup = fixtures::setup_chainlearn_env();
+    let env = &setup.env;
+    let learner = &setup.learner;
+    let spender = Address::generate(env);
+    let recipient = Address::generate(env);
+    env.mock_all_auths();
+
+    let token_client = LearnTokenClient::new(env, &setup.token_contract_id);
+    let progress_client = ProgressTrackerClient::new(env, &setup.progress_contract_id);
+
+    let course_id = Symbol::new(env, "course_1");
+    let quiz_id = Symbol::new(env, "quiz_1");
+    setup_course_and_enroll(env, &progress_client, learner, &course_id, &[quiz_id.clone()]);
+    progress_client.submit_quiz_score(learner, &course_id, &quiz_id, &80);
+    token_client.claim_reward(learner, &course_id, &quiz_id); // 8000
+
+    token_client.approve(learner, &spender, &2_000, &10);
+    env.ledger().with_mut(|ledger| ledger.sequence_number = 20);
+
+    // Reading the expired allowance returns zero rather than the stale value.
+    assert_eq!(token_client.allowance(learner, &spender), 0);
+
+    let result = token_client.try_transfer_from(&spender, learner, &recipient, &1_000);
+    assert!(result.is_err());
+    assert_eq!(token_client.balance(learner), 8_000);
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(token_client.total_supply(), 8_000);
 }
