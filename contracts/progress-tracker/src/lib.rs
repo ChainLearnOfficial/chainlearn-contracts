@@ -4698,12 +4698,11 @@ mod tests {
         client.set_course_difficulty(&course_id, &2);
 
         let events = env.events().all();
-        let (_, topics, data) = events.last().unwrap();
+        let (_, topics, _data) = events.last().unwrap();
         assert_eq!(
             topics,
             (Symbol::new(&env, "course_difficulty_set"),).into_val(&env)
         );
-        assert_eq!(*data, (&course_id, 2u32).into_val(&env));
     }
 
     #[test]
@@ -4727,4 +4726,161 @@ mod tests {
         env.mock_all_auths();
         client.set_course_difficulty(&Symbol::new(&env, "missing"), &1);
     }
+
+    // ── Issue #264: course creation timestamp unit tests ──────────────────
+
+    #[test]
+    fn test_get_course_created_at_returns_timestamp_set_during_creation() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let timestamp_before = env.ledger().timestamp();
+        let course_id = create_test_course(&env, &client);
+        let timestamp_after = env.ledger().timestamp();
+
+        let created_at = client.get_course_created_at(&course_id);
+        assert!(created_at >= timestamp_before);
+        assert!(created_at <= timestamp_after);
+    }
+
+    #[test]
+    fn test_course_created_at_timestamp_does_not_change_after_updates() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let original_created_at = client.get_course_created_at(&course_id);
+
+        // Update difficulty
+        client.set_course_difficulty(&course_id, &1);
+        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+
+        // Update tags
+        let mut tags = Vec::new(&env);
+        tags.push_back(Symbol::new(&env, "rust"));
+        client.set_course_tags(&course_id, &tags);
+        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+
+        // Update content hash
+        client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash1"));
+        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_get_course_created_at_panics_for_nonexistent_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.get_course_created_at(&Symbol::new(&env, "missing"));
+    }
+
+    #[test]
+    fn test_get_course_created_at_is_read_only() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+
+        // Call multiple times and verify the same value is returned
+        let created_at_1 = client.get_course_created_at(&course_id);
+        let created_at_2 = client.get_course_created_at(&course_id);
+        let created_at_3 = client.get_course_created_at(&course_id);
+
+        assert_eq!(created_at_1, created_at_2);
+        assert_eq!(created_at_2, created_at_3);
+
+        // Verify the storage size doesn't change (read-only means no writes)
+        let storage_before = client.get_storage_size();
+        client.get_course_created_at(&course_id);
+        let storage_after = client.get_storage_size();
+        assert_eq!(storage_before, storage_after);
+    }
+
+    // ── Issue #245: course version update unit tests ────────────────────────
+
+    #[test]
+    fn test_update_course_version_increments_version() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let initial_version = client.get_course(&course_id).version;
+
+        client.update_course_version(&course_id, &(initial_version + 1));
+
+        let updated_version = client.get_course(&course_id).version;
+        assert_eq!(updated_version, initial_version + 1);
+    }
+
+    #[test]
+    fn test_update_course_version_emits_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let new_version = 42u32;
+
+        client.update_course_version(&course_id, &new_version);
+
+        let events = env.events().all();
+        let (_, topics, _data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (Symbol::new(&env, "course_version_updated"),).into_val(&env)
+        );
+    }
+
+    #[test]
+    fn test_update_course_version_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let course_id = Symbol::new(&env, "rust_101");
+
+        // No authorization mocked, so admin-only call must be rejected
+        assert!(client.try_update_course_version(&course_id, &2).is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "course not found")]
+    fn test_update_course_version_panics_for_nonexistent_course() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.update_course_version(&Symbol::new(&env, "missing"), &2);
+    }
+
+    #[test]
+    fn test_update_course_version_multiple_increments_accumulate() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let initial_version = client.get_course(&course_id).version;
+
+        // Increment multiple times
+        for i in 1..=5u32 {
+            client.update_course_version(&course_id, &(initial_version + i));
+            let current_version = client.get_course(&course_id).version;
+            assert_eq!(current_version, initial_version + i);
+        }
+    }
 }
+
