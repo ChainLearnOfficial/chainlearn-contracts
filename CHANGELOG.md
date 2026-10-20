@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `.github/PULL_REQUEST_TEMPLATE.md` mirroring the `CONTRIBUTING.md` pull request
+  requirements (summary, changes, testing, breaking changes, security checklist) (#565)
+- Gas benchmark regression check in CI: `scripts/estimate-gas.sh` now compares
+  each operation against per-operation CPU instruction thresholds from
+  `scripts/gas-thresholds.env`, and CI fails when any operation exceeds its
+  threshold (#562)
 - Unit tests for `get_certificate_uri`: unset, generated, idempotent, learner- and
   course-scoped, and `cert_`-prefixed format coverage (#545)
 - Minimum-delay validation on credential-nft `set_admin_transfer_delay`: values below the
@@ -36,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `course_exists()` on progress-tracker, letting other contracts validate a `course_id` cheaply (#108)
 
 ### Changed
+- Deploy workflow now runs `scripts/optimize-wasm.sh` before deploying and uploads
+  the `.optimized.wasm` artifacts, so CI-deployed contract sizes match
+  `deploy.sh` (#563); it also runs `scripts/initialize.sh` after deployment and
+  verifies initialization, so contracts are usable immediately (#564)
 - credential-nft: `revoke_credential` and `revoke_credential_with_reason` share a single implementation and prune indexes with host-side `first_index_of` (#344)
 - learn-token: whitelist-only restrictions now require a 48-hour proposal period, and the configurable admin-transfer delay cannot be set below one hour (#445, #447)
 

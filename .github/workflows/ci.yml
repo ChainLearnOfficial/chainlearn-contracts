@@ -57,6 +57,9 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Gas benchmark regression check
+        run: ./scripts/estimate-gas.sh --thresholds scripts/gas-thresholds.env
+
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
