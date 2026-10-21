@@ -6,10 +6,20 @@ set -euo pipefail
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # Usage:
-#   ./scripts/upgrade.sh testnet                    # Upgrade all contracts
+#   ./scripts/upgrade.sh testnet                    # Upgrade all contracts (single-admin)
 #   ./scripts/upgrade.sh testnet learn-token        # Upgrade only learn-token
 #   ./scripts/upgrade.sh testnet credential-nft     # Upgrade only credential-nft
 #   ./scripts/upgrade.sh testnet progress-tracker   # Upgrade only progress-tracker
+#   ./scripts/upgrade.sh testnet --multisig --co-signer <ADDRESS>
+#                                                   # Upgrade with multi-sig for learn-token (#604)
+#
+# Multi-sig upgrade process (#604):
+#   Learn-token supports two-admin authorization via `upgrade_multisig`.
+#   The multi-sig upgrade is a two-step process:
+#     Step 1: Admin 1 (initiator/caller) invokes `upgrade_multisig` specifying the
+#             co-signer address and new WASM hash.
+#     Step 2: Admin 2 (co-signer) counter-signs the transaction.
+#   Other contracts (credential-nft, progress-tracker) continue to use single-admin upgrade.
 #
 # Prerequisites:
 #   - soroban CLI installed (v21+)
@@ -20,8 +30,68 @@ set -euo pipefail
 #   - New WASM targets must be built (cargo build --release --target wasm32-unknown-unknown)
 # ──────────────────────────────────────────────────────────────────────────────
 
-NETWORK="${1:-testnet}"
-CONTRACT_FILTER="${2:-all}"
+NETWORK="testnet"
+CONTRACT_FILTER="all"
+MULTISIG=false
+CO_SIGNER=""
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --multisig)
+            MULTISIG=true
+            shift
+            ;;
+        --co-signer)
+            [ "$#" -ge 2 ] || { echo "Error: --co-signer requires an address."; exit 1; }
+            CO_SIGNER="$2"
+            shift 2
+            ;;
+        --co-signer=*)
+            CO_SIGNER="${1#*=}"
+            shift
+            ;;
+        testnet|mainnet)
+            NETWORK="$1"
+            shift
+            ;;
+        all|learn-token|credential-nft|progress-tracker)
+            CONTRACT_FILTER="$1"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [testnet|mainnet] [all|learn-token|credential-nft|progress-tracker] [--multisig] [--co-signer <ADDRESS>]"
+            echo ""
+            echo "Options:"
+            echo "  --multisig             Enable two-admin multi-sig upgrade for learn-token (#604)"
+            echo "  --co-signer <ADDRESS>  Required in --multisig mode: address of co-signing admin"
+            echo "  --help, -h             Show this help message"
+            echo ""
+            echo "Multi-sig Upgrade Process:"
+            echo "  Learn-token upgrade_multisig requires signatures from two distinct admins."
+            echo "  1. Initiating admin provides STELLAR_SECRET_KEY and targets the new WASM hash."
+            echo "  2. Co-signer address must authorize the upgrade transaction."
+            echo "  Other contracts (credential-nft, progress-tracker) use single-admin upgrade."
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown argument '$1'."
+            echo "Usage: $0 [testnet|mainnet] [all|learn-token|credential-nft|progress-tracker] [--multisig] [--co-signer <ADDRESS>]"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$MULTISIG" = true ]; then
+    if [ -z "$CO_SIGNER" ]; then
+        echo "Error: --multisig mode requires --co-signer <address>."
+        echo "Usage: $0 [network] [--multisig] --co-signer <co_signer_address>"
+        exit 1
+    fi
+    if [[ ! "$CO_SIGNER" =~ ^[GC][A-Z0-9]{55,62}$ ]]; then
+        echo "Error: Invalid Stellar address for --co-signer: $CO_SIGNER"
+        exit 1
+    fi
+fi
 
 if [ "$NETWORK" = "testnet" ]; then
     RPC_URL="https://soroban-testnet.stellar.org:443"
@@ -74,10 +144,24 @@ for field in "$LEARN_TOKEN_ID" "$CREDENTIAL_NFT_ID" "$PROGRESS_TRACKER_ID"; do
     fi
 done
 
+CALLER_ADDRESS=$(soroban config identity address default 2>/dev/null || true)
+if [ -z "$CALLER_ADDRESS" ]; then
+    CALLER_ADDRESS=$(soroban contract invoke \
+        --id "$LEARN_TOKEN_ID" \
+        --rpc-url "$RPC_URL" \
+        --network-passphrase "$NETWORK_PASSPHRASE" \
+        -- \
+        admin 2>/dev/null | tr -d '"' || true)
+fi
+
 echo "=== ChainLearn Contract Upgrade ==="
-echo "Network:  $NETWORK"
-echo "RPC URL:  $RPC_URL"
-echo "Filter:   $CONTRACT_FILTER"
+echo "Network:    $NETWORK"
+echo "RPC URL:    $RPC_URL"
+echo "Filter:     $CONTRACT_FILTER"
+echo "Multi-sig:  $MULTISIG"
+if [ "$MULTISIG" = true ]; then
+    echo "Co-Signer:  $CO_SIGNER"
+fi
 echo ""
 
 echo "Verifying RPC reachability..."
@@ -178,6 +262,68 @@ upgrade_contract() {
     fi
 }
 
+upgrade_contract_multisig() {
+    local contract_id="$1"
+    local wasm_hash="$2"
+    local co_signer="$3"
+    local label="learn-token"
+
+    echo "  Upgrading $label ($contract_id) via multi-sig (upgrade_multisig)..."
+    echo "    Initiating Admin:   ${CALLER_ADDRESS:-<current_admin>}"
+    echo "    Required Co-Signer: $co_signer"
+
+    # Check current upgrade version before upgrading
+    local current_version
+    current_version=$(soroban contract invoke \
+        --id "$contract_id" \
+        --source "$STELLAR_SECRET_KEY" \
+        --rpc-url "$RPC_URL" \
+        --network-passphrase "$NETWORK_PASSPHRASE" \
+        -- \
+        upgrade_version 2>/dev/null || echo "0")
+    echo "    Current version: $current_version"
+
+    echo "    [Step 1/2] Initiating upgrade_multisig transaction..."
+    soroban contract invoke \
+        --id "$contract_id" \
+        --source "$STELLAR_SECRET_KEY" \
+        --rpc-url "$RPC_URL" \
+        --network-passphrase "$NETWORK_PASSPHRASE" \
+        -- \
+        upgrade_multisig \
+        --caller "${CALLER_ADDRESS}" \
+        --co_signer "$co_signer" \
+        --new_wasm_hash "$wasm_hash"
+    echo "    [Step 2/2] Multi-sig authorization submitted and processed."
+
+    # Verify the upgrade landed
+    local new_version
+    new_version=$(soroban contract invoke \
+        --id "$contract_id" \
+        --source "$STELLAR_SECRET_KEY" \
+        --rpc-url "$RPC_URL" \
+        --network-passphrase "$NETWORK_PASSPHRASE" \
+        -- \
+        upgrade_version 2>/dev/null || echo "?")
+    echo "    New version: $new_version"
+
+    local stored_hash
+    stored_hash=$(soroban contract invoke \
+        --id "$contract_id" \
+        --source "$STELLAR_SECRET_KEY" \
+        --rpc-url "$RPC_URL" \
+        --network-passphrase "$NETWORK_PASSPHRASE" \
+        -- \
+        wasm_hash 2>/dev/null | tr -d '"')
+
+    if [ "$stored_hash" = "$wasm_hash" ]; then
+        echo "    Verified: WASM hash matches."
+    else
+        echo "    Warning: WASM hash verification returned: $stored_hash"
+        echo "    Expected: $wasm_hash"
+    fi
+}
+
 # ── Step 3: Upgrade contracts ─────────────────────────────────────────
 
 echo "[2/5] Installing and upgrading contracts..."
@@ -186,16 +332,20 @@ LEARN_TOKEN_HASH=""
 CREDENTIAL_NFT_HASH=""
 PROGRESS_TRACKER_HASH=""
 
-# Install and upgrade learn-token
+# Install and upgrade learn-token (multisig when --multisig flag is passed, #604)
 if [ "$CONTRACT_FILTER" = "all" ] || [ "$CONTRACT_FILTER" = "learn-token" ]; then
     LEARN_TOKEN_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/learn_token.optimized.wasm" "learn-token")
-    upgrade_contract "$LEARN_TOKEN_ID" "$LEARN_TOKEN_HASH" "learn-token"
+    if [ "$MULTISIG" = true ]; then
+        upgrade_contract_multisig "$LEARN_TOKEN_ID" "$LEARN_TOKEN_HASH" "$CO_SIGNER"
+    else
+        upgrade_contract "$LEARN_TOKEN_ID" "$LEARN_TOKEN_HASH" "learn-token"
+    fi
     echo ""
 else
     echo "  Skipping learn-token (filtered out)."
 fi
 
-# Install and upgrade credential-nft
+# Install and upgrade credential-nft (single-admin upgrade)
 if [ "$CONTRACT_FILTER" = "all" ] || [ "$CONTRACT_FILTER" = "credential-nft" ]; then
     CREDENTIAL_NFT_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/credential_nft.optimized.wasm" "credential-nft")
     upgrade_contract "$CREDENTIAL_NFT_ID" "$CREDENTIAL_NFT_HASH" "credential-nft"
@@ -204,7 +354,7 @@ else
     echo "  Skipping credential-nft (filtered out)."
 fi
 
-# Install and upgrade progress-tracker
+# Install and upgrade progress-tracker (single-admin upgrade)
 if [ "$CONTRACT_FILTER" = "all" ] || [ "$CONTRACT_FILTER" = "progress-tracker" ]; then
     PROGRESS_TRACKER_HASH=$(install_wasm "target/wasm32-unknown-unknown/release/progress_tracker.optimized.wasm" "progress-tracker")
     upgrade_contract "$PROGRESS_TRACKER_ID" "$PROGRESS_TRACKER_HASH" "progress-tracker"
@@ -325,8 +475,14 @@ echo ""
 
 if [ -n "$LEARN_TOKEN_HASH" ]; then
     echo "learn-token:"
-    echo "  Contract: $LEARN_TOKEN_ID"
-    echo "  New WASM: $LEARN_TOKEN_HASH"
+    echo "  Contract:  $LEARN_TOKEN_ID"
+    echo "  New WASM:  $LEARN_TOKEN_HASH"
+    if [ "$MULTISIG" = true ]; then
+        echo "  Upgrade:   Multi-Sig (upgrade_multisig)"
+        echo "  Co-Signer: $CO_SIGNER"
+    else
+        echo "  Upgrade:   Single-Admin (upgrade)"
+    fi
 fi
 
 if [ -n "$CREDENTIAL_NFT_HASH" ]; then

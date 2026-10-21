@@ -129,6 +129,13 @@ soroban contract invoke \
     --new_wasm_hash "$NEW_WASM_HASH"
 ```
 
+Alternatively, run the automated upgrade script with `--multisig`:
+```bash
+./scripts/upgrade.sh testnet --multisig --co-signer "$ADMIN_2_ADDRESS"
+# or upgrade only learn-token:
+./scripts/upgrade.sh testnet learn-token --multisig --co-signer "$ADMIN_2_ADDRESS"
+```
+
 ### Option C: Using Deploy Script
 
 > [!NOTE]

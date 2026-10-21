@@ -19,8 +19,13 @@ The script requires Soroban CLI, `jq`, and the matching
 
 1. the configured RPC endpoint is reachable;
 2. `progress-tracker`, `learn-token`, and `credential-nft` report initialized;
-3. each contract returns a configured admin; and
-4. `learn-token.total_supply` can be read.
+3. each contract returns a configured admin;
+4. pause states across all contracts (warning on paused operations);
+5. pending admin transfer status across all contracts;
+6. cross-contract wiring (`learn-token` and `credential-nft` point to `progress-tracker`);
+7. `learn-token.total_supply` and admin balance;
+8. `credential-nft` total credential and revocation metrics; and
+9. `progress-tracker` course and enrollment metrics.
 
 Run this check after every deployment, initialization, upgrade, configuration
 change, and incident recovery. Schedule it regularly and alert on a non-zero

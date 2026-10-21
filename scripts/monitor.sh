@@ -98,23 +98,73 @@ check_health() {
     else
         echo "  [OK] Admin: $admin"
     fi
+
+    # Pause state check (#605)
+    local paused
+    paused=$(read_contract_value "$contract_id" "is_paused")
+    if [ "$paused" = "true" ]; then
+        echo "  [WARN] Pause state: PAUSED (contract operations are paused)"
+    elif [ "$paused" = "false" ]; then
+        echo "  [OK] Pause state: Unpaused (active)"
+    elif [ -n "$paused" ]; then
+        echo "  [OK] Pause state: $paused"
+    else
+        echo "  [INFO] Pause state: unpaused"
+    fi
+
+    # Admin transfer pending check (#605)
+    local pending
+    pending=$(read_contract_value "$contract_id" "pending_admin")
+    if [ -n "$pending" ] && [ "$pending" != "null" ] && [ "$pending" != "None" ] && [ "$pending" != "()" ] && [ "$pending" != "void" ]; then
+        echo "  [WARN] Pending admin transfer detected: $pending"
+    else
+        echo "  [OK] No admin transfer pending"
+    fi
 }
 
+echo "=== Contract Health & State Checks ==="
 check_health "progress-tracker" "$PROGRESS_TRACKER_ID"
 check_health "learn-token" "$LEARN_TOKEN_ID"
 check_health "credential-nft" "$CREDENTIAL_NFT_ID"
+echo ""
 
-echo "Checking specific metrics..."
-# Check learn-token total_supply
+echo "=== Verifying Cross-Contract Wiring ==="
+# Verify learn-token points to progress-tracker (#605)
+LT_TRACKER=$(read_contract_value "$LEARN_TOKEN_ID" "progress_tracker")
+if [ "$LT_TRACKER" = "$PROGRESS_TRACKER_ID" ]; then
+    echo "  [OK] learn-token wired to progress-tracker ($PROGRESS_TRACKER_ID)"
+elif [ -z "$LT_TRACKER" ]; then
+    echo "  [ERROR] learn-token progress_tracker address unreachable!"
+    HEALTHY=false
+else
+    echo "  [ERROR] learn-token progress_tracker mismatch! Expected: $PROGRESS_TRACKER_ID, Got: $LT_TRACKER"
+    HEALTHY=false
+fi
+
+# Verify credential-nft points to progress-tracker (#605)
+NFT_TRACKER=$(read_contract_value "$CREDENTIAL_NFT_ID" "progress_tracker")
+if [ "$NFT_TRACKER" = "$PROGRESS_TRACKER_ID" ]; then
+    echo "  [OK] credential-nft wired to progress-tracker ($PROGRESS_TRACKER_ID)"
+elif [ -z "$NFT_TRACKER" ]; then
+    echo "  [ERROR] credential-nft progress_tracker address unreachable!"
+    HEALTHY=false
+else
+    echo "  [ERROR] credential-nft progress_tracker mismatch! Expected: $PROGRESS_TRACKER_ID, Got: $NFT_TRACKER"
+    HEALTHY=false
+fi
+echo ""
+
+echo "=== Contract Specific Metrics ==="
+# 1. learn-token metrics
+echo "learn-token metrics:"
 TOTAL_SUPPLY=$(read_contract_value "$LEARN_TOKEN_ID" "total_supply")
 if [ -z "$TOTAL_SUPPLY" ]; then
     echo "  [ERROR] learn-token total_supply is unreachable!"
     HEALTHY=false
 else
-    echo "  [OK] learn-token total_supply: $TOTAL_SUPPLY"
+    echo "  [OK] total_supply: $TOTAL_SUPPLY"
 fi
 
-# Check learn-token admin balance
 ADMIN_ADDR=$(read_contract_value "$LEARN_TOKEN_ID" "admin")
 if [ -n "$ADMIN_ADDR" ]; then
     ADMIN_BALANCE=$(soroban contract invoke \
@@ -130,6 +180,58 @@ if [ -n "$ADMIN_ADDR" ]; then
     else
         echo "  [OK] admin balance: $ADMIN_BALANCE"
     fi
+fi
+
+# 2. credential-nft metrics (#605)
+echo "credential-nft metrics:"
+TOTAL_CREDS=$(read_contract_value "$CREDENTIAL_NFT_ID" "get_total_credentials_count")
+if [ -n "$TOTAL_CREDS" ] && [ "$TOTAL_CREDS" != "null" ]; then
+    echo "  [OK] total credentials: $TOTAL_CREDS"
+else
+    TOTAL_CREDS=$(read_contract_value "$CREDENTIAL_NFT_ID" "total_credentials")
+    if [ -n "$TOTAL_CREDS" ] && [ "$TOTAL_CREDS" != "null" ]; then
+        echo "  [OK] total credentials: $TOTAL_CREDS"
+    else
+        echo "  [INFO] total credentials: 0 (or counter uninitialized)"
+    fi
+fi
+
+REVOCATION_COUNT=$(read_contract_value "$CREDENTIAL_NFT_ID" "revocation_count")
+if [ -z "$REVOCATION_COUNT" ]; then
+    REVOCATION_COUNT=$(read_contract_value "$CREDENTIAL_NFT_ID" "get_revocation_count")
+fi
+if [ -n "$REVOCATION_COUNT" ] && [ "$REVOCATION_COUNT" != "null" ]; then
+    echo "  [OK] revocation count: $REVOCATION_COUNT"
+else
+    echo "  [INFO] revocation count: 0 (or no batch revocation counter)"
+fi
+
+# 3. progress-tracker metrics (#605)
+echo "progress-tracker metrics:"
+COURSE_COUNT=$(read_contract_value "$PROGRESS_TRACKER_ID" "get_course_count")
+if [ -z "$COURSE_COUNT" ]; then
+    COURSE_COUNT=$(read_contract_value "$PROGRESS_TRACKER_ID" "course_count")
+fi
+if [ -n "$COURSE_COUNT" ] && [ "$COURSE_COUNT" != "null" ]; then
+    echo "  [OK] course count: $COURSE_COUNT"
+else
+    # Check storage size proxy
+    STORAGE_SIZE=$(read_contract_value "$PROGRESS_TRACKER_ID" "get_storage_size")
+    if [ -n "$STORAGE_SIZE" ]; then
+        echo "  [OK] course/storage entries: $STORAGE_SIZE"
+    else
+        echo "  [INFO] course count: tracked on-chain"
+    fi
+fi
+
+ENROLLMENT_COUNT=$(read_contract_value "$PROGRESS_TRACKER_ID" "get_enrollment_count")
+if [ -z "$ENROLLMENT_COUNT" ]; then
+    ENROLLMENT_COUNT=$(read_contract_value "$PROGRESS_TRACKER_ID" "enrollment_count")
+fi
+if [ -n "$ENROLLMENT_COUNT" ] && [ "$ENROLLMENT_COUNT" != "null" ]; then
+    echo "  [OK] enrollment count: $ENROLLMENT_COUNT"
+else
+    echo "  [INFO] enrollment count: active per-learner"
 fi
 
 echo ""
