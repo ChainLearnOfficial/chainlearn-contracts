@@ -6,7 +6,9 @@
 //! 3. Correctly identify the error type
 //! 4. Cover all error paths across all contracts
 
-use credential_nft::{ContractError as CredentialContractError, CredentialNft, CredentialNftClient};
+use credential_nft::{
+    ContractError as CredentialContractError, CredentialNft, CredentialNftClient,
+};
 use learn_token::{ContractError, LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
@@ -80,7 +82,13 @@ mod error_message_tests {
             quiz_ids.push_back(Symbol::new(env, &format!("quiz_{}", i + 1)));
         }
 
-        client.create_course(course_id, &module_count, &quiz_count, &module_ids, &quiz_ids);
+        client.create_course(
+            course_id,
+            &module_count,
+            &quiz_count,
+            &module_ids,
+            &quiz_ids,
+        );
     }
 
     fn create_course_and_submit_quiz(
@@ -116,7 +124,14 @@ mod error_message_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
 
         let empty_uri = Symbol::new(&env, "");
         let err = client
@@ -138,7 +153,14 @@ mod error_message_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
 
         let short_uri = Symbol::new(&env, "ipfs_1");
         let err = client
@@ -160,7 +182,14 @@ mod error_message_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
 
         let malformed_uri = Symbol::new(&env, "ftp_metadata_hash");
         let err = client
@@ -184,7 +213,14 @@ mod error_message_tests {
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
 
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
 
         let err = client
             .try_mint_credential(&admin, &learner, &course_id, &40, &metadata_uri)
@@ -207,7 +243,14 @@ mod error_message_tests {
         let uri = Symbol::new(&env, "ipfs_Qm123");
 
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
 
         client.mint_credential(&admin, &learner, &course_id, &85, &uri);
         let err = client
@@ -227,8 +270,11 @@ mod error_message_tests {
         env.mock_all_auths();
         let course_id = Symbol::new(&env, "nonexistent_course");
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &85, &metadata_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &85, &metadata_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, CredentialContractError::NotFound);
     }
 
@@ -242,9 +288,19 @@ mod error_message_tests {
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &100, &uri)
-            .err().expect("should fail").expect("typed error");
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &100, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, CredentialContractError::InvalidScore);
     }
 
@@ -269,10 +325,21 @@ mod error_message_tests {
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
-        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
+        create_course_and_submit_quiz(
+            &env,
+            &pt_client,
+            &learner,
+            &course_id,
+            &Symbol::new(&env, "quiz_1"),
+            85,
+        );
         let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &uri);
         client.revoke_credential(&cred_id);
-        let err = client.try_revoke_credential(&cred_id).err().expect("should fail").expect("typed error");
+        let err = client
+            .try_revoke_credential(&cred_id)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, CredentialContractError::AlreadyInitialized);
     }
 
@@ -286,7 +353,11 @@ mod error_message_tests {
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         ));
-        let err = client.try_transfer_admin(&zero_address).err().expect("should fail").expect("typed error");
+        let err = client
+            .try_transfer_admin(&zero_address)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, CredentialContractError::NotAuthorized);
     }
 
@@ -386,8 +457,11 @@ mod error_message_tests {
         pt_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(&learner, &course_id);
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id, &0);
-        let err = client.try_claim_reward(&learner, &course_id, &quiz_id)
-            .err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -431,8 +505,11 @@ mod error_message_tests {
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         ));
-        let err = client.try_mint(&admin, &zero_address, &1000)
-            .err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_mint(&admin, &zero_address, &1000)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::ZeroAddress);
     }
 
@@ -456,8 +533,11 @@ mod error_message_tests {
         let user = Address::generate(&env);
         env.mock_all_auths();
         client.mint(&admin, &user, &3000);
-        let err = client.try_mint(&admin, &user, &2001)
-            .err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_mint(&admin, &user, &2001)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
@@ -521,7 +601,7 @@ mod error_message_tests {
         env.mock_all_auths();
         let course_id = Symbol::new(&env, "rust_101");
         create_course_with_modules_and_quizzes(&env, &client, &course_id, 3, 2);
-        
+
         // Try to create same course again
         create_course_with_modules_and_quizzes(&env, &client, &course_id, 3, 2);
     }
@@ -667,7 +747,7 @@ mod error_message_tests {
 
         client.enroll(&learner, &course_id);
         client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &80);
-        
+
         // Try to retake with lower score
         client.retake_quiz(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &70);
     }
@@ -680,22 +760,22 @@ mod error_message_tests {
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
-        
+
         // Create prerequisite course
         let prereq_course_id = Symbol::new(&env, "prereq_101");
         create_course_with_modules_and_quizzes(&env, &client, &prereq_course_id, 2, 1);
-        
+
         // Create main course with prerequisite
         let main_course_id = Symbol::new(&env, "main_201");
         create_course_with_modules_and_quizzes(&env, &client, &main_course_id, 2, 1);
-        
+
         // Set prerequisite
         let mut prereqs = Vec::new(&env);
         prereqs.push_back(prereq_course_id.clone());
         client.set_prerequisites(&main_course_id, &prereqs);
-        
+
         let learner = Address::generate(&env);
-        
+
         // Try to enroll in main course without completing prerequisite
         client.enroll(&learner, &main_course_id);
     }
@@ -708,15 +788,14 @@ mod error_message_tests {
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
         env.mock_all_auths();
-        
+
         let course_id = Symbol::new(&env, "self_ref_course");
         create_course_with_modules_and_quizzes(&env, &client, &course_id, 2, 1);
-        
+
         let mut prereqs = Vec::new(&env);
         prereqs.push_back(course_id.clone());
         client.set_prerequisites(&course_id, &prereqs);
     }
 
     // ── Error Message Analysis Tests ──────────────────────────────────────
-
 }

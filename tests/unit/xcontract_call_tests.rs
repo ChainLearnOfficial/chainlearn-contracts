@@ -6,9 +6,7 @@
 
 use learn_token::{AdminRole, ContractError, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{
-    testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 
 #[cfg(test)]
 mod xcontract_call_tests {
@@ -286,8 +284,14 @@ mod xcontract_call_tests {
         // Progress-tracker state is unchanged
         let progress_after = pt_client.get_progress(&learner, &course_id);
         let score_after = pt_client.get_quiz_score(&learner, &course_id, &quiz_id);
-        assert_eq!(progress_before.overall_progress, progress_after.overall_progress);
-        assert_eq!(progress_before.quizzes_submitted, progress_after.quizzes_submitted);
+        assert_eq!(
+            progress_before.overall_progress,
+            progress_after.overall_progress
+        );
+        assert_eq!(
+            progress_before.quizzes_submitted,
+            progress_after.quizzes_submitted
+        );
         assert_eq!(score_before, score_after);
     }
 
@@ -315,8 +319,11 @@ mod xcontract_call_tests {
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 0);
-        let err = token_client.try_claim_reward(&learner, &course_id, &quiz_id)
-            .err().expect("should fail").expect("expected typed error");
+        let err = token_client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -486,10 +493,7 @@ mod xcontract_call_tests {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             token_client.claim_reward(&learner, &course_id, &quiz_id);
         }));
-        assert!(
-            result.is_err(),
-            "claim exceeding supply cap must revert"
-        );
+        assert!(result.is_err(), "claim exceeding supply cap must revert");
 
         // No state change despite the successful cross-contract score read.
         assert_eq!(token_client.total_supply(), supply_before);
@@ -525,8 +529,11 @@ mod xcontract_call_tests {
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
         token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
-        let err = token_client.try_claim_reward(&learner, &course_id, &quiz_id)
-            .err().expect("should fail").expect("expected typed error");
+        let err = token_client
+            .try_claim_reward(&learner, &course_id, &quiz_id)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::ContractPaused);
     }
 
@@ -546,11 +553,7 @@ mod xcontract_call_tests {
         let quiz_id = Symbol::new(&env, "quiz_1");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 50);
 
-        token_client.grant_role(
-            &admin,
-            &admin,
-            &AdminRole::Pauser,
-        );
+        token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
         token_client.unpause(&admin);
         assert!(!token_client.is_paused());
@@ -584,8 +587,11 @@ mod xcontract_call_tests {
         let mut quiz_ids = Vec::new(&env);
         quiz_ids.push_back(quiz_id_1);
         quiz_ids.push_back(quiz_id_2);
-        let err = token_client.try_batch_claim_reward(&learner, &course_id, &quiz_ids)
-            .err().expect("should fail").expect("expected typed error");
+        let err = token_client
+            .try_batch_claim_reward(&learner, &course_id, &quiz_ids)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::ContractPaused);
     }
 
@@ -608,11 +614,7 @@ mod xcontract_call_tests {
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_1, &50);
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_2, &60);
 
-        token_client.grant_role(
-            &admin,
-            &admin,
-            &AdminRole::Pauser,
-        );
+        token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
         token_client.unpause(&admin);
         assert!(!token_client.is_paused());

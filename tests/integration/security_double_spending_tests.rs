@@ -4,14 +4,21 @@
 //! ChainLearn contracts. Double-spending is a critical vulnerability — these
 //! tests prove it is impossible through every contract surface.
 
-use credential_nft::{ContractError as CredentialContractError, CredentialNft, CredentialNftClient};
+use credential_nft::{
+    ContractError as CredentialContractError, CredentialNft, CredentialNftClient,
+};
 use learn_token::LearnTokenClient;
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
-use soroban_sdk::{
-    testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec};
 
-fn setup_env(env: &Env) -> (Address, LearnTokenClient<'static>, CredentialNftClient<'static>, ProgressTrackerClient<'static>) {
+fn setup_env(
+    env: &Env,
+) -> (
+    Address,
+    LearnTokenClient<'static>,
+    CredentialNftClient<'static>,
+    ProgressTrackerClient<'static>,
+) {
     let admin = Address::generate(env);
 
     // Register and initialize ProgressTracker
@@ -191,7 +198,8 @@ fn test_double_mint_credential_does_not_corrupt_state() {
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 85);
 
-    let cred_id = credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+    let cred_id =
+        credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
     let total_before = credential_client.get_total_credentials_count();
 
     // Second mint reverts — state must be unchanged
@@ -200,7 +208,10 @@ fn test_double_mint_credential_does_not_corrupt_state() {
     }));
     assert!(result.is_err(), "double mint should revert");
 
-    assert_eq!(credential_client.get_total_credentials_count(), total_before);
+    assert_eq!(
+        credential_client.get_total_credentials_count(),
+        total_before
+    );
     let info = credential_client.verify_credential(&cred_id);
     assert_eq!(info.learner, learner);
     assert_eq!(info.score, 85);
@@ -285,7 +296,8 @@ fn test_double_enroll_does_not_corrupt_state() {
 
     let progress_after = progress_client.get_progress(&learner, &course_id);
     assert_eq!(
-        progress_before.overall_progress, progress_after.overall_progress
+        progress_before.overall_progress,
+        progress_after.overall_progress
     );
     assert_eq!(
         progress_before.modules_completed_bitmap,
@@ -380,10 +392,14 @@ fn test_double_revoke_credential_is_prevented() {
     let course_id = Symbol::new(&env, "course_1");
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 85);
-    let cred_id = credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+    let cred_id =
+        credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
     credential_client.revoke_credential(&cred_id);
-    let err = credential_client.try_revoke_credential(&cred_id)
-        .err().expect("should fail").expect("typed error");
+    let err = credential_client
+        .try_revoke_credential(&cred_id)
+        .err()
+        .expect("should fail")
+        .expect("typed error");
     assert_eq!(err, CredentialContractError::AlreadyInitialized);
 }
 

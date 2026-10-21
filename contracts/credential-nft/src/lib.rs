@@ -7,11 +7,11 @@ mod verify;
 mod xcall;
 
 use chainlearn_shared::ContractMetadata;
+use metadata::AdminRole;
 use metadata::{
     remove_entry, write_entry, CredentialDataKey, CredentialDisplay, CredentialInfo,
     CredentialVerification,
 };
-use metadata::AdminRole;
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
@@ -113,7 +113,12 @@ impl CredentialNft {
     /// * `caller` - The admin granting the role (must authorize)
     /// * `role` - The role to grant
     /// * `address` - The address to receive the role
-    pub fn grant_role(env: Env, caller: Address, role: AdminRole, address: Address) -> Result<(), ContractError> {
+    pub fn grant_role(
+        env: Env,
+        caller: Address,
+        role: AdminRole,
+        address: Address,
+    ) -> Result<(), ContractError> {
         caller.require_auth();
         if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
             return Err(ContractError::NotAuthorized);
@@ -129,7 +134,12 @@ impl CredentialNft {
     /// * `caller` - The admin revoking the role (must authorize)
     /// * `role` - The role to revoke
     /// * `address` - The address to lose the role
-    pub fn revoke_role(env: Env, caller: Address, role: AdminRole, address: Address) -> Result<(), ContractError> {
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: AdminRole,
+        address: Address,
+    ) -> Result<(), ContractError> {
         caller.require_auth();
         if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
             return Err(ContractError::NotAuthorized);
@@ -251,11 +261,7 @@ impl CredentialNft {
             issuer_name,
         };
 
-        metadata::write_entry(
-            &env,
-            &CredentialDataKey::Display(credential_id),
-            &display,
-        );
+        metadata::write_entry(&env, &CredentialDataKey::Display(credential_id), &display);
 
         events::credential_display_set(
             &env,
@@ -284,7 +290,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `credential_id` - The credential to update
     /// * `new_metadata_uri` - The new metadata URI
-    pub fn update_credential_metadata(env: Env, credential_id: u64, new_metadata_uri: Symbol) -> Result<(), ContractError> {
+    pub fn update_credential_metadata(
+        env: Env,
+        credential_id: u64,
+        new_metadata_uri: Symbol,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         let admin: Address = env
             .storage()
@@ -444,7 +454,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `credential_id` - The credential to revoke
     /// * `reason` - The reason for revocation
-    pub fn revoke_credential_with_reason(env: Env, credential_id: u64, reason: Symbol) -> Result<(), ContractError> {
+    pub fn revoke_credential_with_reason(
+        env: Env,
+        credential_id: u64,
+        reason: Symbol,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         verify::revoke_credential_with_reason(&env, credential_id, reason)
     }
@@ -465,7 +479,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `credential_id` - The credential to renew
     /// * `new_expiry` - The new expiration ledger height (0 = no expiration)
-    pub fn renew_credential(env: Env, credential_id: u64, new_expiry: u32) -> Result<(), ContractError> {
+    pub fn renew_credential(
+        env: Env,
+        credential_id: u64,
+        new_expiry: u32,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         verify::renew_credential(&env, credential_id, new_expiry)
     }
@@ -742,7 +760,11 @@ impl CredentialNft {
     ///
     /// # Returns
     /// The generated certificate URI symbol.
-    pub fn generate_certificate(env: Env, learner: Address, course_id: Symbol) -> Result<Symbol, ContractError> {
+    pub fn generate_certificate(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+    ) -> Result<Symbol, ContractError> {
         Self::ensure_not_paused(&env)?;
         learner.require_auth();
 
@@ -819,7 +841,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `caller` - The admin performing the upgrade (must authorize, Admin role required)
     /// * `new_wasm_hash` - Hash of the already-uploaded wasm to install
-    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
+    pub fn upgrade(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         caller.require_auth();
         if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
@@ -940,7 +966,11 @@ mod tests {
         env.mock_all_auths();
 
         client.pause(&admin);
-        let err = client.try_pause(&admin).err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_pause(&admin)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -953,7 +983,11 @@ mod tests {
         client.initialize(&admin, &Address::generate(&env));
         env.mock_all_auths();
 
-        let err = client.try_unpause(&admin).err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_unpause(&admin)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -1001,7 +1035,11 @@ mod tests {
         let new_admin = Address::generate(&env);
         env.mock_all_auths();
         client.transfer_admin(&new_admin);
-        let err = client.try_accept_admin().err().expect("should fail").expect("typed error");
+        let err = client
+            .try_accept_admin()
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -1031,7 +1069,11 @@ mod tests {
         client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         client.cancel_admin_transfer();
-        let err = client.try_accept_admin().err().expect("should fail").expect("typed error");
+        let err = client
+            .try_accept_admin()
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -1041,7 +1083,11 @@ mod tests {
         let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-        let err = client.try_set_admin_transfer_delay(&0).err().expect("should fail").expect("typed error");
+        let err = client
+            .try_set_admin_transfer_delay(&0)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -1051,7 +1097,11 @@ mod tests {
         let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-        let err = client.try_set_admin_transfer_delay(&3_599).err().expect("should fail").expect("typed error");
+        let err = client
+            .try_set_admin_transfer_delay(&3_599)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -1076,7 +1126,11 @@ mod tests {
         client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         env.ledger().with_mut(|l| l.timestamp += 3_599);
-        let err = client.try_accept_admin().err().expect("should fail").expect("typed error");
+        let err = client
+            .try_accept_admin()
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -1767,8 +1821,11 @@ mod tests {
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 50);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &100, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &100, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -1782,8 +1839,11 @@ mod tests {
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &80, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &80, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -1848,8 +1908,11 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &strong_learner, &course_id, 95);
         complete_course_with_score(&env, &tracker_id, &weak_learner, &course_id, 60);
-        let err = client.try_mint_credential(&admin, &weak_learner, &course_id, &95, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &weak_learner, &course_id, &95, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -2037,8 +2100,11 @@ mod tests {
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &40, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &40, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -2053,8 +2119,11 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
         client.mint_credential(&admin, &learner, &course_id, &90, &uri);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::DuplicateCredential);
     }
 
@@ -2071,8 +2140,11 @@ mod tests {
         let course_id = Symbol::new(&env, "ghost_course");
         let uri = Symbol::new(&env, "ipfs_meta");
 
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
-            .err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -2115,8 +2187,11 @@ mod tests {
         tracker_client.enroll(&learner, &course_id);
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         tracker_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &95);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &95, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &95, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -2134,8 +2209,11 @@ mod tests {
         tracker_client.enroll(&learner, &course_id);
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -2358,7 +2436,10 @@ mod tests {
         enrolled_and_completed(&env, &tracker_id, &learner, &course);
 
         let first = client.generate_certificate(&learner, &course);
-        assert_eq!(client.get_certificate_uri(&learner, &course), Some(first.clone()));
+        assert_eq!(
+            client.get_certificate_uri(&learner, &course),
+            Some(first.clone())
+        );
 
         // generate_certificate is idempotent: it returns the stored URI
         // instead of minting a new one, so get_certificate_uri keeps
@@ -2477,8 +2558,11 @@ mod tests {
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
         let empty_uri = Symbol::new(&env, "");
-        let err = client.try_mint_credential(&admin, &learner, &course, &85, &empty_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course, &85, &empty_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
@@ -2492,8 +2576,11 @@ mod tests {
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
         let short_uri = Symbol::new(&env, "ipfs_1");
-        let err = client.try_mint_credential(&admin, &learner, &course, &85, &short_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course, &85, &short_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
@@ -2507,8 +2594,11 @@ mod tests {
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
         let invalid_uri = Symbol::new(&env, "ftp_metadata_hash");
-        let err = client.try_mint_credential(&admin, &learner, &course, &85, &invalid_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course, &85, &invalid_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
@@ -2544,7 +2634,13 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
-        let id = client.mint_credential(&admin, &learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+        let id = client.mint_credential(
+            &admin,
+            &learner,
+            &course,
+            &85,
+            &Symbol::new(&env, "ipfs_meta"),
+        );
 
         // No display properties were ever set for this credential.
         let verification = client.verify_credential_with_display(&id);
@@ -2563,7 +2659,13 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
-        let id = client.mint_credential(&admin, &learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+        let id = client.mint_credential(
+            &admin,
+            &learner,
+            &course,
+            &85,
+            &Symbol::new(&env, "ipfs_meta"),
+        );
 
         let image_url = Some(Symbol::new(&env, "ipfs_img"));
         let description = Some(Symbol::new(&env, "rust_cert"));
@@ -2738,22 +2840,20 @@ mod tests {
 
         client.pause(&pauser);
         env.as_contract(&contract_id, || {
-            assert!(
-                env.storage()
-                    .persistent()
-                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                .unwrap_or(false));
         });
 
         client.unpause(&pauser);
         env.as_contract(&contract_id, || {
-            assert!(
-                !env.storage()
-                    .persistent()
-                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(!env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                .unwrap_or(false));
         });
     }
 
@@ -2766,12 +2866,11 @@ mod tests {
 
         client.pause(&admin);
         env.as_contract(&contract_id, || {
-            assert!(
-                env.storage()
-                    .persistent()
-                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                .unwrap_or(false));
         });
     }
 

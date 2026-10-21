@@ -232,7 +232,13 @@ impl ProgressTracker {
             Self::add_course_to_tag_index(&env, &tag, &course_id);
         }
 
-        events::course_created(&env, &course_id, total_modules, total_quizzes, module_ids.clone());
+        events::course_created(
+            &env,
+            &course_id,
+            total_modules,
+            total_quizzes,
+            module_ids.clone(),
+        );
     }
 
     /// Enroll a learner in a course.
@@ -542,7 +548,13 @@ impl ProgressTracker {
             progress,
         );
 
-        events::module_completed(env, learner, course_id, &module_id, progress.overall_progress);
+        events::module_completed(
+            env,
+            learner,
+            course_id,
+            &module_id,
+            progress.overall_progress,
+        );
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
@@ -939,14 +951,7 @@ impl ProgressTracker {
             &progress,
         );
 
-        events::quiz_retaken(
-            env,
-            learner,
-            course_id,
-            &quiz_id,
-            previous_score,
-            new_score,
-        );
+        events::quiz_retaken(env, learner, course_id, &quiz_id, previous_score, new_score);
 
         // Notify indexers the moment eligibility flips to true, instead of
         // requiring them to poll get_progress (#96).
@@ -2079,10 +2084,7 @@ impl ProgressTracker {
     pub fn revoke_delegation(env: Env, learner: Address) {
         learner.require_auth();
 
-        types::remove_entry(
-            &env,
-            &ProgressTrackerDataKey::DelegatedTo(learner.clone()),
-        );
+        types::remove_entry(&env, &ProgressTrackerDataKey::DelegatedTo(learner.clone()));
 
         events::delegation_revoked(&env, &learner);
     }
@@ -5097,17 +5099,26 @@ mod tests {
 
         // Update difficulty
         client.set_course_difficulty(&course_id, &1);
-        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+        assert_eq!(
+            client.get_course_created_at(&course_id),
+            original_created_at
+        );
 
         // Update tags
         let mut tags = Vec::new(&env);
         tags.push_back(Symbol::new(&env, "rust"));
         client.set_course_tags(&course_id, &tags);
-        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+        assert_eq!(
+            client.get_course_created_at(&course_id),
+            original_created_at
+        );
 
         // Update content hash
         client.set_course_content_hash(&course_id, &Symbol::new(&env, "hash1"));
-        assert_eq!(client.get_course_created_at(&course_id), original_created_at);
+        assert_eq!(
+            client.get_course_created_at(&course_id),
+            original_created_at
+        );
     }
 
     #[test]
@@ -5317,22 +5328,20 @@ mod tests {
 
         client.pause(&pauser);
         env.as_contract(&contract_id, || {
-            assert!(
-                env.storage()
-                    .persistent()
-                    .get::<_, bool>(&ProgressTrackerDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&ProgressTrackerDataKey::Paused)
+                .unwrap_or(false));
         });
 
         client.unpause(&pauser);
         env.as_contract(&contract_id, || {
-            assert!(
-                !env.storage()
-                    .persistent()
-                    .get::<_, bool>(&ProgressTrackerDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(!env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&ProgressTrackerDataKey::Paused)
+                .unwrap_or(false));
         });
     }
 
@@ -5345,12 +5354,11 @@ mod tests {
 
         client.pause(&admin);
         env.as_contract(&contract_id, || {
-            assert!(
-                env.storage()
-                    .persistent()
-                    .get::<_, bool>(&ProgressTrackerDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&ProgressTrackerDataKey::Paused)
+                .unwrap_or(false));
         });
     }
 
@@ -5413,4 +5421,3 @@ mod tests {
         assert!(client.has_role(&pauser, &AdminRole::Pauser));
     }
 }
-

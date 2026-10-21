@@ -25,7 +25,8 @@ fn test_end_to_end_credential_flow() {
 
     // Mint credential (average score = (85+75)/2 = 80)
     let metadata_uri = Symbol::new(env, "ipfs_QmCredential123");
-    let cred_id = credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &metadata_uri);
+    let cred_id =
+        credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &metadata_uri);
 
     // Verify
     let info = credential_client.verify_credential(&cred_id);
@@ -132,7 +133,8 @@ fn test_credential_metadata_uri() {
     fixtures::complete_full_course(env, learner, &course_id, &progress_client);
     let expected_uri = Symbol::new(env, "ipfs_QmTestMetadata");
 
-    let cred_id = credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &expected_uri);
+    let cred_id =
+        credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &expected_uri);
 
     let info = credential_client.verify_credential(&cred_id);
     assert_eq!(info.metadata_uri, expected_uri);

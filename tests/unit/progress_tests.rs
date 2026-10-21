@@ -2498,11 +2498,15 @@ mod progress_unit_tests {
         client.pause(&admin);
 
         // enroll_checked must fail when paused
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_err());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_err());
 
         // Unpause and verify enroll_checked succeeds
         client.unpause(&admin);
-        assert!(client.try_enroll_checked(&learner, &course_id, &None).is_ok());
+        assert!(client
+            .try_enroll_checked(&learner, &course_id, &None)
+            .is_ok());
     }
 
     #[test]
@@ -2524,9 +2528,25 @@ mod progress_unit_tests {
         client.pause(&admin);
 
         let caller = learner.clone();
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_err());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_err());
 
         client.unpause(&admin);
-        assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
+        assert!(client
+            .try_retake_quiz_for(
+                &caller,
+                &learner,
+                &course_id,
+                &Symbol::new(&env, "quiz_1"),
+                &80
+            )
+            .is_ok());
     }
 }
