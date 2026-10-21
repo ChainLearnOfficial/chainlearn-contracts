@@ -2528,4 +2528,30 @@ mod progress_unit_tests {
         client.unpause(&admin);
         assert!(client.try_retake_quiz_for(&caller, &learner, &course_id, &Symbol::new(&env, "quiz_1"), &80).is_ok());
     }
-}
+
+    #[test]
+    fn test_retake_quiz_for_rejects_former_delegate_after_revocation() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = create_test_course(&env, &client);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        let quiz_id = Symbol::new(&env, "quiz_1");
+
+        client.enroll(&learner, &course_id);
+        client.submit_quiz_score(&learner, &course_id, &quiz_id, &60);
+        client.delegate_progress(&learner, &delegate);
+        client.revoke_delegation(&learner);
+
+        let result = client.try_retake_quiz_for(
+            &delegate,
+            &learner,
+            &course_id,
+            &quiz_id,
+            &80,
+        );
+        assert!(result.is_err());
+    }}
