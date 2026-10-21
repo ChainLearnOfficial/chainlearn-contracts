@@ -11,11 +11,14 @@ set -euo pipefail
 #   ./scripts/deploy.sh testnet --confirm            # Skip cost confirmation prompt (#602)
 #   ./scripts/deploy.sh testnet --resume             # Resume from partial failure (#603)
 #   ./scripts/deploy.sh testnet --estimate-only      # Show cost estimation and exit (#602)
+#   ./scripts/deploy.sh testnet --dry-run            # Validate and build, but do not deploy
 #
 # Flags:
 #   --confirm        Skip confirmation prompt after showing deployment cost estimation
 #   --resume         Resume deployment from a previous partial deployment failure
 #   --estimate-only  Display pre-deployment cost estimation and exit
+#   --dry-run        Validate inputs, build and optimize WASM, print what would be
+#                    deployed, then exit without running 'soroban contract deploy'
 #   -h, --help       Display this help message
 #
 # Prerequisites:
@@ -30,6 +33,7 @@ NETWORK="testnet"
 CONFIRM=false
 RESUME=false
 ESTIMATE_ONLY=false
+DRY_RUN=false
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -45,23 +49,28 @@ while [ "$#" -gt 0 ]; do
             ESTIMATE_ONLY=true
             shift
             ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
         testnet|mainnet)
             NETWORK="$1"
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [testnet|mainnet] [--confirm] [--resume] [--estimate-only]"
+            echo "Usage: $0 [testnet|mainnet] [--confirm] [--resume] [--estimate-only] [--dry-run]"
             echo ""
             echo "Options:"
             echo "  --confirm        Skip interactive confirmation prompt after cost estimation (#602)"
             echo "  --resume         Resume deployment from previous partial state (#603)"
             echo "  --estimate-only  Show estimated deployment costs and exit (#602)"
+            echo "  --dry-run        Validate inputs and build WASM without deploying"
             echo "  -h, --help       Show this help message"
             exit 0
             ;;
         *)
             echo "Error: Unknown argument '$1'."
-            echo "Usage: $0 [testnet|mainnet] [--confirm] [--resume] [--estimate-only]"
+            echo "Usage: $0 [testnet|mainnet] [--confirm] [--resume] [--estimate-only] [--dry-run]"
             exit 1
             ;;
     esac
@@ -94,7 +103,14 @@ if ! command -v jq &>/dev/null; then
     exit 1
 fi
 
+# Verify soroban CLI is available when a deployment (or dry run) is requested
+if [ "$ESTIMATE_ONLY" = false ] && ! command -v soroban &>/dev/null; then
+    echo "Error: soroban CLI is required but not installed."
+    exit 1
+fi
+
 echo "=== ChainLearn Contract Deployment ==="
+[ "$DRY_RUN" = true ] && echo "Mode:     DRY RUN (nothing will be deployed)"
 echo "Network:  $NETWORK"
 echo "RPC URL:  $RPC_URL"
 echo ""
@@ -204,6 +220,26 @@ echo ""
 
 if [ "$ESTIMATE_ONLY" = true ]; then
     echo "(--estimate-only specified: exiting without deploying)"
+    exit 0
+fi
+
+# Dry run: all validation, build and optimization above has run; stop before deploying
+if [ "$DRY_RUN" = true ]; then
+    for wasm in "$LEARN_TOKEN_WASM" "$CREDENTIAL_NFT_WASM" "$PROGRESS_TRACKER_WASM"; do
+        if [ ! -s "$wasm" ]; then
+            echo "Error: expected optimized WASM not found or empty: $wasm"
+            exit 1
+        fi
+    done
+    echo "=== Dry Run: Would Deploy ==="
+    echo "Network:  $NETWORK"
+    echo "RPC URL:  $RPC_URL"
+    echo "  - learn-token:      $LEARN_TOKEN_WASM ($LT_KB KB)"
+    echo "  - credential-nft:   $CREDENTIAL_NFT_WASM ($CN_KB KB)"
+    echo "  - progress-tracker: $PROGRESS_TRACKER_WASM ($PT_KB KB)"
+    echo "Would write contract addresses to: $DEPLOY_FILE"
+    echo ""
+    echo "(--dry-run specified: exiting without deploying)"
     exit 0
 fi
 
