@@ -260,6 +260,84 @@ mod progress_tracker_events {
             ]
         );
     }
+
+    #[test]
+    fn test_delegate_progress_emits_progress_delegated_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.delegate_progress(&learner, &delegate);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        // Topics: [name, learner] (learner indexed); data: (delegate,).
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "progress_delegated"), learner.clone()).into_val(&env),
+                    (delegate.clone(),).into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_revoke_delegation_emits_delegation_revoked_event() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.delegate_progress(&learner, &delegate);
+        client.revoke_delegation(&learner);
+
+        let all = env.events().all();
+        let last = all.last().expect("no events emitted");
+        // Topics: [name, learner] (learner indexed); no data payload.
+        assert_eq!(
+            soroban_sdk::vec![&env, last],
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (Symbol::new(&env, "delegation_revoked"), learner.clone()).into_val(&env),
+                    ().into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_delegation_events_share_learner_topic() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.delegate_progress(&learner, &delegate);
+        client.revoke_delegation(&learner);
+
+        let all = env.events().all();
+        let n = all.len();
+        for i in [n - 2, n - 1] {
+            let (cid, topics, _data) = all.get(i).unwrap();
+            assert_eq!(cid, contract_id);
+            assert_eq!(topics.len(), 2);
+            let indexed: Address = topics.get(1).unwrap().into_val(&env);
+            assert_eq!(indexed, learner);
+        }
+    }
 }
 
 // ── Learn Token Events ──────────────────────────────────────────────────────
