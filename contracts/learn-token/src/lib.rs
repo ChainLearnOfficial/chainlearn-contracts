@@ -2054,6 +2054,7 @@ impl LearnToken {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use soroban_sdk::{
         testutils::{storage::Persistent as _, Address as _, Events as _, Ledger as _},
@@ -2388,6 +2389,117 @@ mod tests {
         assert!(claimed.is_empty());
         assert_eq!(client.total_minted_to(&learner), after_first);
         assert_eq!(client.total_minted_to(&learner), client.balance(&learner));
+    }
+
+    /// Collects the `reward` events emitted by the learn-token contract as
+    /// `(learner, course_id, quiz_id, score, amount)` tuples, in emission order.
+    fn reward_events(
+        env: &Env,
+        lt_id: &Address,
+    ) -> std::vec::Vec<(Address, Symbol, Symbol, u32, i128)> {
+        let reward_topic = Symbol::new(env, "reward");
+        let mut out = std::vec::Vec::new();
+        for (contract, topics, data) in env.events().all().iter() {
+            if &contract != lt_id {
+                continue;
+            }
+            let topics: Vec<soroban_sdk::Val> = topics;
+            if topics.len() != 3 {
+                continue;
+            }
+            let first: Symbol =
+                soroban_sdk::TryFromVal::try_from_val(env, &topics.get(0).unwrap()).unwrap();
+            if first != reward_topic {
+                continue;
+            }
+            let learner: Address =
+                soroban_sdk::TryFromVal::try_from_val(env, &topics.get(1).unwrap()).unwrap();
+            let course: Symbol =
+                soroban_sdk::TryFromVal::try_from_val(env, &topics.get(2).unwrap()).unwrap();
+            let (quiz, score, amount): (Symbol, u32, i128) =
+                soroban_sdk::TryFromVal::try_from_val(env, &data).unwrap();
+            out.push((learner, course, quiz, score, amount));
+        }
+        out
+    }
+
+    #[test]
+    fn test_batch_claim_reward_emits_event_per_claimed_quiz() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_ids = [
+            Symbol::new(&env, "quiz_1"),
+            Symbol::new(&env, "quiz_2"),
+            Symbol::new(&env, "quiz_3"),
+        ];
+        let scores = [70u32, 80, 90];
+        create_course_with_quiz_scores(&env, &pt_client, &learner, &course_id, &quiz_ids, &scores);
+
+        let mut batch = Vec::new(&env);
+        for quiz_id in &quiz_ids {
+            batch.push_back(quiz_id.clone());
+        }
+        let claimed = client.batch_claim_reward(&learner, &course_id, &batch);
+        assert_eq!(claimed.len(), 3);
+
+        let events = reward_events(&env, &lt_id);
+        assert_eq!(events.len(), 3);
+        for (i, (ev_learner, ev_course, ev_quiz, ev_score, ev_amount)) in events.iter().enumerate()
+        {
+            assert_eq!(ev_learner, &learner);
+            assert_eq!(ev_course, &course_id);
+            assert_eq!(ev_quiz, &quiz_ids[i]);
+            assert_eq!(*ev_score, scores[i]);
+            assert_eq!(*ev_amount, (scores[i] as i128) * BASE_REWARD_PER_POINT);
+        }
+    }
+
+    #[test]
+    fn test_batch_claim_reward_partial_batch_emits_only_successful_events() {
+        let env = Env::default();
+        let (_admin, lt_id, pt_id) = setup(&env);
+        let client = LearnTokenClient::new(&env, &lt_id);
+        let pt_client = progress_tracker::ProgressTrackerClient::new(&env, &pt_id);
+
+        env.mock_all_auths();
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let quiz_ids = [
+            Symbol::new(&env, "quiz_1"),
+            Symbol::new(&env, "quiz_2"),
+            Symbol::new(&env, "quiz_3"),
+        ];
+        let scores = [70u32, 80, 90];
+        create_course_with_quiz_scores(&env, &pt_client, &learner, &course_id, &quiz_ids, &scores);
+
+        // quiz_2 is claimed up front, so the batch must skip it silently.
+        client.claim_reward(&learner, &course_id, &quiz_ids[1]);
+        let events_before = reward_events(&env, &lt_id).len();
+        assert_eq!(events_before, 1);
+
+        let mut batch = Vec::new(&env);
+        for quiz_id in &quiz_ids {
+            batch.push_back(quiz_id.clone());
+        }
+        let claimed = client.batch_claim_reward(&learner, &course_id, &batch);
+        assert_eq!(claimed.len(), 2);
+
+        // Only the two newly claimed quizzes add events; quiz_2 adds none.
+        let events = reward_events(&env, &lt_id);
+        assert_eq!(events.len(), events_before + 2);
+        for (event, idx) in events[events_before..].iter().zip([0usize, 2]) {
+            assert_eq!(event.0, learner);
+            assert_eq!(event.1, course_id);
+            assert_eq!(event.2, quiz_ids[idx]);
+            assert_eq!(event.3, scores[idx]);
+            assert_eq!(event.4, (scores[idx] as i128) * BASE_REWARD_PER_POINT);
+        }
     }
 
     // ── Issue #237: reward claim history ─────────────────────────────────
