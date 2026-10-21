@@ -592,6 +592,42 @@ mod error_message_tests {
     }
 
     #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_progress_tracker_non_delegate_caller_error_message() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_progress_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = Symbol::new(&env, "rust_101");
+        create_course_with_modules_and_quizzes(&env, &client, &course_id, 3, 2);
+        let learner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+
+        client.complete_module_for(&stranger, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not the learner or their delegate")]
+    fn test_progress_tracker_revoked_delegate_error_message() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_progress_tracker(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        let course_id = Symbol::new(&env, "rust_101");
+        create_course_with_modules_and_quizzes(&env, &client, &course_id, 3, 2);
+        let learner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        client.enroll(&learner, &course_id);
+        client.delegate_progress(&learner, &delegate);
+        client.revoke_delegation(&learner);
+
+        client.complete_module_for(&delegate, &learner, &course_id, &Symbol::new(&env, "mod_1"));
+    }
+
+    #[test]
     #[should_panic(expected = "course already exists")]
     fn test_progress_tracker_duplicate_course_error_message() {
         let env = Env::default();
