@@ -106,7 +106,6 @@ mod error_message_tests {
     // ── Credential NFT Error Message Tests ────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "metadata_uri cannot be empty")]
     fn test_credential_nft_empty_metadata_uri_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
@@ -120,11 +119,15 @@ mod error_message_tests {
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
 
         let empty_uri = Symbol::new(&env, "");
-        client.mint_credential(&admin, &learner, &course_id, &85, &empty_uri);
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &85, &empty_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, CredentialContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri too short: minimum length is 8")]
     fn test_credential_nft_short_metadata_uri_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
@@ -138,11 +141,15 @@ mod error_message_tests {
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
 
         let short_uri = Symbol::new(&env, "ipfs_1");
-        client.mint_credential(&admin, &learner, &course_id, &85, &short_uri);
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &85, &short_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, CredentialContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri is malformed: must start with a valid URI scheme")]
     fn test_credential_nft_malformed_metadata_uri_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
@@ -156,11 +163,15 @@ mod error_message_tests {
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
 
         let malformed_uri = Symbol::new(&env, "ftp_metadata_hash");
-        client.mint_credential(&admin, &learner, &course_id, &85, &malformed_uri);
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &85, &malformed_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, CredentialContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "score 40 below minimum threshold 50")]
     fn test_credential_nft_low_score_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
@@ -171,15 +182,19 @@ mod error_message_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
-        
+
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
 
-        client.mint_credential(&admin, &learner, &course_id, &40, &metadata_uri);
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &40, &metadata_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, CredentialContractError::InvalidScore);
     }
 
     #[test]
-    #[should_panic(expected = "credential already exists for this learner and course")]
     fn test_credential_nft_duplicate_credential_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
@@ -190,12 +205,17 @@ mod error_message_tests {
 
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_Qm123");
-        
+
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
 
         client.mint_credential(&admin, &learner, &course_id, &85, &uri);
-        client.mint_credential(&admin, &learner, &course_id, &85, &uri);
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &85, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, CredentialContractError::DuplicateCredential);
     }
 
     #[test]

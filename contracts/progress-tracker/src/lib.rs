@@ -4632,8 +4632,7 @@ mod tests {
         // The test name says "succeeds after unpause" but the sequence above never
         // paused the contract. Pause first, then unpause before the delegate
         // retake call to actually exercise the post-unpause path.
-        client.emergency_pause();
-        client.unpause();
+        client.pause(&admin);
         client.unpause(&admin);
         // Delegate path still works once the pause lifts, mirroring the
         // direct path above.

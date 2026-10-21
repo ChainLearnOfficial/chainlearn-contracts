@@ -4649,13 +4649,18 @@ mod tests {
         let client = LearnTokenClient::new(&env, &contract_id);
 
         env.mock_all_auths();
-        env.ledger().with_mut(|li| li.timestamp = 1_500);
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1_500;
+            li.sequence_number = 99;
+        });
+        let snapshot_ledger = env.ledger().sequence();
+        env.ledger().with_mut(|li| li.sequence_number = 100);
         let proposal_id = client.create_proposal(
             &SorobanString::from_str(&env, "Early execution"),
             &2,
             &1_000,
             &2_000,
-            &env.ledger().sequence(),
+            &snapshot_ledger,
         );
 
         let err = client.try_execute_proposal(&proposal_id)

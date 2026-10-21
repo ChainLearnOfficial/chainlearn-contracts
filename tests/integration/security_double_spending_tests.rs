@@ -158,7 +158,6 @@ fn test_double_claim_in_batch_is_skipped() {
 // ── Double-mint credential ──────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "credential already exists for this learner and course")]
 fn test_double_mint_credential_is_prevented() {
     let env = Env::default();
     let (admin, _token_client, credential_client, progress_client) = setup_env(&env);
@@ -173,7 +172,12 @@ fn test_double_mint_credential_is_prevented() {
     credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
 
     // Second mint for the same learner+course must be rejected
-    credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+    let err = credential_client
+        .try_mint_credential(&admin, &learner, &course_id, &85, &metadata_uri)
+        .err()
+        .expect("should fail")
+        .expect("typed error");
+    assert_eq!(err, CredentialContractError::DuplicateCredential);
 }
 
 #[test]
@@ -388,7 +392,7 @@ fn test_double_revoke_credential_is_prevented() {
 #[test]
 fn test_claim_reward_then_mint_credential_are_independent() {
     let env = Env::default();
-    let (_admin, token_client, credential_client, progress_client) = setup_env(&env);
+    let (admin, token_client, credential_client, progress_client) = setup_env(&env);
     let learner = Address::generate(&env);
     env.mock_all_auths();
 

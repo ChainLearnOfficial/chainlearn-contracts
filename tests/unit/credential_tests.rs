@@ -201,7 +201,7 @@ mod credential_unit_tests {
     #[test]
     fn test_nonexistent_credential_invalid() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         assert!(!client.is_credential_valid(&999));
@@ -233,7 +233,7 @@ mod credential_unit_tests {
     #[should_panic]
     fn test_revoke_credential_without_admin_auth_fails() {
         let env = Env::default();
-        let (admin, contract_id, _) = setup_contract(&env);
+        let (_admin, contract_id, _) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         // We do not mock auths, so revoke_credential must fail admin auth check
@@ -396,7 +396,7 @@ mod credential_unit_tests {
         // The rejection is unconditional: it doesn't depend on auth, on
         // `from`/`to` being real accounts, or on `credential_id` existing.
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let from = Address::generate(&env);
@@ -460,7 +460,7 @@ mod credential_unit_tests {
     #[test]
     fn test_is_initialized_true_after_initialize() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         assert!(client.is_initialized());
@@ -469,7 +469,7 @@ mod credential_unit_tests {
     #[test]
     fn test_is_initialized_does_not_mutate_state() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let before = client.contract_metadata();
@@ -494,12 +494,12 @@ mod credential_unit_tests {
     #[test]
     fn test_storage_size_increases_after_initialize() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
-        // initialize() writes Admin, ProgressTracker, CredentialCounter, and
-        // Metadata -- 4 distinct new keys.
-        assert_eq!(client.get_storage_size(), 4);
+        // initialize() writes Admin, ProgressTracker, CredentialCounter,
+        // Metadata and the initial Admin role grant -- 5 distinct new keys.
+        assert_eq!(client.get_storage_size(), 5);
     }
 
     #[test]
@@ -758,7 +758,7 @@ mod credential_unit_tests {
     #[test]
     fn test_update_credential_metadata_rejects_unknown_credential() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
         let err = client.try_update_credential_metadata(&1, &Symbol::new(&env, "ipfs_QmReplaced"))
@@ -831,7 +831,6 @@ mod credential_unit_tests {
         client.update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_QmReplaced"));
     }
 
-    #[test]
     #[test]
     fn test_update_credential_metadata_rejected_while_paused() {
         let env = Env::default();
@@ -1209,34 +1208,59 @@ mod credential_unit_tests {
 
     // ── Issue #541: set/get_credential_display unit tests ──────────────────
 
+    /// Mint a credential for `learner` in `course_id` and return its id.
+    fn mint_credential(
+        env: &Env,
+        client: &CredentialNftClient,
+        admin: &Address,
+        tracker_id: &Address,
+        learner: &Address,
+        course_id: &Symbol,
+    ) -> u64 {
+        enrolled_and_completed_with_score(env, tracker_id, learner, course_id, 85);
+        client.mint_credential(
+            admin,
+            learner,
+            course_id,
+            &85,
+            &Symbol::new(env, "ipfs_Qm123"),
+        )
+    }
+
     #[test]
     fn test_get_credential_display_returns_none_for_unset() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
-        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
 
         assert!(client.get_credential_display(&cred_id).is_none());
     }
 
     #[test]
+    fn test_get_credential_display_returns_none_for_unknown_credential() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        assert!(client.get_credential_display(&999).is_none());
+    }
+
+    #[test]
     fn test_set_credential_display_all_fields() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
-        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
 
         let image_url = Some(Symbol::new(&env, "ipfs_QmImage"));
         let description = Some(Symbol::new(&env, "rust_course_cert"));
@@ -1252,15 +1276,13 @@ mod credential_unit_tests {
     #[test]
     fn test_set_credential_display_partial_fields() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
-        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
 
         client.set_credential_display(&cred_id, &None, &None, &Some(Symbol::new(&env, "chainlearn")));
 
@@ -1273,15 +1295,13 @@ mod credential_unit_tests {
     #[test]
     fn test_set_credential_display_updates_overwrites_previous_values() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
-        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
 
         client.set_credential_display(
             &cred_id,
@@ -1308,15 +1328,13 @@ mod credential_unit_tests {
     #[test]
     fn test_set_credential_display_emits_event() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
-        enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
 
         let image_url = Some(Symbol::new(&env, "ipfs_QmImage"));
         let description = Some(Symbol::new(&env, "rust_course_cert"));
@@ -1342,26 +1360,84 @@ mod credential_unit_tests {
     #[test]
     fn test_set_credential_display_requires_admin_auth() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-        // Don't call env.mock_all_auths() so admin.require_auth() will be
-        // enforced and the call should be rejected without proper auth.
+        env.mock_all_auths();
 
         let learner = Address::generate(&env);
-        // We need to set up course/learner without calling admin-gated functions
-        // that would require mocking; use a fresh env approach or just set up
-        // state differently. Easier: mock auths for setup, then clear and test.
+        let course_id = Symbol::new(&env, "rust_101");
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
+
+        // Disable auth mocking: the credential exists, so the only reason this
+        // call may fail is the missing admin authorization.
+        env.set_auths(&[]);
+        assert!(client
+            .try_set_credential_display(&cred_id, &None, &None, &Some(Symbol::new(&env, "chainlearn")))
+            .is_err());
+
+        // Nothing was written: the display is still unset.
+        env.mock_all_auths();
+        assert!(client.get_credential_display(&cred_id).is_none());
     }
 
     #[test]
-    #[should_panic(expected = "credential not found")]
-    fn test_set_credential_display_panics_for_nonexistent_credential() {
+    fn test_set_credential_display_rejects_unknown_credential() {
         let env = Env::default();
         let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
 
-        client.set_credential_display(&999, &None, &None, &Some(Symbol::new(&env, "x")));
+        let err = client
+            .try_set_credential_display(&999, &None, &None, &Some(Symbol::new(&env, "x")))
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, ContractError::NotFound);
+    }
+
+    #[test]
+    fn test_set_credential_display_is_scoped_to_a_single_credential() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
+
+        let other_course = Symbol::new(&env, "sol_201");
+        let other_cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &other_course);
+        assert_ne!(cred_id, other_cred_id);
+
+        client.set_credential_display(
+            &cred_id,
+            &Some(Symbol::new(&env, "ipfs_QmImage")),
+            &None,
+            &None,
+        );
+
+        assert!(client.get_credential_display(&cred_id).is_some());
+        assert!(client.get_credential_display(&other_cred_id).is_none());
+    }
+
+    #[test]
+    fn test_set_credential_display_survives_revocation() {
+        let env = Env::default();
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "rust_101");
+        let cred_id = mint_credential(&env, &client, &admin, &tracker_id, &learner, &course_id);
+
+        let issuer_name = Some(Symbol::new(&env, "chainlearn"));
+        client.set_credential_display(&cred_id, &None, &None, &issuer_name);
+        client.revoke_credential(&cred_id);
+
+        let display = client.get_credential_display(&cred_id).unwrap();
+        assert_eq!(display.issuer_name, issuer_name);
     }
 
     #[test]

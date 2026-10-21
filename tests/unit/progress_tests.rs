@@ -2201,8 +2201,9 @@ mod progress_unit_tests {
         let (admin, contract_id) = setup_contract(&env);
         let client = ProgressTrackerClient::new(&env, &contract_id);
 
-        // initialize() writes Admin, Metadata, and Version -- 3 distinct new keys.
-        assert_eq!(client.get_storage_size(), 3);
+        // initialize() writes Admin, Metadata, Version and the initial Admin
+        // role grant -- 4 distinct new keys.
+        assert_eq!(client.get_storage_size(), 4);
     }
 
     #[test]
