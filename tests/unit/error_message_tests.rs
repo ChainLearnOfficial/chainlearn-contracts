@@ -7,7 +7,7 @@
 //! 4. Cover all error paths across all contracts
 
 use credential_nft::{CredentialNft, CredentialNftClient};
-use learn_token::{LearnToken, LearnTokenClient};
+use learn_token::{ContractError, LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -360,30 +360,25 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "score must be greater than 0")]
     fn test_learn_token_zero_score_error_message() {
         let env = Env::default();
         let (_admin, contract_id, pt_contract_id) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
-        
         let mut module_ids = Vec::new(&env);
         module_ids.push_back(Symbol::new(&env, "mod_1"));
         let mut quiz_ids = Vec::new(&env);
         quiz_ids.push_back(quiz_id.clone());
         pt_client.create_course(&course_id, &1, &1, &module_ids, &quiz_ids);
         pt_client.enroll(&learner, &course_id);
-        
-        // progress-tracker accepts zero scores; learn-token rejects them when
-        // calculating a reward from the cross-contract score lookup.
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id, &0);
-        client.claim_reward(&learner, &course_id, &quiz_id);
+        let err = client.try_claim_reward(&learner, &course_id, &quiz_id)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::InvalidScore);
     }
 
     #[test]
@@ -417,29 +412,27 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot mint to zero address")]
     fn test_learn_token_mint_to_zero_address_error_message() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
-
         let zero_address = Address::from_string(&SorobanString::from_str(
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         ));
-        client.mint(&admin, &zero_address, &1000);
+        let err = client.try_mint(&admin, &zero_address, &1000)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ZeroAddress);
     }
 
     #[test]
-    #[should_panic(expected = "maximum supply cap exceeded")]
     fn test_learn_token_max_supply_exceeded_error_message() {
         let env = Env::default();
         let admin = Address::generate(&env);
         let pt_contract_id = env.register_contract(None, ProgressTracker);
         let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
         pt_client.initialize(&admin);
-
         let contract_id = env.register_contract(None, LearnToken);
         let client = LearnTokenClient::new(&env, &contract_id);
         client.initialize(
@@ -450,12 +443,12 @@ mod error_message_tests {
             &pt_contract_id,
             &5000,
         );
-
         let user = Address::generate(&env);
         env.mock_all_auths();
-
         client.mint(&admin, &user, &3000);
-        client.mint(&admin, &user, &2001);
+        let err = client.try_mint(&admin, &user, &2001)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
     #[test]
