@@ -23,6 +23,23 @@ pub enum ContractError {
     AlreadyInitialized = 0,
     /// Caller does not have the required role (#551).
     NotAuthorized = 1,
+    ContractPaused = 2,
+    NotFound = 3,
+    AlreadyEnrolled = 4,
+    DuplicateModule = 5,
+    DuplicateQuiz = 6,
+    InvalidScore = 7,
+    OutOfOrder = 8,
+    AlreadyExists = 9,
+    InvalidInput = 10,
+    AlreadyCompleted = 11,
+    AlreadySubmitted = 12,
+    Archived = 13,
+    PrerequisiteNotCompleted = 14,
+    ContentHashMismatch = 15,
+    InvalidState = 16,
+    InvalidAddress = 17,
+    DelayNotElapsed = 18,
 }
 
 /// On-chain learning progress tracker for ChainLearn.

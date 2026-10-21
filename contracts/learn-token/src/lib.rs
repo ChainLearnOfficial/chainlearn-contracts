@@ -44,6 +44,7 @@ pub enum ContractError {
     RewardAlreadyClaimed = 12,
     NotAuthorized = 13,
     InvalidMaxSupply = 14,
+    ArithmeticOverflow = 15,
 }
 
 /// Result of previewing a `claim_reward` call without executing it (#199, #214).
@@ -532,9 +533,15 @@ impl LearnToken {
         // Check transfer restrictions (#191)
         Self::check_transfer_restriction(&env, &from, &to, amount)?;
 
-        storage::set_balance(&env, &from, from_balance - amount);
+        let updated_from_balance = from_balance
+            .checked_sub(amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
         let to_balance = storage::get_balance(&env, &to);
-        storage::set_balance(&env, &to, to_balance + amount);
+        let updated_to_balance = to_balance
+            .checked_add(amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        storage::set_balance(&env, &from, updated_from_balance);
+        storage::set_balance(&env, &to, updated_to_balance);
 
         // Latch the per-sender cooldown timestamp after a successful transfer.
         Self::record_transfer_timestamp(&env, &from);
@@ -597,10 +604,17 @@ impl LearnToken {
         // Check transfer restrictions (#191)
         Self::check_transfer_restriction(&env, &from, &to, amount)?;
 
-        storage::reduce_allowance(&env, &from, &spender, amount);
-        storage::set_balance(&env, &from, from_balance - amount);
+        let updated_from_balance = from_balance
+            .checked_sub(amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
         let to_balance = storage::get_balance(&env, &to);
-        storage::set_balance(&env, &to, to_balance + amount);
+        let updated_to_balance = to_balance
+            .checked_add(amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+
+        storage::reduce_allowance(&env, &from, &spender, amount);
+        storage::set_balance(&env, &from, updated_from_balance);
+        storage::set_balance(&env, &to, updated_to_balance);
 
         // Latch the per-sender cooldown timestamp after a successful transfer.
         Self::record_transfer_timestamp(&env, &from);
@@ -834,7 +848,9 @@ impl LearnToken {
             return Err(ContractError::InvalidScore);
         }
 
-        let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
+        let reward_amount = (score as i128)
+            .checked_mul(BASE_REWARD_PER_POINT)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         // Cap the maximum reward to prevent excessively large minting if
         // MAX_QUIZ_SCORE or BASE_REWARD_PER_POINT change in the future (#78).
@@ -854,9 +870,15 @@ impl LearnToken {
 
         // Mint tokens to the learner
         let current_balance = storage::get_balance(&env, &learner);
-        storage::set_balance(&env, &learner, current_balance + reward_amount);
+        let updated_balance = current_balance
+            .checked_add(reward_amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        let updated_supply = current_supply
+            .checked_add(reward_amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        storage::set_balance(&env, &learner, updated_balance);
 
-        storage::set_total_supply(&env, current_supply + reward_amount);
+        storage::set_total_supply(&env, updated_supply);
 
         // Reward claims mint too, so they count toward the per-address
         // minted total (#236).
@@ -938,21 +960,27 @@ impl LearnToken {
                 continue;
             }
 
-            let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
+            let Some(reward_amount) = (score as i128).checked_mul(BASE_REWARD_PER_POINT) else {
+                continue;
+            };
             if reward_amount > MAX_REWARD_AMOUNT {
                 continue;
             }
 
-            if current_supply
-                .checked_add(reward_amount)
-                .map_or(true, |s| s > max_supply)
-            {
+            let (Some(next_supply), Some(next_balance), Some(next_total_minted)) = (
+                current_supply.checked_add(reward_amount),
+                current_balance.checked_add(reward_amount),
+                total_minted.checked_add(reward_amount),
+            ) else {
+                continue;
+            };
+            if next_supply > max_supply {
                 continue;
             }
 
-            current_supply += reward_amount;
-            current_balance += reward_amount;
-            total_minted += reward_amount;
+            current_supply = next_supply;
+            current_balance = next_balance;
+            total_minted = next_total_minted;
 
             storage::set_reward_claimed(&env, &learner, &course_id, &quiz_id);
             storage::append_claim_record(
