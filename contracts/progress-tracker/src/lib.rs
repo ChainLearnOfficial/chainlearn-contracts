@@ -4246,6 +4246,229 @@ mod tests {
         assert!(client.try_set_admin_transfer_delay(&3_600).is_err());
     }
 
+    // ── Issue #538: admin transfer unit tests (events, auth, lifecycle) ───
+
+    #[test]
+    fn test_transfer_admin_emits_initiated_event() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        let events = env.events().all();
+        let (_, topics, data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (
+                Symbol::new(&env, "admin_transfer_initiated"),
+                new_admin.clone()
+            )
+                .into_val(&env)
+        );
+        // Data: (current_admin, initiated_at, accept_after). The ledger starts
+        // at timestamp 0 and the default delay is 48h, so accept_after is the
+        // default delay exactly.
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 3);
+        let data_admin: Address = data_vec.get(0).unwrap().into_val(&env);
+        let initiated_at: u64 = data_vec.get(1).unwrap().into_val(&env);
+        let accept_after: u64 = data_vec.get(2).unwrap().into_val(&env);
+        assert_eq!(data_admin, admin);
+        assert_eq!(initiated_at, 0);
+        assert_eq!(accept_after, 172_800);
+    }
+
+    #[test]
+    fn test_transfer_admin_requires_admin_auth() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        // No authorization is mocked, so the admin-only call must be rejected
+        // and no pending transfer may be recorded.
+        assert!(client.try_transfer_admin(&new_admin).is_err());
+        assert!(client.pending_admin().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot transfer admin to zero address")]
+    fn test_transfer_admin_rejects_zero_address() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.transfer_admin(&chainlearn_shared::zero_address(&env));
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_emits_cancelled_event() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        client.cancel_admin_transfer();
+
+        let events = env.events().all();
+        let (_, topics, data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (
+                Symbol::new(&env, "admin_transfer_cancelled"),
+                new_admin.clone()
+            )
+                .into_val(&env)
+        );
+        // Data: (current_admin,).
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 1);
+        let data_admin: Address = data_vec.get(0).unwrap().into_val(&env);
+        assert_eq!(data_admin, admin);
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer_requires_admin_auth() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        // Seed a pending transfer directly so the only thing that can reject
+        // an unauthenticated cancel is the admin auth check itself.
+        env.as_contract(&contract_id, || {
+            types::write_entry(
+                &env,
+                &ProgressTrackerDataKey::PendingAdmin,
+                &types::PendingAdminTransfer {
+                    new_admin: new_admin.clone(),
+                    initiated_at: 0,
+                },
+            );
+        });
+
+        assert!(client.try_cancel_admin_transfer().is_err());
+        // The pending transfer and the admin are both untouched.
+        assert_eq!(client.admin(), admin);
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, new_admin);
+    }
+
+    #[test]
+    fn test_accept_admin_emits_accepted_event() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+        // Advance past the default 48h delay.
+        env.ledger().with_mut(|l| l.timestamp += 172_801);
+        client.accept_admin();
+
+        let events = env.events().all();
+        let (_, topics, data) = events.last().unwrap();
+        assert_eq!(
+            topics,
+            (
+                Symbol::new(&env, "admin_transfer_accepted"),
+                new_admin.clone()
+            )
+                .into_val(&env)
+        );
+        // Data: (previous_admin,).
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 1);
+        let data_admin: Address = data_vec.get(0).unwrap().into_val(&env);
+        assert_eq!(data_admin, admin);
+    }
+
+    #[test]
+    fn test_accept_admin_requires_pending_new_admin_auth() {
+        let env = Env::default();
+        let (admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        // Seed a pending transfer whose delay has fully elapsed, without any
+        // auth mocking for the accept call, so the only thing that can reject
+        // it is the pending candidate's require_auth.
+        env.ledger().with_mut(|l| l.timestamp += 172_801);
+        env.as_contract(&contract_id, || {
+            types::write_entry(
+                &env,
+                &ProgressTrackerDataKey::PendingAdmin,
+                &types::PendingAdminTransfer {
+                    new_admin: new_admin.clone(),
+                    initiated_at: 0,
+                },
+            );
+        });
+
+        assert!(client.try_accept_admin().is_err());
+        // The admin is unchanged and the pending transfer survives.
+        assert_eq!(client.admin(), admin);
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, new_admin);
+    }
+
+    #[test]
+    fn test_pending_admin_reports_the_full_lifecycle() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        // Absent before any transfer is initiated.
+        assert!(client.pending_admin().is_none());
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        // Present after transfer_admin, stamped with the initiation time.
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, new_admin);
+        assert_eq!(pending.initiated_at, env.ledger().timestamp());
+
+        // Absent again once the current admin cancels.
+        client.cancel_admin_transfer();
+        assert!(client.pending_admin().is_none());
+
+        // And absent again after a completed transfer.
+        client.transfer_admin(&new_admin);
+        env.ledger().with_mut(|l| l.timestamp += 172_801);
+        client.accept_admin();
+        assert!(client.pending_admin().is_none());
+        assert_eq!(client.admin(), new_admin);
+    }
+
+    #[test]
+    fn test_set_admin_transfer_delay_accepts_larger_values() {
+        let env = Env::default();
+        let (_admin, contract_id) = setup_contract(&env);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&86_400);
+        assert_eq!(client.admin_transfer_delay(), 86_400);
+
+        // The configured delay applies to transfers initiated after the change.
+        let new_admin = Address::generate(&env);
+        client.transfer_admin(&new_admin);
+        env.ledger().with_mut(|l| l.timestamp += 86_399);
+        assert!(client.try_accept_admin().is_err());
+        env.ledger().with_mut(|l| l.timestamp += 1);
+        client.accept_admin();
+        assert_eq!(client.admin(), new_admin);
+    }
+
     // ── Issue #457: course mutations must respect the pause state ───────
 
     fn paused_course(env: &Env) -> (Address, Symbol) {
@@ -4406,6 +4629,11 @@ mod tests {
         client.submit_quiz_score(&learner, &course_id, &quiz_1, &55);
         client.delegate_progress(&learner, &delegate);
 
+        // The test name says "succeeds after unpause" but the sequence above never
+        // paused the contract. Pause first, then unpause before the delegate
+        // retake call to actually exercise the post-unpause path.
+        client.emergency_pause();
+        client.unpause();
         client.unpause(&admin);
         // Delegate path still works once the pause lifts, mirroring the
         // direct path above.
@@ -4586,7 +4814,15 @@ mod tests {
             )
                 .into_val(&env)
         );
-        assert_eq!(*data, (quiz_1, 55u32, 75u32).into_val(&env));
+        // Data: (quiz_id, previous_score, new_score).
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 3);
+        let data_quiz: Symbol = data_vec.get(0).unwrap().into_val(&env);
+        let previous_score: u32 = data_vec.get(1).unwrap().into_val(&env);
+        let new_score: u32 = data_vec.get(2).unwrap().into_val(&env);
+        assert_eq!(data_quiz, quiz_1);
+        assert_eq!(previous_score, 55);
+        assert_eq!(new_score, 75);
     }
 
     #[test]
@@ -4794,18 +5030,20 @@ mod tests {
         client.set_course_difficulty(&course_id, &2);
 
         let events = env.events().all();
-        let (_, topics, _data) = events.last().unwrap();
+        let (_, topics, data) = events.last().unwrap();
         assert_eq!(
             topics,
-            (Symbol::new(&env, "course_difficulty_set"), course_id.clone()).into_val(&env)
+            (
+                Symbol::new(&env, "course_difficulty_set"),
+                course_id.clone()
+            )
+                .into_val(&env)
         );
+        // Data: (difficulty,).
         let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
-        assert_eq!(data_vec.len(), 2);
-        let data_course: Symbol = data_vec.get(0).unwrap().into_val(&env);
-        let data_difficulty: u32 = data_vec.get(1).unwrap().into_val(&env);
-        assert_eq!(data_course, course_id);
+        assert_eq!(data_vec.len(), 1);
+        let data_difficulty: u32 = data_vec.get(0).unwrap().into_val(&env);
         assert_eq!(data_difficulty, 2);
-        assert_eq!(*data, (2u32,).into_val(&env));
     }
 
     #[test]
@@ -4939,11 +5177,19 @@ mod tests {
         client.update_course_version(&course_id, &new_version);
 
         let events = env.events().all();
-        let (_, topics, _data) = events.last().unwrap();
+        let (_, topics, data) = events.last().unwrap();
         assert_eq!(
             topics,
-            (Symbol::new(&env, "course_version_updated"),).into_val(&env)
+            (
+                Symbol::new(&env, "course_version_updated"),
+                course_id.clone()
+            )
+                .into_val(&env)
         );
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 1);
+        let new_version_val: u32 = data_vec.get(0).unwrap().into_val(&env);
+        assert_eq!(new_version_val, new_version);
     }
 
     #[test]
