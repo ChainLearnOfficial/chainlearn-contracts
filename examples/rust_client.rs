@@ -106,7 +106,7 @@ fn main() {
     // ── Admin: Mint credential NFT ─────────────────────────────────────
     // Score must match the verified course average from progress-tracker.
     // via CLI: soroban contract invoke --id <CREDENTIAL_ID> -- mint_credential \
-    //     --to <LEARNER> --course_id "rust_101" --score 88 \
+    //     --caller <ADMIN> --to <LEARNER> --course_id "rust_101" --score 88 \
     //     --metadata_uri "ipfs://Qm123..."
 
     // ── Verify credential ──────────────────────────────────────────────

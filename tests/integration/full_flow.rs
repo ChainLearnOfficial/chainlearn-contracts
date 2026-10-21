@@ -45,7 +45,7 @@ fn test_full_learner_journey() {
 
     // 4. Mint credential
     let metadata_uri = Symbol::new(&env, "ipfs_hash");
-    let cred_id = credential_client.mint_credential(&learner, &course_id, &80, &metadata_uri);
+    let cred_id = credential_client.mint_credential(&_admin, &learner, &course_id, &80, &metadata_uri);
 
     // Verify credential
     let info = credential_client.verify_credential(&cred_id);

@@ -213,11 +213,12 @@ console.log(`Balance: ${balance} tokens`);
 
 ### 3. Credential NFT
 
-#### Mint Credential (Admin)
+#### Mint Credential (Minter)
 
 ```rust
 // Rust
 let credential_id = client.mint_credential(
+    &admin,       // caller (Minter or Admin)
     &learner,
     &course_id,
     &score,
@@ -228,6 +229,7 @@ let credential_id = client.mint_credential(
 ```typescript
 // TypeScript
 const credentialId = await contract.mintCredential({
+  caller: adminAddress,   // Minter or Admin
   to: learnerAddress,
   course_id: "rust_101",
   score: 85,
@@ -902,10 +904,11 @@ fn learner_journey(
         token_client.claim_reward(learner, course_id, quiz_id);
     }
 
-    // 3. Mint credential (requires admin)
+    // 3. Mint credential (requires Minter or Admin)
     if tracker_client.is_eligible_for_credential(learner, course_id) {
         let score = tracker_client.get_course_score(learner, course_id);
         credential_client.mint_credential(
+            &admin,         // caller (Minter or Admin)
             learner,
             course_id,
             score,

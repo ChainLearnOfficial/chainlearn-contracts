@@ -92,7 +92,7 @@ sequenceDiagram
     participant NFT as credential-nft
     participant Tracker as progress-tracker
 
-    Admin->>NFT: mint_credential(to, course_id, score, metadata_uri)
+    Admin->>NFT: mint_credential(caller, to, course_id, score, metadata_uri)
     NFT->>Tracker: is_eligible_for_credential()
     Tracker-->>NFT: return true/false
     NFT->>Tracker: get_course_score()

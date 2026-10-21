@@ -32,4 +32,4 @@ soroban contract invoke --id $TOKEN_ID \
 # 5. Mint credential
 soroban contract invoke --id $CREDENTIAL_ID \
     --source $STELLAR_SECRET_KEY --network testnet \
-    -- mint_credential --to $LEARNER_ADDRESS --course_id "rust_101" --score 85 --metadata_uri "ipfs://Qm..."
+    -- mint_credential --caller $ADMIN_ADDRESS --to $LEARNER_ADDRESS --course_id "rust_101" --score 85 --metadata_uri "ipfs://Qm..."

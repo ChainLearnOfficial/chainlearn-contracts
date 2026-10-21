@@ -1,5 +1,22 @@
 use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol, Val, Vec};
 
+/// Role-based access control roles, matching learn-token (#551).
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AdminRole {
+    Admin,
+    Minter,
+    Pauser,
+}
+
+/// Storage key for a role assignment (#551).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoleKey {
+    pub address: Address,
+    pub role: AdminRole,
+}
+
 /// On-chain metadata for a minted credential NFT.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,6 +73,8 @@ pub enum CredentialDataKey {
     PendingAdmin,
     /// Configurable admin-transfer delay in seconds, absent until set (#423).
     AdminTransferDelay,
+    /// Role assignments per address (#551).
+    Role(RoleKey),
 }
 
 /// An admin transfer that has been initiated but not yet accepted (#423).
@@ -137,6 +156,64 @@ where
     if existed {
         bump_storage_size(env, -1);
     }
+}
+
+// ── Role Management (#551) ───────────────────────────────────────────────────
+
+/// Check if an address has a specific role.
+///
+/// The primary admin always has all roles. Anyone with `AdminRole::Admin`
+/// also has all roles. Otherwise, the Role(RoleKey) persistent entry is checked.
+pub fn has_role(env: &Env, address: &Address, role: &AdminRole) -> bool {
+    // Backward compatibility: the main admin address has all roles.
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&CredentialDataKey::Admin)
+        .expect("not initialized");
+    if address == &admin {
+        return true;
+    }
+
+    // Anyone with AdminRole::Admin has all roles.
+    if role != &AdminRole::Admin {
+        let admin_key = CredentialDataKey::Role(RoleKey {
+            address: address.clone(),
+            role: AdminRole::Admin,
+        });
+        if env
+            .storage()
+            .persistent()
+            .get(&admin_key)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+
+    let key = CredentialDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Grant a role to an address.
+pub fn grant_role(env: &Env, address: &Address, role: &AdminRole) {
+    let key = CredentialDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    write_entry(env, &key, &true);
+}
+
+/// Revoke a role from an address.
+pub fn revoke_role(env: &Env, address: &Address, role: &AdminRole) {
+    let key = CredentialDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    remove_entry(env, &key);
 }
 
 /// Display properties for a credential NFT (#244).

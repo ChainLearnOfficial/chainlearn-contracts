@@ -313,11 +313,12 @@ fn test_unauthorized_set_prerequisites() {
 
 #[test]
 #[should_panic]
-fn test_unauthorized_emergency_pause_progress_tracker() {
+fn test_unauthorized_pause_progress_tracker() {
     let env = Env::default();
     let (_admin, _contract_id, client) = setup_progress_tracker(&env);
     // Admin not authorized - should fail
-    client.emergency_pause();
+    let random = Address::generate(&env);
+    client.pause(&random);
 }
 
 // ── Credential NFT Admin Function Auth Tests ──
@@ -347,7 +348,8 @@ fn test_unauthorized_mint_credential() {
     
     // Now try to mint WITHOUT admin authorization (no mock_all_auths)
     // The credential-nft mint_credential requires BOTH admin and learner auth
-    client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let nobody = Address::generate(&env);
+    client.mint_credential(&nobody, &learner, &course_id, &85, &metadata_uri);
 }
 
 #[test]
@@ -374,7 +376,7 @@ fn test_unauthorized_revoke_credential() {
     pt_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
     pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     
-    let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = client.mint_credential(&_admin, &learner, &course_id, &85, &metadata_uri);
     
     // Now try to revoke WITHOUT admin authorization (no mock_all_auths)
     client.revoke_credential(&cred_id);
@@ -404,7 +406,7 @@ fn test_unauthorized_renew_credential() {
     pt_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
     pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     
-    let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = client.mint_credential(&_admin, &learner, &course_id, &85, &metadata_uri);
     
     // Now try to renew WITHOUT admin authorization (no mock_all_auths)
     client.renew_credential(&cred_id, &1000);
@@ -434,7 +436,7 @@ fn test_unauthorized_set_credential_display() {
     pt_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
     pt_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &85);
     
-    let cred_id = client.mint_credential(&learner, &course_id, &85, &metadata_uri);
+    let cred_id = client.mint_credential(&_admin, &learner, &course_id, &85, &metadata_uri);
     
     // Now try to set display WITHOUT admin authorization (no mock_all_auths)
     client.set_credential_display(&cred_id, &None, &None, &None);
@@ -452,9 +454,10 @@ fn test_unauthorized_transfer_admin_credential_nft() {
 
 #[test]
 #[should_panic]
-fn test_unauthorized_emergency_pause_credential_nft() {
+fn test_unauthorized_pause_credential_nft() {
     let env = Env::default();
     let (_admin, _contract_id, client) = setup_credential_nft(&env);
     // Admin not authorized - should fail
-    client.emergency_pause();
+    let random = Address::generate(&env);
+    client.pause(&random);
 }
