@@ -190,6 +190,23 @@ pub enum AchievementType {
     PerfectCourse,
 }
 
+/// Role-based access control roles, matching learn-token (#551).
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AdminRole {
+    Admin,
+    Minter,
+    Pauser,
+}
+
+/// Storage key for a role assignment (#551).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoleKey {
+    pub address: Address,
+    pub role: AdminRole,
+}
+
 /// Storage keys for the progress tracker contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -226,6 +243,8 @@ pub enum ProgressTrackerDataKey {
     AdminTransferDelay,
     /// Reverse index mapping a tag symbol to course IDs with that tag (#419).
     TagIndex(Symbol),
+    /// Role assignments per address (#551).
+    Role(RoleKey),
 }
 
 /// An admin transfer that has been initiated but not yet accepted (#423).
@@ -305,4 +324,62 @@ where
     if existed {
         bump_storage_size(env, -1);
     }
+}
+
+// ── Role Management (#551) ───────────────────────────────────────────────────
+
+/// Check if an address has a specific role.
+///
+/// The primary admin always has all roles. Anyone with `AdminRole::Admin`
+/// also has all roles. Otherwise, the Role(RoleKey) persistent entry is checked.
+pub fn has_role(env: &Env, address: &Address, role: &AdminRole) -> bool {
+    // Backward compatibility: the main admin address has all roles.
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&ProgressTrackerDataKey::Admin)
+        .expect("not initialized");
+    if address == &admin {
+        return true;
+    }
+
+    // Anyone with AdminRole::Admin has all roles.
+    if role != &AdminRole::Admin {
+        let admin_key = ProgressTrackerDataKey::Role(RoleKey {
+            address: address.clone(),
+            role: AdminRole::Admin,
+        });
+        if env
+            .storage()
+            .persistent()
+            .get(&admin_key)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+
+    let key = ProgressTrackerDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Grant a role to an address.
+pub fn grant_role(env: &Env, address: &Address, role: &AdminRole) {
+    let key = ProgressTrackerDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    write_entry(env, &key, &true);
+}
+
+/// Revoke a role from an address.
+pub fn revoke_role(env: &Env, address: &Address, role: &AdminRole) {
+    let key = ProgressTrackerDataKey::Role(RoleKey {
+        address: address.clone(),
+        role: role.clone(),
+    });
+    remove_entry(env, &key);
 }

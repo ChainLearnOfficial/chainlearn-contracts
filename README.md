@@ -384,6 +384,30 @@ A learner is eligible for a credential when:
 | `is_initialized` | — | — | `bool` | Whether `initialize()` has been called. |
 | `get_storage_size` | — | — | `u64` | Number of persistent storage entries. |
 
+#### Admin
+
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `admin` | — | — | `Address` | Admin address. |
+| `has_role` | — | `address: Address, role: AdminRole` | `bool` | Check role assignment. |
+| `grant_role` | Admin | `caller: Address, address: Address, role: AdminRole` | — | Grant a role. |
+| `revoke_role` | Admin | `caller: Address, address: Address, role: AdminRole` | — | Revoke a role. |
+| `upgrade` | Admin | `caller: Address, new_wasm_hash: BytesN<32>` | — | Upgrade contract WASM. |
+| `wasm_hash` | — | — | `Option<BytesN<32>>` | Current WASM hash. |
+| `transfer_admin` | Admin | `new_admin: Address` | — | Initiate delayed admin transfer. |
+| `accept_admin` | Pending | — | — | Accept admin role after delay. |
+| `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
+| `pending_admin` | — | — | `Option<PendingAdminTransfer>` | Pending transfer details. |
+| `admin_transfer_delay` | — | — | `u64` | Current delay in seconds. |
+| `set_admin_transfer_delay` | Admin | `delay_seconds: u64` | — | Set the delay (minimum 3,600 seconds; panics below). |
+
+#### Emergency Controls
+
+| Function | Auth | Parameters | Returns | Description |
+|---|---|---|---|---|
+| `pause` | Pauser | `caller: Address` | — | Pause all state-changing operations. |
+| `unpause` | Pauser | `caller: Address` | — | Resume operations. |
+
 ### learn-token
 
 #### Initialization
@@ -527,7 +551,7 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `mint_credential` | Admin + Learner | `to: Address, course_id: Symbol, score: u32, metadata_uri: Symbol` | `u64` | Mint a credential NFT. Score-gated (>=50) and verified on-chain. |
+| `mint_credential` | Minter + Learner | `caller: Address, to: Address, course_id: Symbol, score: u32, metadata_uri: Symbol` | `u64` | Mint a credential NFT. Score-gated (>=50) and verified on-chain. |
 | `verify_credential` | — | `credential_id: u64` | `CredentialInfo` | Verify a credential and return its info. |
 | `verify_credential_with_display` | — | `credential_id: u64` | `CredentialVerification` | Verify with optional display properties. |
 | `revoke_credential` | Admin | `credential_id: u64` | — | Revoke a credential. |
@@ -571,6 +595,12 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 |---|---|---|---|---|
 | `admin` | — | — | `Address` | Admin address. |
 | `progress_tracker` | — | — | `Address` | Progress-tracker address. |
+| `has_role` | — | `role: AdminRole, address: Address` | `bool` | Check role assignment. |
+| `grant_role` | Admin | `caller: Address, role: AdminRole, address: Address` | — | Grant a role. |
+| `revoke_role` | Admin | `caller: Address, role: AdminRole, address: Address` | — | Revoke a role. |
+| `upgrade` | Admin | `caller: Address, new_wasm_hash: BytesN<32>` | — | Upgrade contract WASM. |
+| `wasm_hash` | — | — | `Option<BytesN<32>>` | Current WASM hash. |
+| `upgrade_version` | — | — | `u32` | Number of upgrades performed. |
 | `transfer_admin` | Admin | `new_admin: Address` | — | Initiate delayed admin transfer. |
 | `accept_admin` | Pending | — | — | Accept admin role after delay. |
 | `cancel_admin_transfer` | Admin | — | — | Cancel pending admin transfer. |
@@ -585,8 +615,8 @@ that matters (e.g. each voter) before its balance changes, (3) read with `balanc
 
 | Function | Auth | Parameters | Returns | Description |
 |---|---|---|---|---|
-| `emergency_pause` | Admin | — | — | Pause all state-changing operations. |
-| `unpause` | Admin | — | — | Resume operations. |
+| `pause` | Pauser | `caller: Address` | — | Pause all state-changing operations. |
+| `unpause` | Pauser | `caller: Address` | — | Resume operations. |
 
 ## Data Types
 

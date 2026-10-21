@@ -8,12 +8,12 @@ This document describes the security model, trust boundaries, threat model, and 
 
 ChainLearn uses role-based access control with the following roles:
 
-| Role | Permissions | Functions |
-|------|-------------|-----------|
-| **Admin** | Full administrative access | `initialize`, `transfer_admin`, `pause`, `unpause`, `upgrade` |
-| **Minter** | Token minting | `mint` (learn-token only) |
-| **Pauser** | Emergency pause/unpause | `pause`, `unpause` |
-| **User** | Standard operations | `enroll`, `complete_module`, `submit_quiz_score`, `claim_reward` |
+| Role       | Permissions                | Functions                                                        |
+| ---------- | -------------------------- | ---------------------------------------------------------------- |
+| **Admin**  | Full administrative access | `initialize`, `transfer_admin`, `pause`, `unpause`, `upgrade`    |
+| **Minter** | Token minting              | `mint` (learn-token only)                                        |
+| **Pauser** | Emergency pause/unpause    | `pause`, `unpause`                                               |
+| **User**   | Standard operations        | `enroll`, `complete_module`, `submit_quiz_score`, `claim_reward` |
 
 ### Authorization Patterns
 
@@ -74,7 +74,7 @@ graph TD
 graph TD
     subgraph Internal Trust Boundary
         Tracker(progress-tracker <br> Source of Truth)
-        
+
         Token(learn-token <br> Reward Minter) -->|verified reads| Tracker
         NFT(credential-nft <br> Credential Minter) -->|verified reads| Tracker
     end
@@ -87,6 +87,7 @@ graph TD
 **Threat**: Attacker mints tokens without completing quizzes.
 
 **Mitigation**:
+
 - `claim_reward` queries `progress-tracker.get_quiz_score()` directly
 - Score cannot be supplied by the caller
 - Each quiz can only be claimed once per learner
@@ -102,6 +103,7 @@ let reward_amount = (score as i128) * BASE_REWARD_PER_POINT;
 **Threat**: Attacker mints credential without course completion.
 
 **Mitigation**:
+
 - `mint_credential` calls `progress-tracker.is_eligible_for_credential()`
 - Score must match `progress-tracker.get_course_score()` exactly
 - One credential per learner per course
@@ -123,6 +125,7 @@ if score != verified_score {
 **Threat**: Learner claims reward multiple times for same quiz.
 
 **Mitigation**:
+
 - `RewardClaimed(learner, course_id, quiz_id)` flag set after first claim
 - Subsequent claims rejected with "reward already claimed"
 
@@ -131,6 +134,7 @@ if score != verified_score {
 **Threat**: Attacker replays old transactions.
 
 **Mitigation**:
+
 - Stellar transaction sequence numbers prevent replay
 - Allowance expiration via `expiration_ledger`
 - Admin transfer delay prevents immediate key compromise exploitation
@@ -140,6 +144,7 @@ if score != verified_score {
 **Threat**: Attacker front-runs allowance changes.
 
 **Mitigation**:
+
 - `increase_allowance` adds to existing allowance (no reset window)
 - Allowances have expiration ledgers
 
@@ -148,6 +153,7 @@ if score != verified_score {
 **Threat**: Admin inflates token supply beyond safe limits.
 
 **Mitigation**:
+
 - `max_supply` cap enforced on every mint
 - `set_max_supply` limited to 2x increase per update
 - Cannot reduce below current circulating supply
@@ -165,6 +171,7 @@ if new_max_supply > max_allowed {
 **Threat**: Attacker gains control of admin key.
 
 **Mitigation**:
+
 - **Delayed admin transfer**: 48-hour delay (172,800 seconds) before new admin can accept
 - **Cancel window**: Current admin can cancel pending transfer
 - **Multi-sig for critical ops**: Upgrades require two admin signatures
@@ -175,10 +182,105 @@ if new_max_supply > max_allowed {
 **Threat**: Malicious contract upgrade.
 
 **Mitigation**:
+
 - Multi-sig required for upgrades
 - State preserved across upgrades (only wasm replaced)
 - Upgrade version tracked on-chain
 - Wasm hash stored for verification
+
+### 9. Governance: Flash-Loan Voting
+
+**Threat**: Attacker uses flash-loaned tokens to vote with inflated voting power, then repays loan before transaction ends.
+
+**Mitigation**:
+
+- Voting power determined by snapshot-based balance (historical checkpoint)
+- Attacker cannot use flash-loaned tokens acquired after snapshot was taken
+- Snapshot captures voting power at a fixed block height before voting period begins
+
+```rust
+// Voting power from snapshot, not current balance
+let voting_power = get_snapshot_balance(&env, &voter, snapshot_block);
+// Flash-loaned balance acquired after snapshot has no voting rights
+```
+
+### 10. Governance: Snapshot Front-Running
+
+**Threat**: Attacker front-runs snapshot proposal to acquire tokens or transfer voting power.
+
+**Mitigation**:
+
+- Snapshot creation restricted to admin-only operations
+- Non-admin callers cannot trigger snapshot at arbitrary times
+- Snapshot time is predetermined and announced in advance
+- No user input controls snapshot timing
+
+```rust
+// Only admin can create snapshot
+admin.require_auth();
+if !is_admin(&env, &caller) {
+    panic!("snapshot creation requires admin authorization");
+}
+```
+
+### 11. Governance: Proposal Manipulation
+
+**Threat**: Attacker creates frivolous proposals or manipulates voting by extending voting window indefinitely.
+
+**Mitigation**:
+
+- Voting period has fixed duration (time-bounded voting window)
+- Proposal creation has minimum collateral requirement
+- Voting window closes automatically after deadline
+- Proposal parameters (duration, quorum) set at proposal creation and cannot be changed
+
+```rust
+// Fixed voting deadline prevents indefinite voting
+let voting_deadline = current_time + VOTING_PERIOD;
+if current_time > voting_deadline {
+    panic!("voting period has expired");
+}
+```
+
+### 12. Vesting: Cliff Bypass
+
+**Threat**: Attacker claims vested tokens before cliff period has elapsed.
+
+**Mitigation**:
+
+- Vesting cliff enforced via timestamp comparison
+- Claimed amount set to zero if current time is before cliff time
+- Timestamp checked on-chain before any token transfer occurs
+
+```rust
+// Cliff check prevents early claims
+if current_time < vesting_cliff {
+    return 0; // No tokens available before cliff
+}
+let claimable = calculate_vested_amount(vesting_start, vesting_cliff, vesting_end, current_time);
+```
+
+### 13. Vesting: Double-Claim
+
+**Threat**: Learner claims vested tokens multiple times for the same vesting period.
+
+**Mitigation**:
+
+- `claimed_amount` tracked per beneficiary
+- Each claim updates `claimed_amount` to reflect new total claimed
+- Subsequent claims only release tokens beyond previously claimed amount
+- Contract maintains idempotent state of cumulative claims
+
+```rust
+// claimed_amount prevents double-claiming
+let previously_claimed = get_claimed_amount(&env, &beneficiary, &vesting_id);
+let total_vested = calculate_total_vested(...);
+let claimable = total_vested - previously_claimed;
+if claimable > 0 {
+    transfer_tokens(&env, &beneficiary, claimable);
+    update_claimed_amount(&env, &beneficiary, &vesting_id, total_vested);
+}
+```
 
 ## Mitigation Strategies
 

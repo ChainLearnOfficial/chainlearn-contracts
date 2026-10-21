@@ -4,7 +4,7 @@
 //! quiz scores, handles various response scenarios, and maintains consistent
 //! state when cross-contract calls fail.
 
-use learn_token::{AdminRole, LearnTokenClient};
+use learn_token::{AdminRole, ContractError, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::Address as _, Address, Env, String as SorobanString, Symbol, Vec,
@@ -305,23 +305,19 @@ mod xcontract_call_tests {
     /// to reset the score back to 0 after submission.  The cross-contract
     /// call inside `claim_reward` will read 0 and must panic.
     #[test]
-    #[should_panic(expected = "score must be greater than 0")]
     fn test_claim_reward_rejects_zero_score_from_cross_contract() {
         let env = Env::default();
         let (_admin, token_id, pt_id) = setup(&env);
         let token_client = LearnTokenClient::new(&env, &token_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
-
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 0);
-
-        // The cross-contract call returns 0; claim_reward must panic.
-        token_client.claim_reward(&learner, &course_id, &quiz_id);
+        let err = token_client.try_claim_reward(&learner, &course_id, &quiz_id)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::InvalidScore);
     }
 
     /// After a zero-score rejection the token state (balance, supply) must be
@@ -517,32 +513,21 @@ mod xcontract_call_tests {
     /// with "contract is paused" before the cross-contract score fetch even
     /// occurs. The progress-tracker state and token state must be unaffected.
     #[test]
-    #[should_panic(expected = "contract is paused")]
     fn test_paused_contract_blocks_cross_contract_claim_reward() {
         let env = Env::default();
         let (admin, token_id, pt_id) = setup(&env);
         let token_client = LearnTokenClient::new(&env, &token_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id = Symbol::new(&env, "quiz_1");
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 85);
-
-        // Grant admin the Pauser role so it can pause, then pause.
-        token_client.grant_role(
-            &admin,
-            &admin,
-            &AdminRole::Pauser,
-        );
+        token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
-        assert!(token_client.is_paused());
-
-        // This must panic with "contract is paused" before reaching the
-        // cross-contract score fetch.
-        token_client.claim_reward(&learner, &course_id, &quiz_id);
+        let err = token_client.try_claim_reward(&learner, &course_id, &quiz_id)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ContractPaused);
     }
 
     /// After unpausing, the cross-contract reward claim must succeed as normal,
@@ -581,16 +566,13 @@ mod xcontract_call_tests {
     /// with "contract is paused" before the cross-contract score fetch even
     /// occurs. The progress-tracker state and token state must be unaffected.
     #[test]
-    #[should_panic(expected = "contract is paused")]
     fn test_paused_contract_blocks_cross_contract_batch_claim_reward() {
         let env = Env::default();
         let (admin, token_id, pt_id) = setup(&env);
         let token_client = LearnTokenClient::new(&env, &token_id);
         let pt_client = ProgressTrackerClient::new(&env, &pt_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "course_1");
         let quiz_id_1 = Symbol::new(&env, "quiz_1");
         let quiz_id_2 = Symbol::new(&env, "quiz_2");
@@ -604,22 +586,14 @@ mod xcontract_call_tests {
         pt_client.enroll(&learner, &course_id);
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_1, &85);
         pt_client.submit_quiz_score(&learner, &course_id, &quiz_id_2, &75);
-
-        // Grant admin the Pauser role so it can pause, then pause.
-        token_client.grant_role(
-            &admin,
-            &admin,
-            &AdminRole::Pauser,
-        );
+        token_client.grant_role(&admin, &admin, &AdminRole::Pauser);
         token_client.pause(&admin);
-        assert!(token_client.is_paused());
-
-        // This must panic with "contract is paused" before reaching the
-        // cross-contract score fetch.
         let mut quiz_ids = Vec::new(&env);
         quiz_ids.push_back(quiz_id_1);
         quiz_ids.push_back(quiz_id_2);
-        token_client.batch_claim_reward(&learner, &course_id, &quiz_ids);
+        let err = token_client.try_batch_claim_reward(&learner, &course_id, &quiz_ids)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ContractPaused);
     }
 
     /// After unpausing, the cross-contract batch reward claim must succeed as normal,

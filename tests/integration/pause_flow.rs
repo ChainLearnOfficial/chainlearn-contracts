@@ -18,7 +18,7 @@ use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Into
 /// Unpause restores all operations. Read-only functions still work.
 /// Pause/unpause events are emitted.
 #[test]
-fn test_token_emergency_pause_prevents_state_changes() {
+fn test_token_pause_prevents_state_changes() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
     let admin = &setup.admin;
@@ -101,9 +101,10 @@ fn test_token_emergency_pause_prevents_state_changes() {
 /// Pause prevents enrollment, module completion, and quiz submissions.
 /// Unpause restores operations. Read-only functions still work.
 #[test]
-fn test_progress_tracker_emergency_pause() {
+fn test_progress_tracker_pause() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
+    let admin = &setup.admin;
     let learner = &setup.learner;
     env.mock_all_auths();
 
@@ -113,7 +114,7 @@ fn test_progress_tracker_emergency_pause() {
     let course_id = fixtures::create_sample_course(env, &progress_client);
 
     // ── Pause ──
-    progress_client.emergency_pause();
+    progress_client.pause(admin);
 
     // ── Enrollment reverts when paused ──
     let new_learner = Address::generate(env);
@@ -126,9 +127,9 @@ fn test_progress_tracker_emergency_pause() {
 
     // ── Module completion reverts when paused ──
     // Enroll a learner before pausing so we can test complete_module.
-    progress_client.unpause();
+    progress_client.unpause(admin);
     progress_client.enroll(learner, &course_id);
-    progress_client.emergency_pause();
+    progress_client.pause(admin);
     assert!(progress_client
         .try_complete_module(learner, &course_id, &Symbol::new(env, "mod_basics"))
         .is_err());
@@ -147,7 +148,7 @@ fn test_progress_tracker_emergency_pause() {
     assert_eq!(progress.overall_progress, 0);
 
     // ── Unpause ──
-    progress_client.unpause();
+    progress_client.unpause(admin);
 
     // ── Operations resume ──
     progress_client.complete_module(learner, &course_id, &Symbol::new(env, "mod_basics"));
@@ -160,7 +161,7 @@ fn test_progress_tracker_emergency_pause() {
 /// Pause prevents minting, revoking, and renewing credentials.
 /// Unpause restores operations. Read-only functions still work.
 #[test]
-fn test_credential_nft_emergency_pause() {
+fn test_credential_nft_pause() {
     let setup = setup_chainlearn_env();
     let env = &setup.env;
     let learner = &setup.learner;
@@ -184,15 +185,16 @@ fn test_credential_nft_emergency_pause() {
 
     // Mint a credential before pausing so we can test revoke.
     let uri = Symbol::new(env, "ipfs_meta");
-    let cred_id = credential_client.mint_credential(learner, &course_id, &85, &uri);
+    let admin = &setup.admin;
+    let cred_id = credential_client.mint_credential(admin, learner, &course_id, &85, &uri);
 
     // ── Pause ──
-    credential_client.emergency_pause();
+    credential_client.pause(admin);
 
     // ── Minting reverts when paused ──
     let new_learner = Address::generate(env);
     assert!(credential_client
-        .try_mint_credential(&new_learner, &course_id, &85, &uri)
+        .try_mint_credential(admin, &new_learner, &course_id, &85, &uri)
         .is_err());
 
     // ── Revoking reverts when paused ──
@@ -208,7 +210,7 @@ fn test_credential_nft_emergency_pause() {
     assert_eq!(credential_client.get_credential_count(learner), 1);
 
     // ── Unpause ──
-    credential_client.unpause();
+    credential_client.unpause(admin);
 
     // ── Operations resume ──
     let course_id2 = Symbol::new(env, "rust_102");
@@ -221,7 +223,7 @@ fn test_credential_nft_emergency_pause() {
     progress_client.complete_module(learner, &course_id2, &Symbol::new(env, "mod_3"));
     progress_client.submit_quiz_score(learner, &course_id2, &Symbol::new(env, "quiz_2"), &85);
 
-    let new_cred_id = credential_client.mint_credential(learner, &course_id2, &85, &uri);
+    let new_cred_id = credential_client.mint_credential(admin, learner, &course_id2, &85, &uri);
     assert_eq!(new_cred_id, cred_id + 1);
 
     credential_client.revoke_credential(&cred_id);

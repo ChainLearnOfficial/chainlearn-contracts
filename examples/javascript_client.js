@@ -205,6 +205,9 @@ async function mintCredential(adminKeypair, learnerKeypair) {
     credentialNftId,
     "mint_credential",
     [
+      new StellarSdk.nativeToScVal(adminKeypair.publicKey(), {
+        type: "address",
+      }), // caller (Minter or Admin)
       new StellarSdk.nativeToScVal(learnerKeypair.publicKey(), {
         type: "address",
       }),

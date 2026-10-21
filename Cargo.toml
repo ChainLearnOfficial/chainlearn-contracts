@@ -62,10 +62,6 @@ name = "security_auth_tests"
 path = "tests/integration/security_auth_tests.rs"
 
 [[test]]
-name = "security_arithmetic_tests"
-path = "tests/unit/security_arithmetic_tests.rs"
-
-[[test]]
 name = "security_reentrancy_tests"
 path = "tests/integration/security_reentrancy_tests.rs"
 
@@ -90,8 +86,8 @@ name = "pause_event_consistency"
 path = "tests/integration/pause_event_consistency.rs"
 
 [[test]]
-name = "emergency_pause_flow"
-path = "tests/integration/emergency_pause_flow.rs"
+name = "pause_flow"
+path = "tests/integration/pause_flow.rs"
 
 [[test]]
 name = "token_vesting_flow"

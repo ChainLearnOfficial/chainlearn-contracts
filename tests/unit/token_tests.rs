@@ -1,6 +1,6 @@
 //! Unit tests for the learn-token contract.
 
-use learn_token::{ClaimRecord, LearnToken, LearnTokenClient};
+use learn_token::{ClaimRecord, ContractError, LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -286,7 +286,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "maximum supply cap exceeded")]
     fn test_mint_beyond_max_supply_panics() {
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -309,7 +308,9 @@ mod token_unit_tests {
         env.mock_all_auths();
 
         client.mint(&admin, &user, &3000);
-        client.mint(&admin, &user, &2001);
+        let err = client.try_mint(&admin, &user, &2001)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
     #[test]
@@ -476,7 +477,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot mint to zero address")]
     fn test_mint_to_zero_address_panics() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -487,7 +487,9 @@ mod token_unit_tests {
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         ));
-        client.mint(&admin, &zero_address, &1000);
+        let err = client.try_mint(&admin, &zero_address, &1000)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ZeroAddress);
     }
 
     #[test]
@@ -676,7 +678,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "maximum supply cap exceeded")]
     fn test_security_mint_supply_overflow_reverts() {
         let env = Env::default();
         let (admin, contract_id, _pt_contract_id) = setup_token_with_max_supply(&env, i128::MAX);
@@ -685,17 +686,12 @@ mod token_unit_tests {
         let user = Address::generate(&env);
         env.mock_all_auths();
 
-        // Fill supply right up to the cap: current_supply becomes i128::MAX,
-        // which does not overflow (i128::MAX + 0 offset is representable).
         client.mint(&admin, &user, &i128::MAX);
         assert_eq!(client.total_supply(), i128::MAX);
 
-        // One more token would push `current_supply + amount` past
-        // i128::MAX. `mint` guards this with `checked_add` rather than a
-        // raw `+`, so the overflow itself never happens — it surfaces as
-        // the same clear, domain-specific panic as an ordinary cap breach
-        // instead of a raw arithmetic trap.
-        client.mint(&admin, &user, &1);
+        let err = client.try_mint(&admin, &user, &1)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
     #[test]
@@ -891,7 +887,7 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "no snapshot available at specified ledger")]
+    #[test]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -910,11 +906,13 @@ mod token_unit_tests {
         );
         env.ledger().with_mut(|l| l.timestamp = 500);
 
-        client.vote(&voter, &proposal_id, &0);
+        let err = client.try_vote(&voter, &proposal_id, &0)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::NotAuthorized);
     }
 
     #[test]
-    #[should_panic(expected = "snapshot_ledger must be earlier than the current ledger")]
+    #[test]
     fn test_create_proposal_rejects_current_or_future_snapshot_ledger() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -922,34 +920,35 @@ mod token_unit_tests {
         env.mock_all_auths();
         env.ledger().with_mut(|l| l.sequence_number = 100);
 
-        client.create_proposal(
+        let err = client.try_create_proposal(
             &SorobanString::from_str(&env, "Future snapshot"),
             &2,
             &0,
             &1_000,
             &100,
-        );
+        ).err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ExpirationInPast);
     }
 
     #[test]
-    #[should_panic(expected = "contract is paused")]
+    #[test]
     fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
         client.pause(&admin);
-        client.create_proposal(
+        let err = client.try_create_proposal(
             &SorobanString::from_str(&env, "Paused proposal"),
             &2,
             &0,
             &100,
             &env.ledger().sequence(),
-        );
+        ).err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ContractPaused);
     }
 
     #[test]
-    #[should_panic(expected = "contract is paused")]
     fn test_vote_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -970,11 +969,13 @@ mod token_unit_tests {
             &snap_seq,
         );
         client.pause(&admin);
-        client.vote(&voter, &proposal_id, &0);
+        let err = client.try_vote(&voter, &proposal_id, &0)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ContractPaused);
     }
 
     #[test]
-    #[should_panic(expected = "contract is paused")]
+    #[test]
     fn test_execute_proposal_fails_while_paused() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -993,7 +994,9 @@ mod token_unit_tests {
         );
         env.ledger().with_mut(|ledger| ledger.timestamp = 100);
         client.pause(&admin);
-        client.execute_proposal(&proposal_id);
+        let err = client.try_execute_proposal(&proposal_id)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ContractPaused);
     }
 
     #[test]
@@ -1029,13 +1032,14 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin transfer delay is below the minimum")]
     fn test_admin_transfer_delay_rejects_zero() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
-        client.set_admin_transfer_delay(&0);
+        let err = client.try_set_admin_transfer_delay(&0)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::NegativeAmount);
     }
 
     #[test]
@@ -1049,13 +1053,14 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin transfer delay is below the minimum")]
     fn test_admin_transfer_delay_rejects_below_one_hour() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
-        client.set_admin_transfer_delay(&3_599);
+        let err = client.try_set_admin_transfer_delay(&3_599)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::NegativeAmount);
     }
 
     #[test]
@@ -1119,69 +1124,49 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "cliff not reached")]
     fn test_vesting_cliff_enforced() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let beneficiary = Address::generate(&env);
-
         env.mock_all_auths();
-
-        env.ledger().with_mut(|l| {
-            l.timestamp = 0;
-        });
-
+        env.ledger().with_mut(|l| l.timestamp = 0);
         client.create_vesting(&beneficiary, &10_000, &100, &1_000);
-
-        // Advance to timestamp 50 (cliff is 100)
-        env.ledger().with_mut(|l| {
-            l.timestamp = 50;
-        });
-
-        client.claim_vested(&beneficiary);
+        env.ledger().with_mut(|l| l.timestamp = 50);
+        let err = client.try_claim_vested(&beneficiary)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ExpirationInPast);
     }
 
     #[test]
-    #[should_panic(expected = "vesting schedule fully claimed")]
     fn test_vesting_claiming_after_exhausted_panics() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         let beneficiary = Address::generate(&env);
-
         env.mock_all_auths();
-
-        env.ledger().with_mut(|l| {
-            l.timestamp = 0;
-        });
-
+        env.ledger().with_mut(|l| l.timestamp = 0);
         client.create_vesting(&beneficiary, &10_000, &100, &1_000);
-
-        env.ledger().with_mut(|l| {
-            l.timestamp = 1100;
-        });
-
+        env.ledger().with_mut(|l| l.timestamp = 1100);
         client.claim_vested(&beneficiary);
         assert_eq!(client.balance(&beneficiary), 10_000);
-
-        // Attempting to claim again after schedule is exhausted must panic
-        client.claim_vested(&beneficiary);
+        let err = client.try_claim_vested(&beneficiary)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
     #[test]
-    #[should_panic(expected = "vesting amount exceeds remaining supply capacity")]
     fn test_vesting_rejects_amount_above_remaining_supply() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token_with_max_supply(&env, 1_000);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
-
         let minted = Address::generate(&env);
         client.mint(&admin, &minted, &600);
-
         let beneficiary = Address::generate(&env);
-        client.create_vesting(&beneficiary, &401, &0, &1_000);
+        let err = client.try_create_vesting(&beneficiary, &401, &0, &1_000)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
     // ── Issue #241: admin transfer delay ─────────────────────────────────────
@@ -1601,27 +1586,27 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "snapshot ledger must match the current ledger")]
     fn test_snapshot_marker_cannot_be_backdated() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
         env.ledger().with_mut(|l| l.sequence_number = 100);
-
-        client.snapshot(&99);
+        let err = client.try_snapshot(&99)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ExpirationInPast);
     }
 
     #[test]
-    #[should_panic(expected = "snapshot ledger must match the current ledger")]
     fn test_balance_snapshot_cannot_be_backdated() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
         env.mock_all_auths();
         env.ledger().with_mut(|l| l.sequence_number = 100);
-
-        client.record_balance_snapshot(&Address::generate(&env), &99);
+        let err = client.try_record_balance_snapshot(&Address::generate(&env), &99)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::ExpirationInPast);
     }
 
     #[test]
@@ -1839,7 +1824,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "maximum supply cap exceeded")]
     fn test_claim_vested_over_supply_cap_panics() {
         let env = Env::default();
         let (_admin, client) = setup_vesting(&env, 10_000);
@@ -1847,18 +1831,20 @@ mod token_unit_tests {
         client.create_vesting(&beneficiary, &10_000, &0, &100);
         client.set_max_supply(&9_999);
         env.ledger().with_mut(|l| l.timestamp = 100);
-
-        client.claim_vested(&beneficiary);
+        let err = client.try_claim_vested(&beneficiary)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
     #[test]
-    #[should_panic(expected = "vesting amount exceeds remaining supply capacity")]
     fn test_vesting_remaining_supply_check_near_i128_max() {
         let env = Env::default();
         let (admin, client) = setup_vesting(&env, i128::MAX);
         client.mint(&admin, &admin, &(i128::MAX - 10));
         let beneficiary = Address::generate(&env);
-        client.create_vesting(&beneficiary, &11, &0, &100);
+        let err = client.try_create_vesting(&beneficiary, &11, &0, &100)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::MaxSupplyExceeded);
     }
 
     // ── #522: SEP-41 burn_from unit tests ───────────────────────────────────
@@ -2305,19 +2291,18 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "decrease exceeds allowance")]
     fn test_decrease_allowance_underflow_panics() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
         let client = LearnTokenClient::new(&env, &contract_id);
-
         let owner = Address::generate(&env);
         let spender = Address::generate(&env);
         env.mock_all_auths();
-
         let exp = env.ledger().sequence() + 1000;
         client.approve(&owner, &spender, &50, &exp);
-        client.decrease_allowance(&owner, &spender, &51);
+        let err = client.try_decrease_allowance(&owner, &spender, &51)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::InsufficientAllowance);
     }
 
     #[test]

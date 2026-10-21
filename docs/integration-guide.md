@@ -32,18 +32,15 @@ let client = soroban_sdk::contractclient!(<ContractName>Client);
 ### JavaScript/TypeScript Integration
 
 ```typescript
-import * as SorobanClient from '@stellar/stellar-sdk';
+import * as SorobanClient from "@stellar/stellar-sdk";
 
 // Connect to Soroban RPC
 const server = new SorobanClient.SorobanRpc.Server(
-  'https://soroban-testnet.stellar.org:443'
+  "https://soroban-testnet.stellar.org:443",
 );
 
 // Load contract
-const contract = new SorobanClient.Contract(
-  '<CONTRACT_ID>',
-  server
-);
+const contract = new SorobanClient.Contract("<CONTRACT_ID>", server);
 ```
 
 ## Contract Interaction Patterns
@@ -66,11 +63,11 @@ client.create_course(
 ```typescript
 // TypeScript
 await contract.createCourse({
-  course_id: 'rust_101',
+  course_id: "rust_101",
   total_modules: 3,
   total_quizzes: 2,
-  module_ids: ['mod_basics', 'mod_ownership', 'mod_traits'],
-  quiz_ids: ['quiz_1', 'quiz_2'],
+  module_ids: ["mod_basics", "mod_ownership", "mod_traits"],
+  quiz_ids: ["quiz_1", "quiz_2"],
 });
 ```
 
@@ -85,7 +82,7 @@ client.enroll(&learner, &course_id);
 // TypeScript
 await contract.enroll({
   learner: learnerAddress,
-  course_id: 'rust_101',
+  course_id: "rust_101",
 });
 ```
 
@@ -100,8 +97,8 @@ client.complete_module(&learner, &course_id, &module_id);
 // TypeScript
 await contract.completeModule({
   learner: learnerAddress,
-  course_id: 'rust_101',
-  module_id: 'mod_basics',
+  course_id: "rust_101",
+  module_id: "mod_basics",
 });
 ```
 
@@ -116,8 +113,8 @@ client.submit_quiz_score(&learner, &course_id, &quiz_id, &score);
 // TypeScript
 await contract.submitQuizScore({
   learner: learnerAddress,
-  course_id: 'rust_101',
-  quiz_id: 'quiz_1',
+  course_id: "rust_101",
+  quiz_id: "quiz_1",
   score: 85,
 });
 ```
@@ -135,7 +132,7 @@ println!("Eligible: {}", progress.eligible_for_credential);
 // TypeScript
 const progress = await contract.getProgress({
   learner: learnerAddress,
-  course_id: 'rust_101',
+  course_id: "rust_101",
 });
 console.log(`Progress: ${progress.overall_progress}%`);
 console.log(`Eligible: ${progress.eligible_for_credential}`);
@@ -154,8 +151,8 @@ client.claim_reward(&learner, &course_id, &quiz_id);
 // TypeScript
 await contract.claimReward({
   learner: learnerAddress,
-  course_id: 'rust_101',
-  quiz_id: 'quiz_1',
+  course_id: "rust_101",
+  quiz_id: "quiz_1",
 });
 ```
 
@@ -171,8 +168,8 @@ println!("Claimed {} rewards", successful.len());
 // TypeScript
 const successful = await contract.batchClaimReward({
   learner: learnerAddress,
-  course_id: 'rust_101',
-  quiz_ids: ['quiz_1', 'quiz_2', 'quiz_3'],
+  course_id: "rust_101",
+  quiz_ids: ["quiz_1", "quiz_2", "quiz_3"],
 });
 ```
 
@@ -192,8 +189,8 @@ if estimate.would_succeed {
 // TypeScript
 const estimate = await contract.estimateClaimGas({
   learner: learnerAddress,
-  course_id: 'rust_101',
-  quiz_id: 'quiz_1',
+  course_id: "rust_101",
+  quiz_id: "quiz_1",
 });
 if (estimate.would_succeed) {
   console.log(`Estimated reward: ${estimate.estimated_reward}`);
@@ -216,11 +213,12 @@ console.log(`Balance: ${balance} tokens`);
 
 ### 3. Credential NFT
 
-#### Mint Credential (Admin)
+#### Mint Credential (Minter)
 
 ```rust
 // Rust
 let credential_id = client.mint_credential(
+    &admin,       // caller (Minter or Admin)
     &learner,
     &course_id,
     &score,
@@ -231,10 +229,11 @@ let credential_id = client.mint_credential(
 ```typescript
 // TypeScript
 const credentialId = await contract.mintCredential({
+  caller: adminAddress,   // Minter or Admin
   to: learnerAddress,
-  course_id: 'rust_101',
+  course_id: "rust_101",
   score: 85,
-  metadata_uri: 'ipfs://Qm...',
+  metadata_uri: "ipfs://Qm...",
 });
 ```
 
@@ -285,7 +284,9 @@ let is_valid = client.is_credential_valid(&credential_id);
 
 ```typescript
 // TypeScript
-const isValid = await contract.isCredentialValid({ credential_id: credentialId });
+const isValid = await contract.isCredentialValid({
+  credential_id: credentialId,
+});
 ```
 
 ### 4. Admin Transfer (Two-Step Handover)
@@ -306,14 +307,14 @@ contract.cancel_admin_transfer();
 contract.accept_admin();
 ```
 
-| Function | Auth | Returns | Description |
-|---|---|---|---|
-| `transfer_admin` | Admin | — | Record `new_admin` as pending; does not transfer. |
-| `accept_admin` | Pending | — | Complete the transfer once the delay has elapsed. |
-| `cancel_admin_transfer` | Admin | — | Clear the pending transfer. |
-| `pending_admin` | — | `Option<PendingAdminTransfer>` | Inspect the in-flight transfer. |
-| `admin_transfer_delay` | — | `u64` | Current delay in seconds. |
-| `set_admin_transfer_delay` | Admin | — | Set the delay for future transfers (minimum 3,600 seconds). |
+| Function                   | Auth    | Returns                        | Description                                                 |
+| -------------------------- | ------- | ------------------------------ | ----------------------------------------------------------- |
+| `transfer_admin`           | Admin   | —                              | Record `new_admin` as pending; does not transfer.           |
+| `accept_admin`             | Pending | —                              | Complete the transfer once the delay has elapsed.           |
+| `cancel_admin_transfer`    | Admin   | —                              | Clear the pending transfer.                                 |
+| `pending_admin`            | —       | `Option<PendingAdminTransfer>` | Inspect the in-flight transfer.                             |
+| `admin_transfer_delay`     | —       | `u64`                          | Current delay in seconds.                                   |
+| `set_admin_transfer_delay` | Admin   | —                              | Set the delay for future transfers (minimum 3,600 seconds). |
 
 Notes for integrators:
 
@@ -337,21 +338,319 @@ Notes for integrators:
   `admin_transfer_cancelled` events to follow the lifecycle of one candidate.
   All three share the pending address in the second topic slot.
 
+### 5. Governance
+
+#### Create Proposal (Admin)
+
+```rust
+// Rust
+client.create_proposal(
+    &proposal_id,
+    &title,
+    &description,
+    &proposal_type,
+    &execution_data,
+);
+```
+
+```typescript
+// TypeScript
+await contract.createProposal({
+  proposal_id: "prop_001",
+  title: "Increase reward pool",
+  description: "Increase reward pool by 10%",
+  proposal_type: "parameter_change",
+  execution_data: Buffer.from("10"),
+});
+```
+
+#### Vote on Proposal
+
+```rust
+// Rust
+client.vote(
+    &voter,
+    &proposal_id,
+    &vote_type, // 'for' or 'against'
+);
+```
+
+```typescript
+// TypeScript
+await contract.vote({
+  voter: voterAddress,
+  proposal_id: "prop_001",
+  vote_type: "for",
+});
+```
+
+#### Execute Proposal (Admin)
+
+```rust
+// Rust
+client.execute_proposal(&proposal_id);
+```
+
+```typescript
+// TypeScript
+await contract.executeProposal({
+  proposal_id: "prop_001",
+});
+```
+
+#### Get Proposal Details
+
+```rust
+// Rust
+let proposal = client.get_proposal(&proposal_id);
+println!("Proposal: {}", proposal.title);
+println!("Votes For: {}", proposal.votes_for);
+println!("Votes Against: {}", proposal.votes_against);
+println!("Status: {}", proposal.status);
+```
+
+```typescript
+// TypeScript
+const proposal = await contract.getProposal({
+  proposal_id: "prop_001",
+});
+console.log(`Proposal: ${proposal.title}`);
+console.log(`Votes For: ${proposal.votes_for}`);
+console.log(`Status: ${proposal.status}`);
+```
+
+#### Check Voting Power (Snapshot-Based)
+
+```rust
+// Rust
+let voting_power = client.get_voting_power(&voter, &snapshot_block);
+println!("Voting power at snapshot: {}", voting_power);
+```
+
+```typescript
+// TypeScript
+const votingPower = await contract.getVotingPower({
+  voter: voterAddress,
+  snapshot_block: 123456,
+});
+console.log(`Voting power: ${votingPower}`);
+```
+
+#### Error Handling for Governance
+
+```rust
+// Rust
+match panic::catch_unwind(AssertUnwindSafe(|| {
+    client.vote(&voter, &proposal_id, &"for".to_string());
+})) {
+    Ok(_) => println!("Vote registered"),
+    Err(_) => println!("Vote failed - check proposal status or voting eligibility"),
+}
+```
+
+```typescript
+// TypeScript
+try {
+  await contract.vote({
+    voter: voterAddress,
+    proposal_id: "prop_001",
+    vote_type: "for",
+  });
+  console.log("Vote registered");
+} catch (error) {
+  if (error.message.includes("voting period expired")) {
+    console.error("Voting period has ended");
+  } else if (error.message.includes("insufficient voting power")) {
+    console.error("Insufficient voting power at snapshot");
+  } else {
+    console.error("Vote failed:", error.message);
+  }
+}
+```
+
+### 6. Vesting
+
+#### Create Vesting Schedule (Admin)
+
+```rust
+// Rust
+client.create_vesting_schedule(
+    &beneficiary,
+    &amount,
+    &start_time,
+    &cliff_time,
+    &end_time,
+);
+```
+
+```typescript
+// TypeScript
+await contract.createVestingSchedule({
+  beneficiary: beneficiaryAddress,
+  amount: "1000000",
+  start_time: Math.floor(Date.now() / 1000),
+  cliff_time: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
+  end_time: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // 1 year
+});
+```
+
+#### Claim Vested Tokens
+
+```rust
+// Rust
+client.claim_vested_tokens(&beneficiary, &vesting_id);
+```
+
+```typescript
+// TypeScript
+await contract.claimVestedTokens({
+  beneficiary: beneficiaryAddress,
+  vesting_id: "vest_001",
+});
+```
+
+#### Get Vesting Schedule Details
+
+```rust
+// Rust
+let schedule = client.get_vesting_schedule(&beneficiary, &vesting_id);
+println!("Total amount: {}", schedule.amount);
+println!("Cliff time: {}", schedule.cliff_time);
+println!("End time: {}", schedule.end_time);
+println!("Claimed so far: {}", schedule.claimed_amount);
+```
+
+```typescript
+// TypeScript
+const schedule = await contract.getVestingSchedule({
+  beneficiary: beneficiaryAddress,
+  vesting_id: "vest_001",
+});
+console.log(`Total amount: ${schedule.amount}`);
+console.log(`Claimed so far: ${schedule.claimed_amount}`);
+```
+
+#### Calculate Claimable Amount
+
+```rust
+// Rust
+let claimable = client.get_claimable_amount(&beneficiary, &vesting_id);
+println!("Claimable now: {}", claimable);
+```
+
+```typescript
+// TypeScript
+const claimable = await contract.getClaimableAmount({
+  beneficiary: beneficiaryAddress,
+  vesting_id: "vest_001",
+});
+console.log(`Claimable now: ${claimable}`);
+```
+
+#### Error Handling for Vesting
+
+```rust
+// Rust
+match panic::catch_unwind(AssertUnwindSafe(|| {
+    client.claim_vested_tokens(&beneficiary, &vesting_id);
+})) {
+    Ok(_) => println!("Tokens claimed"),
+    Err(_) => println!("Claim failed - check cliff time or insufficient vesting"),
+}
+```
+
+```typescript
+// TypeScript
+try {
+  await contract.claimVestedTokens({
+    beneficiary: beneficiaryAddress,
+    vesting_id: "vest_001",
+  });
+  console.log("Tokens claimed successfully");
+} catch (error) {
+  if (error.message.includes("cliff not reached")) {
+    console.error("Cliff period has not elapsed");
+  } else if (error.message.includes("no tokens available")) {
+    console.error("No vested tokens available to claim");
+  } else {
+    console.error("Claim failed:", error.message);
+  }
+}
+```
+
+### 7. Transfer Restrictions and Whitelist
+
+#### Transfer with Whitelist Check
+
+```rust
+// Rust
+client.transfer(&from, &to, &amount);
+// Transfer fails if recipient not on whitelist
+```
+
+```typescript
+// TypeScript
+try {
+  await contract.transfer({
+    from: senderAddress,
+    to: recipientAddress,
+    amount: "1000",
+  });
+  console.log("Transfer successful");
+} catch (error) {
+  if (error.message.includes("not on whitelist")) {
+    console.error("Recipient not on whitelist");
+  } else {
+    console.error("Transfer failed:", error.message);
+  }
+}
+```
+
+#### Add Address to Whitelist (Admin)
+
+```rust
+// Rust
+client.add_to_whitelist(&address);
+```
+
+```typescript
+// TypeScript
+await contract.addToWhitelist({
+  address: addressToWhitelist,
+});
+```
+
+#### Check Whitelist Status
+
+```rust
+// Rust
+let is_whitelisted = client.is_whitelisted(&address);
+println!("Whitelisted: {}", is_whitelisted);
+```
+
+```typescript
+// TypeScript
+const isWhitelisted = await contract.isWhitelisted({
+  address: addressToCheck,
+});
+console.log(`Whitelisted: ${isWhitelisted}`);
+```
+
 ## Error Handling
 
 ### Common Errors
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `"already enrolled"` | Learner already enrolled in course | Check enrollment status first |
-| `"module already completed"` | Module already marked complete | Use `get_progress` to check |
-| `"quiz already submitted"` | Quiz score already submitted | Use `get_quiz_score` to check |
-| `"reward already claimed"` | Reward already claimed for quiz | Use `is_reward_claimed` to check |
-| `"not authorized"` | Caller lacks required permissions | Ensure correct admin/user calling |
-| `"score exceeds maximum"` | Score > 100 | Keep score <= 100 |
-| `"course not found"` | Invalid course_id | Verify course exists |
-| `"insufficient balance"` | Not enough tokens | Check balance first |
-| `"credential not found"` | Invalid credential_id | Verify credential exists |
+| Error                        | Cause                              | Solution                          |
+| ---------------------------- | ---------------------------------- | --------------------------------- |
+| `"already enrolled"`         | Learner already enrolled in course | Check enrollment status first     |
+| `"module already completed"` | Module already marked complete     | Use `get_progress` to check       |
+| `"quiz already submitted"`   | Quiz score already submitted       | Use `get_quiz_score` to check     |
+| `"reward already claimed"`   | Reward already claimed for quiz    | Use `is_reward_claimed` to check  |
+| `"not authorized"`           | Caller lacks required permissions  | Ensure correct admin/user calling |
+| `"score exceeds maximum"`    | Score > 100                        | Keep score <= 100                 |
+| `"course not found"`         | Invalid course_id                  | Verify course exists              |
+| `"insufficient balance"`     | Not enough tokens                  | Check balance first               |
+| `"credential not found"`     | Invalid credential_id              | Verify credential exists          |
 
 ### Error Handling Pattern
 
@@ -374,12 +673,12 @@ match result {
 try {
   await contract.claimReward({
     learner: learnerAddress,
-    course_id: 'rust_101',
-    quiz_id: 'quiz_1',
+    course_id: "rust_101",
+    quiz_id: "quiz_1",
   });
-  console.log('Reward claimed successfully');
+  console.log("Reward claimed successfully");
 } catch (error) {
-  console.error('Failed to claim reward:', error.message);
+  console.error("Failed to claim reward:", error.message);
 }
 ```
 
@@ -441,6 +740,8 @@ client.batch_claim_reward(&learner, &course_id, &quiz_ids);
 
 ### 4. Event Monitoring
 
+#### Testing Environments (Rust)
+
 In testing environments, inspect emitted events with `env.events().all()`:
 
 ```rust
@@ -451,7 +752,93 @@ for event in all_events.iter() {
 }
 ```
 
-For off-chain indexers and client applications, poll or stream events using the Soroban RPC `getEvents` method with filters for topics such as `reward_claimed`, `credential_minted`, or `credential_eligible`.
+#### Client Applications - Polling Events
+
+For off-chain indexers and client applications, use the Soroban RPC `getEvents` method to poll for events:
+
+```rust
+// Rust: Poll for events using Soroban RPC
+use soroban_sdk::Address;
+
+let contract_id = Address::from_string(&env, "<CONTRACT_ID>");
+let rpc_url = "https://soroban-testnet.stellar.org:443";
+
+// Build a GetEventsRequest to query reward_claimed events
+// Note: Event filtering requires polling via RPC (no real-time subscription)
+```
+
+```typescript
+// TypeScript: Poll for events using SorobanRpc
+import * as StellarSdk from "@stellar/stellar-sdk";
+
+const server = new StellarSdk.SorobanRpc.Server(
+  "https://soroban-testnet.stellar.org:443",
+);
+
+// Query for reward_claimed events from the contract
+const events = await server.getEvents({
+  contractIds: ["CABC...XYZ"], // Contract address
+  filters: [
+    {
+      type: "contract",
+      contractIds: ["CABC...XYZ"],
+    },
+  ],
+  startLedger: 1000,
+  limit: 100,
+});
+
+// Process the events
+for (const event of events.events) {
+  console.log("Event:", event.event);
+  console.log("Ledger:", event.ledger);
+  console.log("Topics:", event.topics);
+  console.log("Value:", event.value);
+}
+```
+
+#### Polling Loop Example
+
+```typescript
+// TypeScript: Poll for events periodically
+import * as StellarSdk from "@stellar/stellar-sdk";
+
+const server = new StellarSdk.SorobanRpc.Server(
+  "https://soroban-testnet.stellar.org:443",
+);
+
+let lastLedger = 0;
+const contractId = "CABC...XYZ";
+
+async function pollForEvents() {
+  try {
+    const response = await server.getEvents({
+      contractIds: [contractId],
+      startLedger: lastLedger + 1,
+      limit: 100,
+    });
+
+    for (const event of response.events) {
+      console.log("New event:", {
+        type: event.event.type,
+        ledger: event.ledger,
+        topics: event.topics,
+        value: event.value,
+      });
+      lastLedger = event.ledger;
+    }
+  } catch (error) {
+    console.error("Failed to fetch events:", error);
+  }
+}
+
+// Poll every 5 seconds
+setInterval(pollForEvents, 5000);
+```
+
+#### Event Data Retention
+
+Note: Soroban RPC retains events for **7 days maximum**. For long-term event archival, store events in an off-chain database or indexer as you receive them.
 
 ### 5. Pagination
 
@@ -466,7 +853,7 @@ loop {
     let page = client.get_credentials_for(&learner, &start, &page_size);
     let page_len = page.len();
     all_credentials.extend(page);
-    
+
     if (page_len as u32) < page_size {
         break;
     }
@@ -517,10 +904,11 @@ fn learner_journey(
         token_client.claim_reward(learner, course_id, quiz_id);
     }
 
-    // 3. Mint credential (requires admin)
+    // 3. Mint credential (requires Minter or Admin)
     if tracker_client.is_eligible_for_credential(learner, course_id) {
         let score = tracker_client.get_course_score(learner, course_id);
         credential_client.mint_credential(
+            &admin,         // caller (Minter or Admin)
             learner,
             course_id,
             score,
