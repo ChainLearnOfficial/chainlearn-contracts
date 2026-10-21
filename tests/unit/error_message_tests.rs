@@ -6,7 +6,7 @@
 //! 3. Correctly identify the error type
 //! 4. Cover all error paths across all contracts
 
-use credential_nft::{CredentialNft, CredentialNftClient};
+use credential_nft::{ContractError as CredentialContractError, CredentialNft, CredentialNftClient};
 use learn_token::{ContractError, LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
@@ -199,38 +199,33 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "course does not exist")]
     fn test_credential_nft_nonexistent_course_error_message() {
         let env = Env::default();
         let (admin, contract_id, _tracker_id) = setup_credential_nft(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "nonexistent_course");
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
-
-        client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &85, &metadata_uri)
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, CredentialContractError::NotFound);
     }
 
     #[test]
-    #[should_panic(expected = "score 100 does not match verified score 85")]
     fn test_credential_nft_mismatched_score_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
-        
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
-
-        client.mint_credential(&admin, &learner, &course_id, &100, &uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &100, &uri)
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, CredentialContractError::InvalidScore);
     }
 
     #[test]
@@ -245,39 +240,34 @@ mod error_message_tests {
     }
 
     #[test]
-    #[should_panic(expected = "credential already revoked")]
     fn test_credential_nft_double_revoke_error_message() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_credential_nft(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
-        
         let pt_client = ProgressTrackerClient::new(&env, &tracker_id);
         create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &Symbol::new(&env, "quiz_1"), 85);
-
         let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &uri);
         client.revoke_credential(&cred_id);
-        client.revoke_credential(&cred_id);
+        let err = client.try_revoke_credential(&cred_id).err().expect("should fail").expect("typed error");
+        assert_eq!(err, CredentialContractError::AlreadyInitialized);
     }
 
     #[test]
-    #[should_panic(expected = "cannot transfer admin to zero address")]
     fn test_credential_nft_transfer_to_zero_address_error_message() {
         let env = Env::default();
         let (admin, contract_id, _tracker_id) = setup_credential_nft(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         env.mock_all_auths();
         let zero_address = Address::from_string(&SorobanString::from_str(
             &env,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         ));
-        client.transfer_admin(&zero_address);
+        let err = client.try_transfer_admin(&zero_address).err().expect("should fail").expect("typed error");
+        assert_eq!(err, CredentialContractError::NotAuthorized);
     }
 
     // ── Learn Token Error Message Tests ───────────────────────────────────

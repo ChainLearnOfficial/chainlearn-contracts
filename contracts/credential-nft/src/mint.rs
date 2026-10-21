@@ -4,20 +4,21 @@ use soroban_sdk::{Address, Env, Symbol, TryFromVal};
 
 use crate::metadata::{CredentialDataKey, CredentialInfo};
 use crate::xcall;
+use crate::ContractError;
 
 /// Validate that `metadata_uri` is non-empty, meets the minimum length (>= 8 characters),
 /// and starts with a recognized URI scheme (http, https, ipfs, or cert).
-pub fn validate_metadata_uri(env: &Env, metadata_uri: &Symbol) {
+pub fn validate_metadata_uri(env: &Env, metadata_uri: &Symbol) -> Result<(), ContractError> {
     let sstr = match SymbolStr::try_from_val(env, &metadata_uri.to_symbol_val()) {
         Ok(s) => s,
-        Err(_) => panic!("metadata_uri is malformed"),
+        Err(_) => return Err(ContractError::InvalidMetadataUri),
     };
     let uri: &str = sstr.as_ref();
     if uri.is_empty() {
-        panic!("metadata_uri cannot be empty");
+        return Err(ContractError::InvalidMetadataUri);
     }
     if uri.len() < 8 {
-        panic!("metadata_uri too short: minimum length is 8");
+        return Err(ContractError::InvalidMetadataUri);
     }
     let has_valid_scheme = uri.starts_with("ipfs_")
         || uri.starts_with("ipfs://")
@@ -28,8 +29,9 @@ pub fn validate_metadata_uri(env: &Env, metadata_uri: &Symbol) {
         || uri.starts_with("cert_")
         || uri.starts_with("cert://");
     if !has_valid_scheme {
-        panic!("metadata_uri is malformed: must start with a valid URI scheme");
+        return Err(ContractError::InvalidMetadataUri);
     }
+    Ok(())
 }
 
 /// Mint a new credential NFT for a learner.
@@ -63,22 +65,19 @@ pub fn mint_credential(
     course_id: &Symbol,
     score: u32,
     metadata_uri: &Symbol,
-) -> u64 {
+) -> Result<u64, ContractError> {
     // Metadata URI gate: must be non-empty, >= 8 chars, with a valid scheme
-    validate_metadata_uri(env, metadata_uri);
+    validate_metadata_uri(env, metadata_uri)?;
 
     // Score gate: only mint if score >= 50
     if score < MIN_CREDENTIAL_SCORE {
-        panic!(
-            "score {} below minimum threshold {}",
-            score, MIN_CREDENTIAL_SCORE
-        );
+        return Err(ContractError::InvalidScore);
     }
 
     // Check for duplicate: one credential per learner per course
     let dup_key = CredentialDataKey::CourseCredential(to.clone(), course_id.clone());
     if env.storage().persistent().has(&dup_key) {
-        panic!("credential already exists for this learner and course");
+        return Err(ContractError::DuplicateCredential);
     }
 
     // Completion gate: the progress-tracker is the source of truth for whether
@@ -94,11 +93,11 @@ pub fn mint_credential(
     // clear reason (#108). The tracker address is resolved once above and
     // reused for each check via direct cross-contract calls (#217, #133).
     if !xcall::course_exists(env, &progress_tracker, course_id) {
-        panic!("course does not exist");
+        return Err(ContractError::NotFound);
     }
 
     if !xcall::is_eligible_for_credential(env, &progress_tracker, to, course_id) {
-        panic!("learner has not completed the course requirements");
+        return Err(ContractError::NotFound);
     }
 
     // Score gate: the caller supplies a score, but the progress-tracker is the
@@ -108,10 +107,7 @@ pub fn mint_credential(
     // quizzes for this course.
     let verified_score = xcall::get_course_score(env, &progress_tracker, to, course_id);
     if score != verified_score {
-        panic!(
-            "score {} does not match verified score {}",
-            score, verified_score
-        );
+        return Err(ContractError::InvalidScore);
     }
 
     // Generate unique credential ID. The counter is checked so it can never wrap
@@ -121,10 +117,7 @@ pub fn mint_credential(
         .persistent()
         .get(&CredentialDataKey::CredentialCounter)
         .unwrap_or(0);
-    let credential_id = match counter.checked_add(1) {
-        Some(id) => id,
-        None => panic!("credential ID counter overflow"),
-    };
+    let credential_id = counter.checked_add(1).ok_or(ContractError::NotFound)?; // overflow → NotFound (should never happen)
     crate::metadata::write_entry(env, &CredentialDataKey::CredentialCounter, &credential_id);
 
     // Build credential info
@@ -183,5 +176,5 @@ pub fn mint_credential(
         metadata_uri,
     );
 
-    credential_id
+    Ok(credential_id)
 }

@@ -5,6 +5,7 @@ use crate::metadata::{
     no_display, one_display, CredentialDataKey, CredentialDisplay, CredentialInfo,
     CredentialVerification,
 };
+use crate::ContractError;
 
 /// Read the full list of credential IDs owned by a learner.
 fn learner_credentials(env: &Env, learner: &Address) -> Vec<u64> {
@@ -160,7 +161,7 @@ pub fn is_credential_valid(env: &Env, credential_id: u64) -> bool {
 /// Kept as a single non-inlined helper so both entry points share one copy
 /// of this logic in the compiled WASM instead of duplicating it.
 #[inline(never)]
-fn revoke_and_prune(env: &Env, credential_id: u64) -> (Address, CredentialInfo) {
+fn revoke_and_prune(env: &Env, credential_id: u64) -> Result<(Address, CredentialInfo), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
@@ -172,10 +173,10 @@ fn revoke_and_prune(env: &Env, credential_id: u64) -> (Address, CredentialInfo) 
         .storage()
         .persistent()
         .get(&CredentialDataKey::Credential(credential_id))
-        .expect("credential not found");
+        .ok_or(ContractError::NotFound)?;
 
     if info.revoked {
-        panic!("credential already revoked");
+        return Err(ContractError::AlreadyInitialized); // already revoked
     }
 
     info.revoked = true;
@@ -196,7 +197,7 @@ fn revoke_and_prune(env: &Env, credential_id: u64) -> (Address, CredentialInfo) 
         credential_id,
     );
 
-    (admin, info)
+    Ok((admin, info))
 }
 
 /// Remove `credential_id` from the `Vec<u64>` stored under `key`, writing the
@@ -219,12 +220,8 @@ fn remove_id_from_list(env: &Env, key: &CredentialDataKey, credential_id: u64) {
 /// On revocation the credential ID is pruned from both the learner's
 /// credential list and the course's credential index (#104). This keeps
 /// those lists free of stale revoked entries.
-pub fn revoke_credential(env: &Env, credential_id: u64) {
-    let (admin, info) = revoke_and_prune(env, credential_id);
-
-    // Emit the learner, course and revoking admin alongside the ID so revocations
-    // can be audited without a follow-up state read (#100), with learner and
-    // course indexed as topics (#548).
+pub fn revoke_credential(env: &Env, credential_id: u64) -> Result<(), ContractError> {
+    let (admin, info) = revoke_and_prune(env, credential_id)?;
     crate::events::credential_revoked(
         env,
         &info.learner,
@@ -232,6 +229,7 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
         credential_id,
         &admin,
     );
+    Ok(())
 }
 
 /// Revoke a credential with a reason. Admin only (#194).
@@ -240,17 +238,14 @@ pub fn revoke_credential(env: &Env, credential_id: u64) {
 /// * `env` - Soroban environment
 /// * `credential_id` - The credential to revoke
 /// * `reason` - The reason for revocation
-pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symbol) {
-    let (admin, info) = revoke_and_prune(env, credential_id);
-    // Store the revocation reason (#194)
+pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symbol) -> Result<(), ContractError> {
+    let (admin, info) = revoke_and_prune(env, credential_id)?;
     crate::metadata::write_entry(
         env,
         &CredentialDataKey::RevocationReason(credential_id),
         &reason,
     );
 
-    // Same indexed topics as the reason-less variant so a revocation query
-    // covers both shapes; the reason rides in the payload (#548).
     crate::events::credential_revoked_with_reason(
         env,
         &info.learner,
@@ -259,6 +254,7 @@ pub fn revoke_credential_with_reason(env: &Env, credential_id: u64, reason: Symb
         &admin,
         &reason,
     );
+    Ok(())
 }
 
 /// Get the reason a credential was revoked (#194).
@@ -281,7 +277,7 @@ pub fn get_revocation_reason(env: &Env, credential_id: u64) -> Option<Symbol> {
 /// * `env` - Soroban environment
 /// * `credential_id` - The credential to renew
 /// * `new_expiry` - The new expiration ledger height (0 = no expiration)
-pub fn renew_credential(env: &Env, credential_id: u64, new_expiry: u32) {
+pub fn renew_credential(env: &Env, credential_id: u64, new_expiry: u32) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
@@ -293,14 +289,15 @@ pub fn renew_credential(env: &Env, credential_id: u64, new_expiry: u32) {
         .storage()
         .persistent()
         .get(&CredentialDataKey::Credential(credential_id))
-        .expect("credential not found");
+        .ok_or(ContractError::NotFound)?;
 
     if info.revoked {
-        panic!("cannot renew revoked credential");
+        return Err(ContractError::AlreadyInitialized); // cannot renew revoked credential
     }
 
     info.expires_at = new_expiry;
     crate::metadata::write_entry(env, &CredentialDataKey::Credential(credential_id), &info);
 
     crate::events::credential_renewed(env, credential_id, new_expiry);
+    Ok(())
 }

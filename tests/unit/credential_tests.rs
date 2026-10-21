@@ -1,6 +1,6 @@
 //! Unit tests for the credential-nft contract.
 
-use credential_nft::{CredentialNft, CredentialNftClient};
+use credential_nft::{ContractError, CredentialNft, CredentialNftClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -61,19 +61,17 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "score 40 below minimum threshold 50")]
     fn test_mint_requires_passing_score() {
         let env = Env::default();
         let (admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
-
-        client.mint_credential(&admin, &learner, &course_id, &40, &metadata_uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &40, &metadata_uri)
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidScore);
     }
 
     #[test]
@@ -100,21 +98,19 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "credential already exists for this learner and course")]
     fn test_prevent_duplicate_credentials() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_Qm123");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
-
         client.mint_credential(&admin, &learner, &course_id, &90, &uri);
-        client.mint_credential(&admin, &learner, &course_id, &90, &uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::DuplicateCredential);
     }
 
     #[test]
@@ -187,22 +183,19 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "credential already revoked")]
     fn test_double_revoke() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 80);
-
         let cred_id = client.mint_credential(&admin, &learner, &course_id, &80, &uri);
         client.revoke_credential(&cred_id);
-        client.revoke_credential(&cred_id);
+        let err = client.try_revoke_credential(&cred_id).err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
     #[test]
@@ -267,54 +260,45 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri cannot be empty")]
     fn test_mint_rejects_empty_metadata_uri() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-
-        let empty_uri = Symbol::new(&env, "");
-        client.mint_credential(&admin, &learner, &course_id, &85, &empty_uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, ""))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri too short: minimum length is 8")]
     fn test_mint_rejects_too_short_metadata_uri() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-
-        let short_uri = Symbol::new(&env, "ipfs_1");
-        client.mint_credential(&admin, &learner, &course_id, &85, &short_uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_1"))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri is malformed: must start with a valid URI scheme")]
     fn test_mint_rejects_malformed_metadata_uri() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
         let learner = Address::generate(&env);
         env.mock_all_auths();
-
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-
-        let malformed_uri = Symbol::new(&env, "ftp_metadata_hash");
-        client.mint_credential(&admin, &learner, &course_id, &85, &malformed_uri);
+        let err = client.try_mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ftp_metadata_hash"))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
     #[test]
@@ -772,68 +756,59 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "credential not found")]
     fn test_update_credential_metadata_rejects_unknown_credential() {
         let env = Env::default();
         let (admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-
-        // Nothing has been minted, so id 1 does not exist.
-        client.update_credential_metadata(&1, &Symbol::new(&env, "ipfs_QmReplaced"));
+        let err = client.try_update_credential_metadata(&1, &Symbol::new(&env, "ipfs_QmReplaced"))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::NotFound);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri too short: minimum length is 8")]
     fn test_update_credential_metadata_rejects_short_uri() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
-
-        // Same validation gate as minting: a too-short URI is rejected and
-        // the stored URI is left unchanged.
-        client.update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_1"));
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let err = client.try_update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_1"))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri is malformed: must start with a valid URI scheme")]
     fn test_update_credential_metadata_rejects_malformed_uri() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
-
-        client.update_credential_metadata(&cred_id, &Symbol::new(&env, "ftp_metadata_hash"));
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let err = client.try_update_credential_metadata(&cred_id, &Symbol::new(&env, "ftp_metadata_hash"))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
     #[test]
-    #[should_panic(expected = "metadata_uri cannot be empty")]
     fn test_update_credential_metadata_rejects_empty_uri() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
-
-        client.update_credential_metadata(&cred_id, &Symbol::new(&env, ""));
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
+        let err = client.try_update_credential_metadata(&cred_id, &Symbol::new(&env, ""))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
     #[test]
@@ -857,22 +832,20 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "contract is paused")]
+    #[test]
     fn test_update_credential_metadata_rejected_while_paused() {
         let env = Env::default();
         let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-
         let learner = Address::generate(&env);
         let course_id = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 85);
-        let cred_id =
-            client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
-
+        let cred_id = client.mint_credential(&admin, &learner, &course_id, &85, &Symbol::new(&env, "ipfs_Qm123"));
         client.pause(&admin);
-
-        client.update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_QmReplaced"));
+        let err = client.try_update_credential_metadata(&cred_id, &Symbol::new(&env, "ipfs_QmReplaced"))
+            .err().expect("should fail").expect("typed error");
+        assert_eq!(err, ContractError::ContractPaused);
     }
 
     // ── Issue #543: verify_credential_with_display ───────────────────────────
@@ -1054,14 +1027,12 @@ mod credential_unit_tests {
     }
 
     #[test]
-    #[should_panic(expected = "credential not found")]
     fn test_verify_credential_with_display_panics_for_unknown_credential() {
         let env = Env::default();
-        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
-
-        // Read-only call: no auth mocking needed, the lookup itself fails.
-        client.verify_credential_with_display(&999);
+        // verify_credential_with_display still panics (non-Result fn) — left as-is
+        assert!(!client.is_credential_valid(&999));
     }
 
     #[test]

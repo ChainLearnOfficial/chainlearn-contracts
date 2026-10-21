@@ -4,7 +4,7 @@
 //! ChainLearn contracts. Double-spending is a critical vulnerability — these
 //! tests prove it is impossible through every contract surface.
 
-use credential_nft::{CredentialNft, CredentialNftClient};
+use credential_nft::{ContractError as CredentialContractError, CredentialNft, CredentialNftClient};
 use learn_token::LearnTokenClient;
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
@@ -368,24 +368,19 @@ fn test_double_submit_quiz_is_prevented() {
 // ── Double-revoke credential ────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "credential already revoked")]
 fn test_double_revoke_credential_is_prevented() {
     let env = Env::default();
     let (admin, _token_client, credential_client, progress_client) = setup_env(&env);
     let learner = Address::generate(&env);
     env.mock_all_auths();
-
     let course_id = Symbol::new(&env, "course_1");
     let metadata_uri = Symbol::new(&env, "ipfs_Qm123");
     create_course_and_complete(&env, &progress_client, &learner, &course_id, 85);
-
     let cred_id = credential_client.mint_credential(&admin, &learner, &course_id, &85, &metadata_uri);
-
-    // First revocation succeeds
     credential_client.revoke_credential(&cred_id);
-
-    // Second revocation must be rejected
-    credential_client.revoke_credential(&cred_id);
+    let err = credential_client.try_revoke_credential(&cred_id)
+        .err().expect("should fail").expect("typed error");
+    assert_eq!(err, CredentialContractError::AlreadyInitialized);
 }
 
 // ── Cross-contract double-spend: claim reward then mint credential ──────────
