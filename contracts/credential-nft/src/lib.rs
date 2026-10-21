@@ -7,11 +7,11 @@ mod verify;
 mod xcall;
 
 use chainlearn_shared::ContractMetadata;
+use metadata::AdminRole;
 use metadata::{
     remove_entry, write_entry, CredentialDataKey, CredentialDisplay, CredentialInfo,
     CredentialVerification,
 };
-use metadata::AdminRole;
 use mint::validate_metadata_uri;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracterror, contractimpl, Address, BytesN, Env, Symbol, Vec};
@@ -113,7 +113,12 @@ impl CredentialNft {
     /// * `caller` - The admin granting the role (must authorize)
     /// * `role` - The role to grant
     /// * `address` - The address to receive the role
-    pub fn grant_role(env: Env, caller: Address, role: AdminRole, address: Address) -> Result<(), ContractError> {
+    pub fn grant_role(
+        env: Env,
+        caller: Address,
+        role: AdminRole,
+        address: Address,
+    ) -> Result<(), ContractError> {
         caller.require_auth();
         if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
             return Err(ContractError::NotAuthorized);
@@ -129,7 +134,12 @@ impl CredentialNft {
     /// * `caller` - The admin revoking the role (must authorize)
     /// * `role` - The role to revoke
     /// * `address` - The address to lose the role
-    pub fn revoke_role(env: Env, caller: Address, role: AdminRole, address: Address) -> Result<(), ContractError> {
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: AdminRole,
+        address: Address,
+    ) -> Result<(), ContractError> {
         caller.require_auth();
         if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
             return Err(ContractError::NotAuthorized);
@@ -251,11 +261,7 @@ impl CredentialNft {
             issuer_name,
         };
 
-        metadata::write_entry(
-            &env,
-            &CredentialDataKey::Display(credential_id),
-            &display,
-        );
+        metadata::write_entry(&env, &CredentialDataKey::Display(credential_id), &display);
 
         events::credential_display_set(
             &env,
@@ -284,7 +290,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `credential_id` - The credential to update
     /// * `new_metadata_uri` - The new metadata URI
-    pub fn update_credential_metadata(env: Env, credential_id: u64, new_metadata_uri: Symbol) -> Result<(), ContractError> {
+    pub fn update_credential_metadata(
+        env: Env,
+        credential_id: u64,
+        new_metadata_uri: Symbol,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         let admin: Address = env
             .storage()
@@ -444,7 +454,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `credential_id` - The credential to revoke
     /// * `reason` - The reason for revocation
-    pub fn revoke_credential_with_reason(env: Env, credential_id: u64, reason: Symbol) -> Result<(), ContractError> {
+    pub fn revoke_credential_with_reason(
+        env: Env,
+        credential_id: u64,
+        reason: Symbol,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         verify::revoke_credential_with_reason(&env, credential_id, reason)
     }
@@ -465,7 +479,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `credential_id` - The credential to renew
     /// * `new_expiry` - The new expiration ledger height (0 = no expiration)
-    pub fn renew_credential(env: Env, credential_id: u64, new_expiry: u32) -> Result<(), ContractError> {
+    pub fn renew_credential(
+        env: Env,
+        credential_id: u64,
+        new_expiry: u32,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         verify::renew_credential(&env, credential_id, new_expiry)
     }
@@ -742,7 +760,11 @@ impl CredentialNft {
     ///
     /// # Returns
     /// The generated certificate URI symbol.
-    pub fn generate_certificate(env: Env, learner: Address, course_id: Symbol) -> Result<Symbol, ContractError> {
+    pub fn generate_certificate(
+        env: Env,
+        learner: Address,
+        course_id: Symbol,
+    ) -> Result<Symbol, ContractError> {
         Self::ensure_not_paused(&env)?;
         learner.require_auth();
 
@@ -819,7 +841,11 @@ impl CredentialNft {
     /// # Arguments
     /// * `caller` - The admin performing the upgrade (must authorize, Admin role required)
     /// * `new_wasm_hash` - Hash of the already-uploaded wasm to install
-    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
+    pub fn upgrade(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
         Self::ensure_not_paused(&env)?;
         caller.require_auth();
         if !metadata::has_role(&env, &caller, &AdminRole::Admin) {
@@ -864,8 +890,8 @@ impl CredentialNft {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Events as _, Ledger as _},
-        vec, Address, IntoVal,
+        testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+        vec, Address, Bytes, IntoVal, SymbolStr, TryFromVal,
     };
 
     /// Register both contracts and return `(admin, credential_id, tracker_id)`.
@@ -940,7 +966,11 @@ mod tests {
         env.mock_all_auths();
 
         client.pause(&admin);
-        let err = client.try_pause(&admin).err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_pause(&admin)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -953,7 +983,11 @@ mod tests {
         client.initialize(&admin, &Address::generate(&env));
         env.mock_all_auths();
 
-        let err = client.try_unpause(&admin).err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_unpause(&admin)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -962,7 +996,7 @@ mod tests {
     #[test]
     fn test_transfer_admin_defers_the_handover() {
         let env = Env::default();
-        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let new_admin = Address::generate(&env);
 
@@ -978,7 +1012,7 @@ mod tests {
     #[test]
     fn test_accept_admin_completes_the_transfer() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let new_admin = Address::generate(&env);
 
@@ -1001,14 +1035,18 @@ mod tests {
         let new_admin = Address::generate(&env);
         env.mock_all_auths();
         client.transfer_admin(&new_admin);
-        let err = client.try_accept_admin().err().expect("should fail").expect("typed error");
+        let err = client
+            .try_accept_admin()
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
     #[test]
     fn test_cancel_admin_transfer_aborts_the_handover() {
         let env = Env::default();
-        let (admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let new_admin = Address::generate(&env);
 
@@ -1031,7 +1069,11 @@ mod tests {
         client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         client.cancel_admin_transfer();
-        let err = client.try_accept_admin().err().expect("should fail").expect("typed error");
+        let err = client
+            .try_accept_admin()
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -1041,7 +1083,11 @@ mod tests {
         let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-        let err = client.try_set_admin_transfer_delay(&0).err().expect("should fail").expect("typed error");
+        let err = client
+            .try_set_admin_transfer_delay(&0)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
@@ -1051,14 +1097,18 @@ mod tests {
         let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         env.mock_all_auths();
-        let err = client.try_set_admin_transfer_delay(&3_599).err().expect("should fail").expect("typed error");
+        let err = client
+            .try_set_admin_transfer_delay(&3_599)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
     #[test]
     fn test_set_admin_transfer_delay_accepts_one_hour_minimum() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -1076,14 +1126,18 @@ mod tests {
         client.set_admin_transfer_delay(&3_600);
         client.transfer_admin(&new_admin);
         env.ledger().with_mut(|l| l.timestamp += 3_599);
-        let err = client.try_accept_admin().err().expect("should fail").expect("typed error");
+        let err = client
+            .try_accept_admin()
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::AlreadyInitialized);
     }
 
     #[test]
     fn test_set_admin_transfer_delay_requires_admin_auth() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         // No authorization is mocked, so the admin-only call must be rejected
@@ -1094,7 +1148,7 @@ mod tests {
     #[test]
     fn test_default_admin_transfer_delay_matches_learn_token() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         assert_eq!(client.admin_transfer_delay(), 172_800);
@@ -1144,14 +1198,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot transfer admin to zero address")]
     fn test_transfer_admin_rejects_zero_address() {
         let env = Env::default();
         let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         env.mock_all_auths();
-        client.transfer_admin(&chainlearn_shared::zero_address(&env));
+        let err = client
+            .try_transfer_admin(&chainlearn_shared::zero_address(&env))
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, ContractError::NotAuthorized);
     }
 
     #[test]
@@ -1303,12 +1361,115 @@ mod tests {
         let pending = client.pending_admin().expect("no pending transfer");
         assert_eq!(pending.new_admin, second);
 
-        // The first candidate can never accept the transfer anymore.
+        // The first candidate can never accept the transfer anymore: only the
+        // pending `new_admin` is allowed to sign the acceptance.
         env.ledger().with_mut(|l| l.timestamp += 3_600);
-        // We need to act as the first address, but it's not pending anymore.
-        // accept_admin will fail because pending.new_admin != caller when
-        // called without proper auth; easier to just verify state.
-        // The pending is now second, so cancel/accept by new admin flow changes.
+        env.mock_auths(&[MockAuth {
+            address: &first,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(client.try_accept_admin().is_err());
+
+        // The pending transfer is untouched and the admin is unchanged.
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, second);
+        assert_eq!(client.admin(), _admin);
+    }
+
+    #[test]
+    fn test_transfer_admin_requires_the_current_admin_signature() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        // Drop the admin signature: only the current admin may start a
+        // handover, so the second attempt must be rejected.
+        env.set_auths(&[]);
+        let other_admin = Address::generate(&env);
+        assert!(client.try_transfer_admin(&other_admin).is_err());
+
+        // The handover that was already initiated is left untouched.
+        let pending = client.pending_admin().expect("no pending transfer");
+        assert_eq!(pending.new_admin, new_admin);
+    }
+
+    #[test]
+    fn test_pending_admin_alone_can_accept_the_handover() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.set_admin_transfer_delay(&3_600);
+        client.transfer_admin(&new_admin);
+        env.ledger().with_mut(|l| l.timestamp += 3_600);
+
+        // The handover is completed by the incoming admin alone: the current
+        // admin never has to sign the acceptance.
+        env.mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }]);
+        client.accept_admin();
+
+        assert_eq!(client.admin(), new_admin);
+        assert!(client.pending_admin().is_none());
+    }
+
+    #[test]
+    fn test_default_admin_transfer_delay_blocks_acceptance_within_48_hours() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_admin(&new_admin);
+
+        // The default delay is 48 hours.
+        assert_eq!(client.admin_transfer_delay(), 172_800);
+        env.ledger().with_mut(|l| l.timestamp += 172_799);
+        assert!(client.try_accept_admin().is_err());
+
+        env.ledger().with_mut(|l| l.timestamp += 1);
+        client.accept_admin();
+        assert_eq!(client.admin(), new_admin);
+    }
+
+    #[test]
+    fn test_admin_transfer_delay_is_never_below_the_minimum() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        // A delay below the one-hour minimum is rejected and leaves the
+        // configured delay at its default value.
+        let err = client
+            .try_set_admin_transfer_delay(&0)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, ContractError::AlreadyInitialized);
+        assert_eq!(client.admin_transfer_delay(), 172_800);
+
+        client.set_admin_transfer_delay(&3_600);
+        assert_eq!(client.admin_transfer_delay(), 3_600);
     }
 
     #[test]
@@ -1350,21 +1511,93 @@ mod tests {
         assert_eq!(client.upgrade_version(), 0);
     }
 
+    // ── Issue #540: upgrade / wasm_hash / upgrade_version unit tests ───────
+
+    /// Upload a placeholder WASM module so `upgrade()` has a hash to point at.
+    /// The module body is irrelevant for these tests: the contract only
+    /// records the hash, bumps the version and emits the `upgraded` event.
+    fn upload_placeholder_wasm(env: &Env) -> BytesN<32> {
+        env.deployer()
+            .upload_contract_wasm(Bytes::from_slice(env, &[]))
+    }
+
     #[test]
     fn test_upgrade_requires_admin_auth() {
         let env = Env::default();
-        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
+        // No authorization is mocked, so the admin signature is missing.
         let fake_hash = BytesN::from_array(&env, &[7u8; 32]);
-        assert!(client.try_upgrade(&fake_hash).is_err());
+        assert!(client.try_upgrade(&admin, &fake_hash).is_err());
     }
 
-    // Note: Full upgrade integration tests (verifying wasm hash updates,
-    // event emission, and version increments on actual upgrades) are covered
-    // in integration tests (tests/integration/upgrade_tests.rs), since they
-    // require uploading real contract WASM to the test host. Here we only
-    // verify defaults and admin auth as requested by the unit-test scope.
+    #[test]
+    fn test_upgrade_rejects_non_admin_role_holder() {
+        let env = Env::default();
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let not_admin = Address::generate(&env);
+        let wasm_hash = upload_placeholder_wasm(&env);
+        let err = client
+            .try_upgrade(&not_admin, &wasm_hash)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, ContractError::NotAuthorized);
+    }
+
+    #[test]
+    fn test_upgrade_sets_wasm_hash_and_increments_version() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let wasm_hash = upload_placeholder_wasm(&env);
+        client.upgrade(&admin, &wasm_hash);
+
+        assert_eq!(client.wasm_hash(), Some(wasm_hash));
+        assert_eq!(client.upgrade_version(), 1);
+    }
+
+    #[test]
+    fn test_upgrade_emits_upgraded_event() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let wasm_hash = upload_placeholder_wasm(&env);
+        client.upgrade(&admin, &wasm_hash);
+
+        let events = env.events().all();
+        let (_, topics, data) = events.last().unwrap();
+        assert_eq!(topics, (Symbol::new(&env, "upgraded"),).into_val(&env));
+        let data_vec: soroban_sdk::Vec<soroban_sdk::Val> = data.into_val(&env);
+        assert_eq!(data_vec.len(), 2);
+        let event_hash: BytesN<32> = data_vec.get(0).unwrap().into_val(&env);
+        let event_version: u32 = data_vec.get(1).unwrap().into_val(&env);
+        assert_eq!(event_hash, wasm_hash);
+        assert_eq!(event_version, 1);
+    }
+
+    #[test]
+    fn test_failed_upgrade_leaves_version_and_hash_untouched() {
+        let env = Env::default();
+        let (admin, contract_id, _tracker_id) = setup_contract(&env);
+        let client = CredentialNftClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        // The hash was never uploaded, so the upgrade must not go through.
+        let unknown_hash = BytesN::from_array(&env, &[9u8; 32]);
+        assert!(client.try_upgrade(&admin, &unknown_hash).is_err());
+
+        assert_eq!(client.wasm_hash(), None);
+        assert_eq!(client.upgrade_version(), 0);
+    }
 
     fn setup_contract(env: &Env) -> (Address, Address, Address) {
         let admin = Address::generate(env);
@@ -1459,7 +1692,7 @@ mod tests {
     #[test]
     fn test_mint_and_verify() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1482,7 +1715,7 @@ mod tests {
     #[test]
     fn test_get_credentials_for() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1508,7 +1741,7 @@ mod tests {
     #[test]
     fn test_get_credentials_for_paginates() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1581,37 +1814,43 @@ mod tests {
     #[test]
     fn test_mint_rejects_inflated_score() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 50);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &100, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &100, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
     #[test]
     fn test_mint_rejects_understated_score() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let learner = Address::generate(&env);
         env.mock_all_auths();
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &80, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &80, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
     #[test]
     fn test_mint_accepts_verified_score() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1628,7 +1867,7 @@ mod tests {
     #[test]
     fn test_mint_verifies_against_average_of_all_quizzes() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let tracker = progress_tracker::ProgressTrackerClient::new(&env, &tracker_id);
 
@@ -1660,7 +1899,7 @@ mod tests {
     #[test]
     fn test_mint_rejects_score_from_a_different_learner() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
         let strong_learner = Address::generate(&env);
         let weak_learner = Address::generate(&env);
@@ -1669,8 +1908,11 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &strong_learner, &course_id, 95);
         complete_course_with_score(&env, &tracker_id, &weak_learner, &course_id, 60);
-        let err = client.try_mint_credential(&admin, &weak_learner, &course_id, &95, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &weak_learner, &course_id, &95, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -1720,7 +1962,7 @@ mod tests {
     #[test]
     fn test_get_credentials_by_course_multiple_courses() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1750,7 +1992,7 @@ mod tests {
     #[test]
     fn test_mint_rejects_counter_overflow() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (admin, contract_id, tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         let learner = Address::generate(&env);
@@ -1767,8 +2009,12 @@ mod tests {
                 .set(&CredentialDataKey::CredentialCounter, &u64::MAX);
         });
 
-        client.mint_credential(&_admin, &learner, &course_id, &90, &uri);
-        assert!(true); // overflow returns NotFound error
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, ContractError::NotFound);
     }
 
     #[test]
@@ -1854,8 +2100,11 @@ mod tests {
         let course_id = Symbol::new(&env, "rust_101");
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed(&env, &tracker_id, &learner, &course_id);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &40, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &40, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidScore);
     }
 
@@ -1870,8 +2119,11 @@ mod tests {
         let uri = Symbol::new(&env, "ipfs_meta");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course_id, 90);
         client.mint_credential(&admin, &learner, &course_id, &90, &uri);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::DuplicateCredential);
     }
 
@@ -1888,8 +2140,11 @@ mod tests {
         let course_id = Symbol::new(&env, "ghost_course");
         let uri = Symbol::new(&env, "ipfs_meta");
 
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
-            .err().expect("should fail").expect("expected typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("expected typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -1910,7 +2165,12 @@ mod tests {
         create_course(&env, &tracker_id, &course_id);
         tracker_client.enroll(&learner, &course_id);
 
-        client.mint_credential(&admin, &learner, &course_id, &100, &uri); // should panic
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &100, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
+        assert_eq!(err, ContractError::NotFound);
     }
 
     #[test]
@@ -1927,8 +2187,11 @@ mod tests {
         tracker_client.enroll(&learner, &course_id);
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         tracker_client.submit_quiz_score(&learner, &course_id, &Symbol::new(&env, "quiz_1"), &95);
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &95, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &95, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -1946,8 +2209,11 @@ mod tests {
         tracker_client.enroll(&learner, &course_id);
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_1"));
         tracker_client.complete_module(&learner, &course_id, &Symbol::new(&env, "mod_2"));
-        let err = client.try_mint_credential(&admin, &learner, &course_id, &90, &uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course_id, &90, &uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::NotFound);
     }
 
@@ -2170,7 +2436,10 @@ mod tests {
         enrolled_and_completed(&env, &tracker_id, &learner, &course);
 
         let first = client.generate_certificate(&learner, &course);
-        assert_eq!(client.get_certificate_uri(&learner, &course), Some(first.clone()));
+        assert_eq!(
+            client.get_certificate_uri(&learner, &course),
+            Some(first.clone())
+        );
 
         // generate_certificate is idempotent: it returns the stored URI
         // instead of minting a new one, so get_certificate_uri keeps
@@ -2236,7 +2505,7 @@ mod tests {
     #[test]
     fn test_get_certificate_uri_is_none_for_unknown_learner_and_course() {
         let env = Env::default();
-        let (_admin, contract_id, tracker_id) = setup_contract(&env);
+        let (_admin, contract_id, _tracker_id) = setup_contract(&env);
         let client = CredentialNftClient::new(&env, &contract_id);
 
         env.mock_all_auths();
@@ -2262,34 +2531,21 @@ mod tests {
         let cert_uri = client.generate_certificate(&learner, &course);
 
         // The generated URI follows the documented on-chain format:
-        // "cert_" + 12 lowercase hex characters of the learner/course hash.
-        // Symbol is stored as bytes; to_xdr is used in the contract to build
-        // payloads. For test assertions, verify the symbol's string form.
-        use soroban_sdk::String as SorobanString;
-        let uri_str = SorobanString::from_str(&env, "cert_");
-        let _ = uri_str;
-        // Check via the returned value's structure by re-deriving expectations
-        // from the API contract: prefix "cert_" and length 17.
-        let _prefix_ok = true;
-        // We can't inspect Symbol internals directly in tests; use the fact
-        // that generate_certificate builds it as "cert_" + 24 hex chars.
-        let _s = cert_uri.clone();
-        // Fallback: assert the API contract - length check via bytes conversion
-        // in a different way isn't feasible; instead verify behavior.
-        // The original test intent: ensure format. Check prefix by attempting
-        // to reconstruct logic is unreliable. Use the fact that the symbol
-        // was created from our formatted string of length 17 starting with cert_.
-        assert!(true);
-        // More directly: the test as written in the repo expects the format;
-        // verify by checking roundtrip via string representation semantics.
-        // We'll use a simpler check based on the known format.
-        // Actually let us just verify the event/data contract holds.
-        // For now, skip the byte inspection and trust format by construction.
-        // But the test must pass. Let us check: the original test was failing
-        // The format is enforced by the implementation (cert_ + 12 lowercase hex).
+        // "cert_" + 24 lowercase hex characters of the learner/course hash.
+        let symbol_str = SymbolStr::try_from_val(&env, &cert_uri.to_symbol_val())
+            .expect("the URI is a well-formed symbol");
+        let uri: &str = symbol_str.as_ref();
+        assert_eq!(uri.len(), 29, "unexpected URI: {uri}");
+        assert!(uri.starts_with("cert_"), "unexpected URI: {uri}");
+        assert!(
+            uri[5..]
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "suffix must be lowercase hex, got: {uri}"
+        );
+
         let stored = client.get_certificate_uri(&learner, &course);
-        assert!(stored.is_some());
-        assert_eq!(stored.unwrap(), cert_uri.clone());
+        assert_eq!(stored, Some(cert_uri));
     }
 
     #[test]
@@ -2302,8 +2558,11 @@ mod tests {
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
         let empty_uri = Symbol::new(&env, "");
-        let err = client.try_mint_credential(&admin, &learner, &course, &85, &empty_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course, &85, &empty_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
@@ -2317,8 +2576,11 @@ mod tests {
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
         let short_uri = Symbol::new(&env, "ipfs_1");
-        let err = client.try_mint_credential(&admin, &learner, &course, &85, &short_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course, &85, &short_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
@@ -2332,8 +2594,11 @@ mod tests {
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
         let invalid_uri = Symbol::new(&env, "ftp_metadata_hash");
-        let err = client.try_mint_credential(&admin, &learner, &course, &85, &invalid_uri)
-            .err().expect("should fail").expect("typed error");
+        let err = client
+            .try_mint_credential(&admin, &learner, &course, &85, &invalid_uri)
+            .err()
+            .expect("should fail")
+            .expect("typed error");
         assert_eq!(err, ContractError::InvalidMetadataUri);
     }
 
@@ -2369,7 +2634,13 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
-        let id = client.mint_credential(&admin, &learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+        let id = client.mint_credential(
+            &admin,
+            &learner,
+            &course,
+            &85,
+            &Symbol::new(&env, "ipfs_meta"),
+        );
 
         // No display properties were ever set for this credential.
         let verification = client.verify_credential_with_display(&id);
@@ -2388,7 +2659,13 @@ mod tests {
 
         let course = Symbol::new(&env, "rust_101");
         enrolled_and_completed_with_score(&env, &tracker_id, &learner, &course, 85);
-        let id = client.mint_credential(&admin, &learner, &course, &85, &Symbol::new(&env, "ipfs_meta"));
+        let id = client.mint_credential(
+            &admin,
+            &learner,
+            &course,
+            &85,
+            &Symbol::new(&env, "ipfs_meta"),
+        );
 
         let image_url = Some(Symbol::new(&env, "ipfs_img"));
         let description = Some(Symbol::new(&env, "rust_cert"));
@@ -2562,29 +2839,21 @@ mod tests {
         client.grant_role(&admin, &AdminRole::Pauser, &pauser);
 
         client.pause(&pauser);
-        assert!(env
-            .storage()
-            .persistent()
-            .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-            .unwrap_or(false));
-
         env.as_contract(&contract_id, || {
-            assert!(
-                env.storage()
-                    .persistent()
-                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                .unwrap_or(false));
         });
 
         client.unpause(&pauser);
         env.as_contract(&contract_id, || {
-            assert!(
-                !env.storage()
-                    .persistent()
-                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(!env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                .unwrap_or(false));
         });
     }
 
@@ -2597,12 +2866,11 @@ mod tests {
 
         client.pause(&admin);
         env.as_contract(&contract_id, || {
-            assert!(
-                env.storage()
-                    .persistent()
-                    .get::<_, bool>(&metadata::CredentialDataKey::Paused)
-                    .unwrap_or(false)
-            );
+            assert!(env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&metadata::CredentialDataKey::Paused)
+                .unwrap_or(false));
         });
     }
 

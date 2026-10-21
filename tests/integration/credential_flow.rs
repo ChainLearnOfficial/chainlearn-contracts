@@ -25,7 +25,8 @@ fn test_end_to_end_credential_flow() {
 
     // Mint credential (average score = (85+75)/2 = 80)
     let metadata_uri = Symbol::new(env, "ipfs_QmCredential123");
-    let cred_id = credential_client.mint_credential(learner, &course_id, &80, &metadata_uri);
+    let cred_id =
+        credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &metadata_uri);
 
     // Verify
     let info = credential_client.verify_credential(&cred_id);
@@ -50,7 +51,7 @@ fn test_public_verification() {
     fixtures::complete_full_course(env, learner, &course_id, &progress_client);
     let uri = Symbol::new(env, "ipfs_Qm123");
 
-    let cred_id = credential_client.mint_credential(learner, &course_id, &80, &uri);
+    let cred_id = credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &uri);
 
     // Anyone can verify (no auth required for reads)
     let info = credential_client.verify_credential(&cred_id);
@@ -83,8 +84,8 @@ fn test_multiple_course_credentials() {
     progress_client.complete_module(learner, &course_id_2, &Symbol::new(env, "mod_sol_1"));
     progress_client.submit_quiz_score(learner, &course_id_2, &Symbol::new(env, "quiz_sol_1"), &90);
 
-    let cred1 = credential_client.mint_credential(learner, &course_id_1, &80, &uri);
-    let cred2 = credential_client.mint_credential(learner, &course_id_2, &90, &uri);
+    let cred1 = credential_client.mint_credential(&setup.admin, learner, &course_id_1, &80, &uri);
+    let cred2 = credential_client.mint_credential(&setup.admin, learner, &course_id_2, &90, &uri);
 
     let creds = credential_client.get_credentials_for(learner, &0, &10);
     assert_eq!(creds.len(), 2);
@@ -107,7 +108,7 @@ fn test_revoked_credential_shows_revoked_status() {
     fixtures::complete_full_course(env, learner, &course_id, &progress_client);
     let uri = Symbol::new(env, "ipfs_meta");
 
-    let cred_id = credential_client.mint_credential(learner, &course_id, &80, &uri);
+    let cred_id = credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &uri);
     assert!(credential_client.is_credential_valid(&cred_id));
 
     credential_client.revoke_credential(&cred_id);
@@ -132,7 +133,8 @@ fn test_credential_metadata_uri() {
     fixtures::complete_full_course(env, learner, &course_id, &progress_client);
     let expected_uri = Symbol::new(env, "ipfs_QmTestMetadata");
 
-    let cred_id = credential_client.mint_credential(learner, &course_id, &80, &expected_uri);
+    let cred_id =
+        credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &expected_uri);
 
     let info = credential_client.verify_credential(&cred_id);
     assert_eq!(info.metadata_uri, expected_uri);
@@ -159,7 +161,7 @@ fn test_credential_has_issuance_timestamp() {
     fixtures::complete_full_course(env, learner, &course_id, &progress_client);
     let uri = Symbol::new(env, "ipfs_meta");
 
-    let cred_id = credential_client.mint_credential(learner, &course_id, &80, &uri);
+    let cred_id = credential_client.mint_credential(&setup.admin, learner, &course_id, &80, &uri);
 
     let info = credential_client.verify_credential(&cred_id);
     assert_eq!(info.issued_at, 1700000000);
