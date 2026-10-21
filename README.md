@@ -180,6 +180,13 @@ cargo test -p credential-nft
 cargo test -p progress-tracker
 ```
 
+Run the event emission tests (topics and data for every contract event, including
+progress-tracker `progress_delegated` and `delegation_revoked`):
+
+```bash
+cargo test --test event_emission_tests
+```
+
 Run with output:
 
 ```bash
