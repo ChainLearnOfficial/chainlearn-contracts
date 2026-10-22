@@ -1,6 +1,6 @@
 //! Unit tests for the learn-token contract.
 
-use learn_token::{ClaimRecord, ContractError, LearnToken, LearnTokenClient};
+use learn_token::{AdminInfo, AdminRole, ClaimRecord, ContractError, LearnToken, LearnTokenClient};
 use progress_tracker::{ProgressTracker, ProgressTrackerClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -887,7 +887,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[test]
     fn test_vote_rejects_missing_snapshot_instead_of_using_current_balance() {
         let env = Env::default();
         let (admin, contract_id, _) = setup_token(&env);
@@ -912,7 +911,6 @@ mod token_unit_tests {
     }
 
     #[test]
-    #[test]
     fn test_create_proposal_rejects_current_or_future_snapshot_ledger() {
         let env = Env::default();
         let (_admin, contract_id, _) = setup_token(&env);
@@ -920,17 +918,57 @@ mod token_unit_tests {
         env.mock_all_auths();
         env.ledger().with_mut(|l| l.sequence_number = 100);
 
-        let err = client.try_create_proposal(
-            &SorobanString::from_str(&env, "Future snapshot"),
+        let current_err = client.try_create_proposal(
+            &SorobanString::from_str(&env, "Current snapshot"),
             &2,
             &0,
             &1_000,
             &100,
         ).err().expect("should fail").expect("expected typed error");
-        assert_eq!(err, ContractError::ExpirationInPast);
+        assert_eq!(current_err, ContractError::ExpirationInPast);
+
+        let future_err = client.try_create_proposal(
+            &SorobanString::from_str(&env, "Future snapshot"),
+            &2,
+            &0,
+            &1_000,
+            &101,
+        ).err().expect("should fail").expect("expected typed error");
+        assert_eq!(future_err, ContractError::ExpirationInPast);
+        assert_eq!(client.proposal_count(), 0);
     }
 
     #[test]
+    fn test_execute_proposal_rejects_zero_votes() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        env.ledger().with_mut(|l| {
+            l.sequence_number = 100;
+            l.timestamp = 0;
+        });
+        let proposal_id = client.create_proposal(
+            &SorobanString::from_str(&env, "No votes"),
+            &2,
+            &0,
+            &1_000,
+            &99,
+        );
+
+        env.ledger().with_mut(|l| l.timestamp = 2_000);
+        let err = client.try_execute_proposal(&proposal_id)
+            .err().expect("should fail").expect("expected typed error");
+        assert_eq!(err, ContractError::NotAuthorized);
+
+        let proposal = client.get_proposal(&proposal_id).unwrap();
+        assert!(!proposal.executed);
+        assert_eq!(proposal.winning_choice, u32::MAX);
+        assert_eq!(proposal.vote_totals.get(0).unwrap(), 0);
+        assert_eq!(proposal.vote_totals.get(1).unwrap(), 0);
+    }
+
     #[test]
     fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
@@ -974,7 +1012,6 @@ mod token_unit_tests {
         assert_eq!(err, ContractError::ContractPaused);
     }
 
-    #[test]
     #[test]
     fn test_execute_proposal_fails_while_paused() {
         let env = Env::default();
@@ -2363,5 +2400,177 @@ mod token_unit_tests {
                 )
             ]
         );
+    }
+
+    // ── #505: dedicated query-function unit tests ───────────────────────────
+
+    #[test]
+    fn test_get_storage_size_tracks_mint_and_claim_entries() {
+        let env = Env::default();
+        let (admin, contract_id, pt_contract_id) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let pt_client = ProgressTrackerClient::new(&env, &pt_contract_id);
+        env.mock_all_auths();
+
+        // initialize() records the primary admin role as one tracked entry.
+        assert_eq!(client.get_storage_size(), 1);
+
+        let user = Address::generate(&env);
+        client.mint(&admin, &user, &1_000);
+        assert_eq!(client.get_storage_size(), 2);
+
+        client.mint(&admin, &user, &500);
+        assert_eq!(client.get_storage_size(), 2);
+
+        let learner = Address::generate(&env);
+        let course_id = Symbol::new(&env, "course_1");
+        let quiz_id = Symbol::new(&env, "quiz_1");
+        create_course_and_submit_quiz(&env, &pt_client, &learner, &course_id, &quiz_id, 80);
+        client.claim_reward(&learner, &course_id, &quiz_id);
+        // RewardClaimed + ClaimHistory + TotalMintedTo(learner)
+        assert_eq!(client.get_storage_size(), 5);
+    }
+
+    #[test]
+    fn test_get_vesting_schedule_returns_none_until_created() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        let beneficiary = Address::generate(&env);
+
+        assert!(client.get_vesting_schedule(&beneficiary).is_none());
+        assert_eq!(client.get_vesting_claimed(&beneficiary), 0);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|l| l.timestamp = 50);
+        client.create_vesting(&beneficiary, &10_000, &100, &1_000);
+
+        let schedule = client
+            .get_vesting_schedule(&beneficiary)
+            .expect("schedule should exist after create_vesting");
+        assert_eq!(schedule.total_amount, 10_000);
+        assert_eq!(schedule.cliff_timestamp, 100);
+        assert_eq!(schedule.duration_seconds, 1_000);
+        assert_eq!(schedule.created_at, 50);
+        assert!(!schedule.exhausted);
+        assert!(client
+            .get_vesting_schedule(&Address::generate(&env))
+            .is_none());
+    }
+
+    #[test]
+    fn test_permit_nonce_starts_at_zero_and_increments_only_on_success() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        assert_eq!(client.permit_nonce(&owner), 0);
+
+        client.permit(&owner, &spender, &100, &1_000, &0);
+        assert_eq!(client.permit_nonce(&owner), 1);
+        client.permit(&owner, &spender, &200, &1_000, &1);
+        assert_eq!(client.permit_nonce(&owner), 2);
+
+        assert!(client
+            .try_permit(&owner, &spender, &300, &1_000, &1)
+            .is_err());
+        assert_eq!(client.permit_nonce(&owner), 2);
+    }
+
+    #[test]
+    fn test_get_admins_lists_primary_and_added_admins() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let admins = client.get_admins();
+        assert_eq!(admins.len(), 1);
+        assert_eq!(admins.get(0).unwrap().address, admin);
+        assert_eq!(admins.get(0).unwrap().role, AdminRole::Admin);
+
+        let minter = Address::generate(&env);
+        client.add_admin(
+            &admin,
+            &AdminInfo {
+                address: minter.clone(),
+                role: AdminRole::Minter,
+            },
+        );
+
+        let admins = client.get_admins();
+        assert_eq!(admins.len(), 2);
+        assert_eq!(admins.get(1).unwrap().address, minter);
+        assert_eq!(admins.get(1).unwrap().role, AdminRole::Minter);
+
+        client.remove_admin(
+            &admin,
+            &AdminInfo {
+                address: minter.clone(),
+                role: AdminRole::Minter,
+            },
+        );
+        let admins = client.get_admins();
+        assert_eq!(admins.len(), 1);
+        assert_eq!(admins.get(0).unwrap().address, admin);
+    }
+
+    #[test]
+    fn test_has_role_reflects_primary_admin_and_granted_roles() {
+        let env = Env::default();
+        let (admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        assert!(client.has_role(&admin, &AdminRole::Admin));
+        assert!(client.has_role(&admin, &AdminRole::Minter));
+        assert!(client.has_role(&admin, &AdminRole::Pauser));
+
+        let stranger = Address::generate(&env);
+        assert!(!client.has_role(&stranger, &AdminRole::Admin));
+        assert!(!client.has_role(&stranger, &AdminRole::Minter));
+
+        let minter = Address::generate(&env);
+        client.grant_role(&admin, &minter, &AdminRole::Minter);
+        assert!(client.has_role(&minter, &AdminRole::Minter));
+        assert!(!client.has_role(&minter, &AdminRole::Pauser));
+        assert!(!client.has_role(&minter, &AdminRole::Admin));
+
+        client.revoke_role(&admin, &minter, &AdminRole::Minter);
+        assert!(!client.has_role(&minter, &AdminRole::Minter));
+    }
+
+    #[test]
+    fn test_prune_expired_allowance_removes_expired_entry_only() {
+        let env = Env::default();
+        let (_admin, contract_id, _) = setup_token(&env);
+        let client = LearnTokenClient::new(&env, &contract_id);
+        env.mock_all_auths();
+
+        let owner = Address::generate(&env);
+        let expired_spender = Address::generate(&env);
+        let active_spender = Address::generate(&env);
+        let expiring_ledger = env.ledger().sequence() + 5;
+        let valid_ledger = env.ledger().sequence() + 999_999;
+
+        client.approve(&owner, &expired_spender, &100, &expiring_ledger);
+        client.approve(&owner, &active_spender, &200, &valid_ledger);
+        assert!(!client.prune_expired_allowance(&owner, &expired_spender));
+        assert_eq!(client.allowance_spender_count(&owner), 2);
+
+        env.ledger().with_mut(|l| {
+            l.sequence_number = expiring_ledger + 1;
+        });
+
+        assert!(client.prune_expired_allowance(&owner, &expired_spender));
+        assert_eq!(client.allowance(&owner, &expired_spender), 0);
+        assert_eq!(client.allowance(&owner, &active_spender), 200);
+        assert_eq!(client.allowance_spender_count(&owner), 1);
+        assert!(!client.prune_expired_allowance(&owner, &expired_spender));
+        assert!(!client.prune_expired_allowance(&owner, &active_spender));
+        assert!(!client.prune_expired_allowance(&owner, &Address::generate(&env)));
     }
 }
