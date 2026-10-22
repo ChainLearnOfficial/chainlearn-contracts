@@ -2033,6 +2033,10 @@ impl LearnToken {
             }
         }
 
+        if winning_votes == 0 {
+            return Err(ContractError::NotAuthorized);
+        }
+
         proposal.executed = true;
         proposal.winning_choice = winning_choice;
         storage::set_proposal(&env, proposal_id, &proposal);
