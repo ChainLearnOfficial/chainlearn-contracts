@@ -969,6 +969,9 @@ mod token_unit_tests {
         assert_eq!(proposal.vote_totals.get(1).unwrap(), 0);
     }
 
+    // Regression guard (#581): these three pause-path tests must stay at
+    // module scope so the Rust test harness registers each as an independent
+    // test. Keep them out of any other test function's body.
     #[test]
     fn test_create_proposal_fails_while_paused() {
         let env = Env::default();
