@@ -163,3 +163,83 @@ Use the exact contract IDs and artifact hashes returned by the deployment
 commands. Keep the file name aligned with the network: for example,
 deployments-testnet.json and deployments-mainnet.json. Never commit secret
 keys, signing material, or full transaction envelopes to the deployment file.
+
+## Mainnet Safety Considerations
+
+Deploying or upgrading contracts on Stellar Mainnet is an high-impact operational action. Unlike testnet, mainnet transactions incur real XLM costs, state changes are permanent on the public ledger, and downstream integrators depend on stable contract addresses and interfaces.
+
+### Mainnet Pre-Deployment Checklist
+
+Complete every item below before running `./scripts/deploy.sh mainnet` or `./scripts/upgrade.sh mainnet`:
+
+- [ ] **Quality Gates Green**:
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace`
+  - `cargo deny check` and `cargo audit`
+- [ ] **WASM Size & Gas Verification**:
+  - `./scripts/measure-size.sh` confirms all three optimized binaries (`learn-token`, `credential-nft`, `progress-tracker`) are well within Soroban's `contract_max_size_bytes` limit.
+  - `./scripts/estimate-gas.sh` passes all CPU instruction thresholds in `scripts/gas-thresholds.env`.
+  - Confirm whether `STRIP_SPEC_DOCS=1` is enabled for the release and document the choice so `./scripts/verify.sh mainnet` uses the matching flag.
+- [ ] **Testnet Dry-Run Parity**:
+  - The exact release commit has been deployed (`./scripts/deploy.sh testnet`), initialized (`./scripts/initialize.sh testnet`), verified (`./scripts/verify.sh testnet`), and health-checked (`./scripts/monitor.sh testnet`) on testnet.
+- [ ] **Admin & Key Readiness**:
+  - Mainnet deployer and admin accounts are funded, verified, and backed by hardware or multisig controls.
+  - `deployments-mainnet.json` from the previous release is backed up and clean in version control.
+
+### Cost Estimation Guidance
+
+Mainnet deployment and operation incur three distinct XLM cost categories on Soroban:
+
+1. **WASM Code Upload & Byte Cost**:
+   Uploading each contract's `.optimized.wasm` binary charges network inclusion fees plus ledger write fees proportional to binary size (~193 KB total across all three contracts by default, or ~136 KB with `STRIP_SPEC_DOCS=1`; see [`docs/wasm-size-audit.md`](wasm-size-audit.md)).
+2. **Contract Instance & Code Ledger Rent**:
+   Both the uploaded WASM code entry and each deployed contract instance (`progress-tracker`, `learn-token`, `credential-nft`) require ongoing ledger rent (TTL extensions). Keep extra XLM headroom on the operations account for periodic TTL bump transactions.
+3. **Initialization & Invocation Execution Costs**:
+   `initialize.sh` invokes `initialize` on all three contracts and wires cross-contract addresses. Estimate CPU instruction and read/write footprint beforehand using:
+   ```bash
+   ./scripts/measure-size.sh
+   ./scripts/estimate-gas.sh
+   ```
+   Maintain at least **50–100 XLM** of uncommitted buffer in the deployer account above the minimum account reserve to absorb fee-surge multipliers during network congestion.
+
+### Rollback Planning
+
+Because Soroban contract storage is persistent on-chain, a mainnet rollback must be planned before any upgrade or deployment:
+
+1. **Preserve Previous WASM Hashes**:
+   Verify that `deployments-mainnet.json` records the currently active `wasm_hash` for every contract (and retains prior entries in the `upgrades` array) before running an upgrade.
+2. **Immediate Emergency Mitigation (Pause)**:
+   If a post-deployment anomaly is detected, immediately pause state-changing operations on affected contracts while investigating rather than pushing an untested hotfix.
+3. **Contract Code Rollback (`upgrade.sh`)**:
+   If an upgrade introduces a regression and storage layout compatibility has been preserved, roll back by re-uploading or referencing the previous verified `wasm_hash` recorded in `deployments-mainnet.json`'s `upgrades` history and verifying on-chain bytecode parity with `./scripts/verify.sh mainnet`.
+4. **Storage Schema Compatibility Rule**:
+   Never deploy a mainnet upgrade that mutates existing storage key encodings in place without a tested migration path, as incompatible storage changes prevent clean WASM code rollback.
+
+### Communication and Coordination Plan
+
+Coordinate every mainnet deployment or upgrade across engineering, operations, and downstream consumers:
+
+1. **Pre-Deployment Notice (T-24h)**:
+   Announce the scheduled maintenance window, target commit SHA, expected contract upgrades, and whether any ABI (`contractspecv0`) or event schema changes are included.
+2. **Execution Window (T-0)**:
+   - Freeze merges to `main` until deployment and verification complete.
+   - Run `./scripts/deploy.sh mainnet` (and `./scripts/initialize.sh mainnet` for initial deployments).
+   - Run `./scripts/verify.sh mainnet` and `./scripts/monitor.sh mainnet` immediately after completion.
+3. **Post-Deployment Handoff**:
+   - Commit the updated `deployments-mainnet.json` (never include secret keys) and tag the release in Git.
+   - Share the verified `contract_id`s and `wasm_hash`es with frontend, indexer, and API operators.
+   - Monitor RPC health and contract events for at least 60 minutes post-deployment.
+
+### Multi-Operator Deployment Guidance
+
+To eliminate single-point-of-failure key risk on mainnet, separate duties across multiple operators:
+
+1. **Separation of Deployer and Admin Authority**:
+   Use a dedicated, short-lived or low-privilege deployer account for uploading WASM bytes (`deploy.sh`), and transfer or configure contract administrative authority (`admin`) to a multi-signature account rather than a single developer workstation key.
+2. **Two-Operator Verification Protocol**:
+   - **Operator A** executes the build and deployment from a clean checkout of the tagged commit and records the resulting `deployments-mainnet.json`.
+   - **Operator B** independently builds the tagged commit on a separate machine and runs `./scripts/verify.sh mainnet` and `./scripts/monitor.sh mainnet` to confirm that the on-chain WASM hashes, admin addresses, and cross-contract links (`progress-tracker` address stored in `learn-token` and `credential-nft`) match the expected release artifacts.
+3. **Secret Hygiene**:
+   Inject signing credentials exclusively via ephemeral environment variables (`STELLAR_SECRET_KEY`) or hardware-backed Soroban identity profiles (`stellar keys`). Revoke or rotate temporary deployment keys once control is verified on the admin multisig.
+
