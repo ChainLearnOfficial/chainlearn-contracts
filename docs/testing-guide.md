@@ -79,3 +79,166 @@ Thresholds are defined in `scripts/gas-thresholds.env`. To update one:
    in-test baselines use roughly 2x the observed cost).
 3. Commit the changed threshold together with the change that moved the cost,
    and explain the increase in the pull request.
+
+## Gas Benchmarks (`tests/benchmarks/`)
+
+The workspace includes a dedicated CPU-instruction benchmark suite in `tests/benchmarks/gas_benchmarks.rs` (within the `integration-tests` package) that measures the execution cost of critical contract operations such as token minting, reward claiming, course creation, module completion, and NFT credential minting.
+
+### Running Gas Benchmarks
+```bash
+# Run the benchmark suite with instruction output printed to stdout
+cargo test --test gas_benchmarks -- --nocapture
+
+# Run the automated gas threshold verification script used in CI
+./scripts/estimate-gas.sh
+```
+
+Each benchmark resets the Soroban `Env` budget (`env.budget().reset_default()`), executes the target contract invocation, and asserts that `env.budget().cpu_instruction_cost()` remains below both the in-test safety baseline and the CI threshold configured in `scripts/gas-thresholds.env`.
+
+## Security Test Suites
+
+Security-critical invariants are verified in dedicated suites (such as `tests/security_tests.rs` and per-contract security modules):
+
+1. **Authorization & Spoofing Resistance**:
+   Verify that privileged entry points (`mint`, `create_course`, `revoke_credential`, `set_admin`, `pause`) reject non-admin callers and that learner-scoped functions require the learner's own signature.
+2. **Arithmetic Overflow, Underflow, and Boundary Checks**:
+   Exercise `0`, `1`, maximum quiz scores (`100`), boundary token amounts (`i128::MAX` / `u64::MAX`), and invalid percentages to ensure checked arithmetic prevents silent wraparound.
+3. **Double-Spending & Replay Prevention**:
+   Confirm that learners cannot claim token rewards twice for the same quiz (`claim_reward`), complete the same course module repeatedly to inflate progress, or mint duplicate credentials for the same `(learner, course_id)` pair.
+4. **Reentrancy & State Ordering**:
+   Ensure contract state updates (such as marking a reward claimed or a credential revoked) are persisted to storage before or atomically with external cross-contract calls.
+
+```bash
+cargo test --test security_tests -- --nocapture
+```
+
+## Cross-Contract Test Patterns
+
+ChainLearn's architecture links three contracts together: `progress-tracker` (source of truth for courses, module completion, and quiz scores), `learn-token` (mints rewards after verifying quiz completion with `progress-tracker`), and `credential-nft` (mints soulbound credentials after verifying course completion and score thresholds with `progress-tracker`).
+
+When writing cross-contract integration tests in `tests/`:
+
+1. **Register all participating contracts in the same `Env`** and mock auths with `env.mock_all_auths()`.
+2. **Initialize contracts in dependency order**: initialize `progress-tracker` first, then pass its `Address` when initializing `learn-token` and `credential-nft`.
+3. **Exercise both happy-path and cross-contract rejection flows** (for example, attempting to mint a credential before `progress-tracker` records all modules complete).
+
+```rust
+use credential_nft::{CredentialNft, CredentialNftClient};
+use learn_token::{LearnToken, LearnTokenClient};
+use progress_tracker::{ProgressTracker, ProgressTrackerClient};
+use soroban_sdk::{testutils::Address as _, Address, Env, String};
+
+struct CrossContractFixture<'a> {
+    env: Env,
+    admin: Address,
+    learner: Address,
+    tracker: ProgressTrackerClient<'a>,
+    token: LearnTokenClient<'a>,
+    nft: CredentialNftClient<'a>,
+}
+
+impl<'a> CrossContractFixture<'a> {
+    fn setup() -> Self {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let learner = Address::generate(&env);
+
+        let tracker_id = env.register_contract(None, ProgressTracker);
+        let token_id = env.register_contract(None, LearnToken);
+        let nft_id = env.register_contract(None, CredentialNft);
+
+        let tracker = ProgressTrackerClient::new(&env, &tracker_id);
+        let token = LearnTokenClient::new(&env, &token_id);
+        let nft = CredentialNftClient::new(&env, &nft_id);
+
+        // Initialize in dependency order: tracker first, then dependents
+        tracker.initialize(&admin);
+        token.initialize(&admin, &tracker_id);
+        nft.initialize(&admin, &tracker_id);
+
+        Self { env, admin, learner, tracker, token, nft }
+    }
+}
+```
+
+## Fuzzing and Property-Based Testing
+
+For arithmetic-heavy or state-transition logic (such as token vesting schedules, reward calculations, pagination boundaries, and progress percentage math), use property-based or randomized input loops to test invariants across wide input domains:
+
+- **Conservation Invariants**: Total supply equals the sum of all holder balances after any sequence of mints, transfers, and burns.
+- **Monotonicity**: Completing additional modules or increasing quiz scores never decreases a learner's completion percentage or reward eligibility.
+- **Idempotency & Rejection of Out-of-Range Inputs**: Invalid scores (`> 100`), zero-module courses, or unauthorized callers always fail deterministically regardless of ledger timestamp or prior state.
+
+## Complete Test Template for a New Contract Function
+
+Use the template below when adding tests for a new contract entry point to ensure happy-path behavior, state persistence, authorization checks, and boundary conditions are all covered:
+
+```rust
+#![cfg(test)]
+
+use soroban_sdk::{
+    testutils::{Address as _, Events as _},
+    Address, Env, String,
+};
+use crate::{ProgressTracker, ProgressTrackerClient};
+
+struct TestContext<'a> {
+    env: Env,
+    client: ProgressTrackerClient<'a>,
+    admin: Address,
+    learner: Address,
+}
+
+impl<'a> TestContext<'a> {
+    fn new() -> Self {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, ProgressTracker);
+        let client = ProgressTrackerClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let learner = Address::generate(&env);
+
+        client.initialize(&admin);
+        Self { env, client, admin, learner }
+    }
+}
+
+#[test]
+fn test_new_function_happy_path_and_events() {
+    let ctx = TestContext::new();
+    let course_id = String::from_str(&ctx.env, "rust-101");
+    let title = String::from_str(&ctx.env, "Intro to Soroban");
+
+    ctx.client.create_course(&ctx.admin, &course_id, &title, &3u32);
+    ctx.client.enroll(&ctx.learner, &course_id);
+
+    assert!(ctx.client.is_enrolled(&ctx.learner, &course_id));
+    assert!(!ctx.env.events().all().is_empty());
+}
+
+#[test]
+#[should_panic]
+fn test_new_function_rejects_unauthorized_caller() {
+    let ctx = TestContext::new();
+    let outsider = Address::generate(&ctx.env);
+    let course_id = String::from_str(&ctx.env, "rust-101");
+    let title = String::from_str(&ctx.env, "Intro to Soroban");
+
+    // Non-admin caller must be rejected
+    ctx.client.create_course(&outsider, &course_id, &title, &3u32);
+}
+
+#[test]
+#[should_panic]
+fn test_new_function_rejects_invalid_boundary_input() {
+    let ctx = TestContext::new();
+    let course_id = String::from_str(&ctx.env, "rust-101");
+    let title = String::from_str(&ctx.env, "Intro to Soroban");
+
+    // Zero modules is a boundary violation and must panic
+    ctx.client.create_course(&ctx.admin, &course_id, &title, &0u32);
+}
+```
