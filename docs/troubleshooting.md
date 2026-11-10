@@ -80,6 +80,56 @@ Do not silence a warning without understanding its contract or security impact.
 Prefer a small code correction and add a regression test if the warning exposed
 incorrect behavior.
 
+## WASM size and contract optimization
+
+Soroban enforces a network-level maximum contract binary size (`contract_max_size_bytes`) and charges both upload fees and ongoing ledger rent per byte. If a build approaches the size limit or CI flags a WASM size regression, use the workflow below. For full benchmark tables and section breakdowns, see the [Contract WASM Size Audit](wasm-size-audit.md).
+
+### Measuring WASM size
+
+Run the size measurement script from the repository root:
+
+```bash
+./scripts/measure-size.sh
+```
+
+This script builds the release WASM binaries (`target/wasm32-unknown-unknown/release/*.wasm`), runs `./scripts/optimize-wasm.sh` both with and without `--strip-docs`, and prints a comparison table of raw, `wasm-opt`-optimized, and doc-stripped byte counts for `learn-token`, `credential-nft`, and `progress-tracker`.
+
+To inspect which WASM sections (`code`, `contractspecv0`, `data`, `export`) or functions consume the most space, see the section breakdown methodology in [`docs/wasm-size-audit.md`](wasm-size-audit.md#where-the-bytes-go).
+
+### Common causes of WASM size increases
+
+1. **Verbose `///` doc comments on public contract items (`contractspecv0` bloat)**:
+   `#[contractimpl]` and `#[contracttype]` embed every `///` doc comment on public functions, parameters, structs, and enums directly into the on-chain `contractspecv0` custom section (frequently 34–45% of the entire binary).
+2. **Formatted string panics (`core::fmt` machinery)**:
+   Using `panic!("{} ...", val)` or `Option::expect` pulls `core::fmt` formatting tables (~4.5 KB per contract) into the binary even though the Soroban host panic handler discards formatted strings.
+3. **Unoptimized raw Cargo output or debug symbols**:
+   Uploading `target/wasm32-unknown-unknown/release/<contract>.wasm` directly without running `stellar contract optimize` (`wasm-opt`) or without `strip = "symbols"` leaves 17–24% of removable dead code and symbol metadata in the binary.
+4. **Unused dependencies or heavy feature flags**:
+   Adding crates to `Cargo.toml` with default `std` or formatting features enabled increases code size across all monomorphized entry points.
+5. **Large `#[contracttype]` structs and 128-bit math**:
+   Monomorphized `FromVal`/`IntoVal` conversions for large structs and software-emulated `i128`/`u128` division (`compiler_builtins::u128_div_rem`) add significant code size.
+
+### Optimization techniques
+
+- **Always run the optimizer pass before deploying or verifying**:
+  ```bash
+  ./scripts/optimize-wasm.sh
+  ```
+  `deploy.sh`, `upgrade.sh`, and `verify.sh` automatically invoke `scripts/optimize-wasm.sh` to produce `<name>.optimized.wasm`.
+- **Strip on-chain spec documentation when appropriate**:
+  ```bash
+  ./scripts/optimize-wasm.sh --strip-docs
+  # or during deployment:
+  STRIP_SPEC_DOCS=1 ./scripts/deploy.sh testnet
+  ```
+  Stripping doc strings from `contractspecv0` saves 10–26 KB per contract while preserving function names, argument types, and return types for `stellar contract invoke` and client bindings. Make sure `./scripts/verify.sh` is run with the same `STRIP_SPEC_DOCS` setting used at deployment time.
+- **Prefer typed `#[contracterror]` enums over string panics**:
+  Use `panic_with_error!(&env, ContractError::...)` instead of formatted `panic!(...)` strings to avoid pulling `core::fmt` into the WASM table.
+- **Deduplicate shared contract logic and use Soroban host helpers**:
+  Factor repeated validation/storage code into private helper functions and prefer host-provided methods (such as `Vec::first_index_of`) over guest-side loops.
+- **Keep the workspace release profile intact**:
+  Ensure `[profile.release]` in the root `Cargo.toml` retains `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, and `strip = "symbols"`.
+
 ## Deployment and invocation errors
 
 ### `Deployment file ... not found`
