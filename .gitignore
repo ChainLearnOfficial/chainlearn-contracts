@@ -5,3 +5,4 @@ test_snapshots/
 mimo/
 /coverage/
 deployments-*.prev.json
+.worktrees/
