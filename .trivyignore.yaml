@@ -1,0 +1,29 @@
+# Trivy ignore rules for chainlearn-contracts (Trivy .trivyignore.yaml format).
+# Every entry must reference a tracking issue or an explicit rationale —
+# removing entries is part of the issue's acceptance criteria.
+vulnerabilities:
+  - id: CVE-2026-26267
+    paths:
+      - Cargo.lock
+    statement: "soroban-sdk-macros 21.7.7 -> upgrade to 22.0.10+ tracked in issue #785"
+secrets:
+  - id: github-pat
+    paths:
+      - scripts/malware_scan.py
+      - docs/compose/plans/
+    statement: "Layer-1 self-test fixture strings, not credentials (see .gitleaks.toml)"
+  - id: aws-access-key
+    paths:
+      - scripts/malware_scan.py
+      - docs/compose/plans/
+    statement: "Layer-1 self-test fixture strings, not credentials (see .gitleaks.toml)"
+  - id: slack-access-token
+    paths:
+      - scripts/malware_scan.py
+      - docs/compose/plans/
+    statement: "Layer-1 self-test fixture strings, not credentials (see .gitleaks.toml)"
+  - id: stripe-secret-token
+    paths:
+      - scripts/malware_scan.py
+      - docs/compose/plans/
+    statement: "Layer-1 self-test fixture strings, not credentials (see .gitleaks.toml)"

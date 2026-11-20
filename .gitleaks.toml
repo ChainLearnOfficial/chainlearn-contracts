@@ -1,0 +1,15 @@
+title = "gitleaks config for chainlearn-contracts"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Layer-1 self-test fixture strings in the malware scanner and its committed plan. Layer 1 owns and exempts this content; these are test data, not credentials."
+paths = [
+  "scripts/malware_scan.py",
+  "docs/compose/plans/",
+]
+
+[[allowlists]]
+description = "Doc-comment PEM example inside vendored ed25519-dalek sources (leftover vendor tree tracked for removal in issue #779)."
+paths = ["vendor/"]
